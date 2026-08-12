@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Rect, Line, Circle, Text, Shape, Group } from 'react-konva';
-import { flattenPath, pathBBox } from '@core/geometry.js';
+import { flattenPath, shapeBBox, partesDe } from '@core/geometry.js';
 import { recorridoRapido } from '@core/cutting.js';
 import { usarTema } from '@/lib/estado';
 import { num } from '@/lib/formato';
@@ -76,12 +76,17 @@ export function Visor2D({ shape, alto = 400, opciones = {}, chapa = null }) {
   /* ---------------- Geometría aplanada ---------------- */
   const geo = useMemo(() => {
     if (!shape?.outer) return null;
+    // Una pieza puede tener varias partes disjuntas (un cartel importado de un
+    // DXF, por ejemplo): se dibujan todas, no sólo la más grande.
+    const partes = partesDe(shape).map((p) => ({
+      outer: flattenPath(p.outer, 0.05),
+      holes: (p.holes || []).map((h) => flattenPath(h, 0.05)),
+    }));
     return {
-      outer: flattenPath(shape.outer, 0.05),
-      holes: (shape.holes || []).map((h) => flattenPath(h, 0.05)),
-      bbox: pathBBox(shape.outer),
+      partes,
+      bbox: shapeBBox(shape),
       pliegues: shape.pliegues || [],
-      perforaciones: [inicio(shape.outer), ...(shape.holes || []).map(inicio)],
+      perforaciones: partesDe(shape).flatMap((p) => [inicio(p.outer), ...(p.holes || []).map(inicio)]),
     };
   }, [shape]);
 
@@ -229,8 +234,10 @@ export function Visor2D({ shape, alto = 400, opciones = {}, chapa = null }) {
                   ctx.closePath();
                 };
                 ctx.beginPath();
-                trazar(geo.outer);
-                geo.holes.forEach(trazar);
+                for (const p of geo.partes) {
+                  trazar(p.outer);
+                  p.holes.forEach(trazar);
+                }
                 // Konva no expone la regla par-impar: se usa el contexto crudo,
                 // que ya tiene aplicada la transformación del grupo.
                 const raw = ctx._context;
@@ -249,20 +256,25 @@ export function Visor2D({ shape, alto = 400, opciones = {}, chapa = null }) {
                 />
               ))}
 
-            <Line
-              points={planar(geo.outer)} closed
-              stroke={col.corte} strokeWidth={1.7} strokeScaleEnabled={false}
-              lineJoin="round"
-            />
-
-            {geo.holes.map((h, i) => (
+            {geo.partes.map((p, i) => (
               <Line
-                key={i}
-                points={planar(h)} closed
-                stroke={col.interior} strokeWidth={1.3} strokeScaleEnabled={false}
+                key={'o' + i}
+                points={planar(p.outer)} closed
+                stroke={col.corte} strokeWidth={1.7} strokeScaleEnabled={false}
                 lineJoin="round"
               />
             ))}
+
+            {geo.partes.flatMap((p, i) =>
+              p.holes.map((h, j) => (
+                <Line
+                  key={`h${i}-${j}`}
+                  points={planar(h)} closed
+                  stroke={col.interior} strokeWidth={1.3} strokeScaleEnabled={false}
+                  lineJoin="round"
+                />
+              ))
+            )}
 
             {plegado &&
               geo.pliegues.map((l, i) => (

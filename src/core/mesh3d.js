@@ -9,7 +9,7 @@
  *   Face = { pts: [[x,y,z]...], holes: [[[x,y,z]...]], tipo: 'cara'|'canto' }
  */
 
-import { flattenPath, rad, TAU } from './geometry.js';
+import { flattenPath, rad, TAU, partesDe } from './geometry.js';
 
 const P3 = (x, y, z) => [x, y, z];
 
@@ -18,20 +18,7 @@ const P3 = (x, y, z) => [x, y, z];
 /* ------------------------------------------------------------------ */
 
 export function meshPlano(shape, t) {
-  const outer = flattenPath(shape.outer, 0.4);
-  const holes = (shape.holes || []).map((h) => flattenPath(h, 0.4));
   const faces = [];
-
-  faces.push({
-    pts: outer.map(([x, y]) => P3(x, y, t)),
-    holes: holes.map((h) => h.map(([x, y]) => P3(x, y, t))),
-    tipo: 'cara',
-  });
-  faces.push({
-    pts: outer.map(([x, y]) => P3(x, y, 0)).reverse(),
-    holes: holes.map((h) => h.map(([x, y]) => P3(x, y, 0)).reverse()),
-    tipo: 'cara',
-  });
 
   const pared = (pts, invertir) => {
     for (let i = 0; i < pts.length; i++) {
@@ -42,8 +29,27 @@ export function meshPlano(shape, t) {
       faces.push({ pts: invertir ? q.reverse() : q, holes: [], tipo: 'canto' });
     }
   };
-  pared(outer, false);
-  for (const h of holes) pared(h, true);
+
+  // Cada parte se extruye por separado: un cartel de letras sueltas tiene que
+  // verse como letras sueltas, no como una sola chapa.
+  for (const parte of partesDe(shape)) {
+    const outer = flattenPath(parte.outer, 0.4);
+    const holes = (parte.holes || []).map((h) => flattenPath(h, 0.4));
+
+    faces.push({
+      pts: outer.map(([x, y]) => P3(x, y, t)),
+      holes: holes.map((h) => h.map(([x, y]) => P3(x, y, t))),
+      tipo: 'cara',
+    });
+    faces.push({
+      pts: outer.map(([x, y]) => P3(x, y, 0)).reverse(),
+      holes: holes.map((h) => h.map(([x, y]) => P3(x, y, 0)).reverse()),
+      tipo: 'cara',
+    });
+
+    pared(outer, false);
+    for (const h of holes) pared(h, true);
+  }
   return { faces, bbox: bboxDe(faces) };
 }
 

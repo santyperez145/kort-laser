@@ -116,7 +116,25 @@ Son la razón de ser de varios tests.
    polígono inscripto. Aproximar subestima el peso del material y con él el
    precio. Ya pasó una vez.
 
-5. **El nesting es por PRESUPUESTO, no por ítem.** La máquina corta un programa
+5. **Una pieza puede tener VARIAS PARTES, y el DXF del cliente no se separa
+   solo.** Un dibujo con varios contornos exteriores sueltos no es
+   necesariamente un lote de piezas independientes: puede ser un cartel, un
+   juego que se entrega armado, o piezas cuya separación es parte del pedido.
+   Separarlo de oficio rompe el diseño **y cotiza mal en silencio**, porque
+   cada parte pasaría a anidarse por su cuenta en otra posición.
+
+   `shape.partes` es la lista `[{outer, holes}]`; cuando no está, la pieza es
+   de una sola parte y `outer`/`holes` alcanzan — que es el caso de TODA la
+   biblioteca paramétrica. **Ninguna cuenta debe leer `sh.outer` directo: va
+   por `partesDe(sh)`**, o mide sólo la parte más grande y el precio sale
+   corto. `leerDXF()` devuelve `conjunto` (el dibujo entero) además de
+   `piezas` (las partes sueltas, por si de verdad son independientes).
+
+   ⚠️ **En el nesting, una pieza multiparte va por su rectángulo envolvente**,
+   no por el contorno de una de sus partes: las partes viajan juntas, así que
+   usar el contorno prometería un encastre que en la chapa no existe.
+
+6. **El nesting es por PRESUPUESTO, no por ítem.** La máquina corta un programa
    por chapa, no un ítem por chapa. `planificarNesting()` agrupa por
    (material, espesor, gas, chapa) y reparte chapas, material y setup **por el
    área que ocupa cada ítem en el layout real**. Volver a anidar un ítem por su

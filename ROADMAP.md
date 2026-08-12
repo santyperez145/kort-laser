@@ -74,6 +74,30 @@ chapa estándar difiere. Y si el motor no logra colocar todas las piezas del
 grupo, se cae a cotizar por ítem: un número conservador y verificable es mejor
 que uno optimista que no se puede cortar.
 
+### ✅ 1.1b El DXF del cliente ya no se parte solo
+
+Un dibujo con varios contornos exteriores sueltos **se importa como una sola
+pieza**, con las posiciones que dibujó el cliente. Antes se partía de oficio en
+N piezas independientes, y eso rompe el diseño de un cartel o de un juego que
+se entrega armado — además de cotizar mal en silencio, porque cada parte pasaba
+a anidarse por su cuenta en otra posición.
+
+Separar sigue estando, pero como decisión explícita: en el importador hay un
+"¿En realidad son N piezas sueltas?" que muestra las tarjetas una por una.
+
+Para eso el modelo de pieza pasó a admitir **varias partes** (`shape.partes`).
+Área, longitud de corte, perforaciones, caja envolvente, recorrido, DXF de
+salida, 3D y los dos visores suman todas las partes. Un recuadro con contenido
+sigue siendo una pieza con agujeros, como antes.
+
+Verificado con dos rectángulos sueltos (200×100 y 150×100 separados 100 mm):
+mide 450×100 mm, 1,10 m de corte, 2 perforaciones y 0,550 kg — los tres a mano
+dan lo mismo. 8 tests nuevos.
+
+⚠️ En el nesting una pieza multiparte va por su **rectángulo envolvente**: las
+partes viajan juntas, así que usar el contorno de una prometería un encastre
+que en la chapa no existe.
+
 ### 📋 1.2 Corte en línea común
 
 Dos piezas rectangulares pegadas comparten el corte del medio: se corta una vez

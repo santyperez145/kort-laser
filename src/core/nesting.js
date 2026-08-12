@@ -20,7 +20,15 @@
  * cada columna, así que nunca promete un encastre que no entra.
  */
 
-import { flattenPath, pathBBox } from './geometry.js';
+import { flattenPath, pathBBox, shapeBBox, esMultiParte } from './geometry.js';
+
+/** El rectángulo envolvente como polígono, para anidar del lado seguro. */
+const rectanguloDe = (b) => [
+  [b.minX, b.minY],
+  [b.maxX, b.minY],
+  [b.maxX, b.maxY],
+  [b.minX, b.maxY],
+];
 
 /* ================================================================== */
 /* Motor 1 · Rectangular (MaxRects, Best-Short-Side-Fit)              */
@@ -320,7 +328,18 @@ function nestFormaReal(items, chapa, opts) {
   // Perfiles por pieza y rotación (se calculan una sola vez)
   const catalogo = new Map();
   for (const it of items) {
-    const base = it.poly || (it.shape ? flattenPath(it.shape.outer, Math.min(0.4, res / 4)) : null);
+    // Una pieza de varias partes (un cartel de letras sueltas, un juego que se
+    // entrega junto) se anida por su rectángulo envolvente y no por el
+    // contorno de una de sus partes: usar sólo `outer` prometería un encastre
+    // que en la chapa no existe, porque las otras partes se pisarían con la
+    // pieza vecina. Del lado seguro, siempre.
+    const base = it.poly
+      ? it.poly
+      : esMultiParte(it.shape)
+        ? rectanguloDe(shapeBBox(it.shape))
+        : it.shape
+          ? flattenPath(it.shape.outer, Math.min(0.4, res / 4))
+          : null;
     if (!base) return null; // sin geometría no hay forma real
     const rots = (it.rotable === false ? [0] : rotaciones).map((g) => ({
       grados: g,

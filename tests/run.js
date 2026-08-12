@@ -15,12 +15,13 @@ import { fileURLToPath } from 'node:url';
 import {
   rect, circle, slot, polyline, makeShape, shapeArea, shapeCutLength,
   shapeBBox, shapePiercings, pathLength, pathArea, regularPolygon, TAU, rad,
+  makeShapeMulti, partesDe, esMultiParte,
 } from '../src/core/geometry.js';
 import {
   DEFAULT_MATERIALS, interpTable, cuttingSpeed, pesoKg, findMaterial, GASES,
   gasRecomendado, gasesDisponibles, gasFlow, compararGases, proceso, espesorMaximo, boquilla,
 } from '../src/core/materials.js';
-import { tiempoCortePieza, tiempoCorteLote, DEFAULT_MACHINE, DEFAULT_PLEGADORA, calcularCostoHora, fmtTiempo } from '../src/core/cutting.js';
+import { tiempoCortePieza, tiempoCorteLote, recorridoRapido, DEFAULT_MACHINE, DEFAULT_PLEGADORA, calcularCostoHora, fmtTiempo } from '../src/core/cutting.js';
 import {
   calcularEstructura, calcularCostoHoraMaquina, costoHoraOperario, puntoEquilibrio,
   evaluarGeneradorN2, DEFAULT_ESTRUCTURA, TARIFAS_EDELAR, UOM_RAMA17, CARGAS_LABORALES,
@@ -587,6 +588,102 @@ test('un espesor por encima del máximo devuelve error explicativo', () => {
 });
 
 /* ================================================================== */
+/* ================================================================== */
+
+grupo('Piezas de varias partes (carteles, juegos, DXF de cliente)');
+
+test('con una sola parte no se complica: es una pieza normal', () => {
+  const sh = makeShapeMulti([{ outer: rect(0, 0, 100, 50), holes: [] }]);
+  assert.ok(!sh.partes, 'con una sola parte no hace falta la lista');
+  assert.ok(!esMultiParte(sh));
+  cerca(shapeArea(sh), 100 * 50, 1e-6);
+  assert.equal(partesDe(sh).length, 1);
+});
+
+test('el área, el corte y las perforaciones suman TODAS las partes', () => {
+  const sh = makeShapeMulti([
+    { outer: rect(0, 0, 100, 50), holes: [circle(50, 25, 10)] },
+    { outer: rect(200, 0, 60, 40), holes: [] },
+  ]);
+  assert.ok(esMultiParte(sh));
+  cerca(shapeArea(sh), 100 * 50 + 60 * 40 - Math.PI * 100, 1e-3, 'área neta');
+  cerca(shapeCutLength(sh), 2 * (100 + 50) + 2 * Math.PI * 10 + 2 * (60 + 40), 1e-3, 'longitud de corte');
+  // Un piercing por contorno cerrado: 2 exteriores + 1 agujero
+  assert.equal(shapePiercings(sh), 3);
+});
+
+test('la caja envolvente cubre todas las partes, no sólo la más grande', () => {
+  const sh = makeShapeMulti([
+    { outer: rect(0, 0, 100, 50), holes: [] },
+    { outer: rect(200, 0, 60, 40), holes: [] },
+  ]);
+  const b = shapeBBox(sh);
+  cerca(b.minX, 0, 1e-6);
+  cerca(b.maxX, 260, 1e-6);
+  cerca(b.w, 260, 1e-6, 'si diera 100 estaría midiendo sólo una parte');
+});
+
+test('el recorrido de corte pasa por los contornos de todas las partes', () => {
+  const sh = makeShapeMulti([
+    { outer: rect(0, 0, 100, 50), holes: [circle(50, 25, 8)] },
+    { outer: rect(200, 0, 60, 40), holes: [] },
+  ]);
+  const { orden } = recorridoRapido(sh);
+  assert.equal(orden.length, 3, 'dos exteriores y un agujero');
+  // El agujero de una parte va antes que su propio contorno, o la pieza se
+  // suelta antes de terminar de cortarla
+  assert.ok(orden.indexOf(sh.partes[0].holes[0]) < orden.indexOf(sh.partes[0].outer));
+});
+
+test('un DXF con dos contornos sueltos se importa como UNA pieza de dos partes', () => {
+  const dxf = generarDXF([
+    { shape: makeShape(rect(0, 0, 100, 50)) },
+    { shape: makeShape(rect(0, 0, 60, 40)), dx: 200 },
+  ]);
+  const r = leerDXF(dxf);
+  assert.ok(r.conjunto, 'tiene que venir el dibujo completo como una pieza');
+  assert.equal(r.conjunto.partes.length, 2, 'las dos partes, con sus posiciones');
+  cerca(shapeArea(r.conjunto), 100 * 50 + 60 * 40, 1, 'el área es la de las dos');
+  // Y las piezas sueltas siguen disponibles por si de verdad son independientes
+  assert.equal(r.piezas.length, 2);
+});
+
+test('un DXF con recuadro y contenido sigue siendo una pieza con agujeros', () => {
+  const dxf = generarDXF([
+    { shape: makeShape(rect(0, 0, 300, 200), [circle(80, 100, 20), circle(220, 100, 20)]) },
+  ]);
+  const r = leerDXF(dxf);
+  assert.equal(r.piezas.length, 1, 'el recuadro con contenido es UNA pieza');
+  assert.equal(r.piezas[0].holes.length, 2);
+  assert.ok(!esMultiParte(r.conjunto), 'no hay varias partes acá');
+});
+
+test('una pieza de varias partes se anida por su rectángulo, sin prometer encastre', () => {
+  // Dos cuadrados de 100 separados 200: el hueco del medio NO se puede usar
+  // para meter otra pieza, porque las partes viajan juntas.
+  const sh = makeShapeMulti([
+    { outer: rect(0, 0, 100, 100), holes: [] },
+    { outer: rect(300, 0, 100, 100), holes: [] },
+  ]);
+  const b = shapeBBox(sh);
+  cerca(b.w, 400, 1e-6);
+  const r = nest([{ id: 'm', w: b.w, h: b.h, cantidad: 8, shape: sh }], { w: 1000, h: 300 }, { separacion: 5, margen: 10 });
+  // Por rectángulo entran 6 por chapa (2 × 3): 8 necesitan dos chapas.
+  // Si anidara por el contorno de una sola parte, entrarían todas en una.
+  assert.ok(r.cantidadChapas >= 2, `entraron todas en ${r.cantidadChapas} chapa(s): está prometiendo un encastre falso`);
+});
+
+test('el DXF de salida escribe los contornos de todas las partes', () => {
+  const sh = makeShapeMulti([
+    { outer: rect(0, 0, 100, 50), holes: [] },
+    { outer: rect(200, 0, 60, 40), holes: [] },
+  ]);
+  const dxf = generarDXF([{ shape: sh }]);
+  const releido = leerDXF(dxf);
+  assert.equal(releido.piezas.length, 2, 'las dos partes tienen que llegar al CAM');
+  cerca(shapeArea(releido.conjunto), shapeArea(sh), 1, 'y con la misma área');
+});
+
 /* ================================================================== */
 
 grupo('Nesting por presupuesto');

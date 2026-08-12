@@ -23,6 +23,7 @@ import {
   segStart,
   pathCentroid,
   arcSweep,
+  partesDe,
 } from './geometry.js';
 import { cuttingSpeed, pierceTime, gasFlow, gasRecomendado, presionGas, boquilla, GASES } from './materials.js';
 import { calcularEstructura, calcularCostoHoraMaquina, costoHoraOperario, UOM_RAMA17, DEFAULT_ESTRUCTURA } from './costos.js';
@@ -215,29 +216,36 @@ export function simularContorno(path, { vMax, accel, delta }) {
  * el contorno exterior, minimizando el recorrido con vecino más cercano.
  */
 export function recorridoRapido(shape, origen = [0, 0]) {
-  const holes = (shape.holes || []).map((p) => ({ p, c: pathCentroid(p) }));
   let cur = origen;
   let dist = 0;
   const orden = [];
-  const pend = [...holes];
-  while (pend.length) {
-    let bi = 0;
-    let bd = Infinity;
-    for (let i = 0; i < pend.length; i++) {
-      const d = Math.hypot(pend[i].c[0] - cur[0], pend[i].c[1] - cur[1]);
-      if (d < bd) {
-        bd = d;
-        bi = i;
+
+  // Parte por parte: dentro de cada una, primero los agujeros y el contorno al
+  // final. El orden entre partes no se optimiza a propósito — mezclarlas
+  // dejaría contornos exteriores cortados antes que los agujeros de otra
+  // parte, y una pieza suelta que todavía tiene que cortarse se mueve.
+  for (const parte of partesDe(shape)) {
+    const pend = (parte.holes || []).map((p) => ({ p, c: pathCentroid(p) }));
+    while (pend.length) {
+      let bi = 0;
+      let bd = Infinity;
+      for (let i = 0; i < pend.length; i++) {
+        const d = Math.hypot(pend[i].c[0] - cur[0], pend[i].c[1] - cur[1]);
+        if (d < bd) {
+          bd = d;
+          bi = i;
+        }
       }
+      dist += bd;
+      cur = pend[bi].c;
+      orden.push(pend[bi].p);
+      pend.splice(bi, 1);
     }
-    dist += bd;
-    cur = pend[bi].c;
-    orden.push(pend[bi].p);
-    pend.splice(bi, 1);
+    const [ox, oy] = segStart(parte.outer.segs[0]);
+    dist += Math.hypot(ox - cur[0], oy - cur[1]);
+    cur = [ox, oy];
+    orden.push(parte.outer);
   }
-  const [ox, oy] = segStart(shape.outer.segs[0]);
-  dist += Math.hypot(ox - cur[0], oy - cur[1]);
-  orden.push(shape.outer);
   return { distancia: dist, orden };
 }
 

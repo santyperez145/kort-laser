@@ -15,7 +15,10 @@
  *      dibujo en pulgadas, agujeros más chicos que el espesor.
  */
 
-import { line, arc, rad, deg, pathArea, pathBBox, pointInPath, flattenPath, TAU } from './geometry.js';
+import {
+  line, arc, rad, deg, pathArea, pathBBox, pointInPath, flattenPath, TAU,
+  makeShapeMulti, shapeBBox,
+} from './geometry.js';
 
 const TOL = 0.05; // mm de tolerancia para unir extremos
 
@@ -565,17 +568,38 @@ export function leerDXF(texto, opts = {}) {
     });
   }
 
+  /**
+   * El dibujo COMPLETO como una sola pieza, con las posiciones relativas tal
+   * cual las dibujó el cliente.
+   *
+   * Es lo que hay que ofrecer primero. Un DXF con varios contornos sueltos no
+   * es necesariamente un lote de piezas independientes: puede ser el diseño de
+   * un cartel, un juego que se entrega armado, o piezas cuya separación en la
+   * chapa es parte del pedido. Separarlas de oficio destruye el diseño y
+   * además cotiza mal —cada una pasaría a anidarse por su cuenta, en otra
+   * posición— sin que nadie se entere.
+   *
+   * Separar sigue estando, pero como decisión explícita de quien cotiza.
+   */
+  const conjunto = makeShapeMulti(piezas, { origen: 'dxf', partes: piezas.length });
+
   if (piezas.length > 1) {
-    avisos.push({ nivel: 'info', msg: `El archivo contiene ${piezas.length} piezas independientes. Podés cotizarlas juntas o por separado.` });
+    avisos.push({
+      nivel: 'info',
+      msg:
+        `El dibujo tiene ${piezas.length} contornos exteriores. Se importa como UNA pieza, ` +
+        'respetando el diseño y las posiciones. Si en realidad son piezas sueltas, podés separarlas.',
+    });
   }
 
-  const bbox = piezas.length ? pathBBox(piezas[0].outer) : null;
+  const bbox = conjunto ? shapeBBox(conjunto) : null;
   if (bbox && Math.max(bbox.w, bbox.h) < 5) {
     avisos.push({ nivel: 'aviso', msg: 'La pieza mide menos de 5 mm. ¿El archivo estaba en metros o pulgadas?' });
   }
 
   return {
     piezas,
+    conjunto,
     abiertos,
     plegado: escalar(segsPlegado),
     grabado: escalar(segsGrabado),

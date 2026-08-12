@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Upload, FileUp, Search } from 'lucide-react';
+import { Upload, FileUp, Search, Scissors } from 'lucide-react';
 
 import { usarCotizador, itemNuevo } from './contexto';
 import { Dialogo, ContenidoDialogo, Aviso } from '@/componentes/ui/varios';
@@ -129,6 +129,8 @@ export function ImportarDXF({ abierto, alCerrar }) {
   const [encima, setEncima] = useState(false);
   const [lectura, setLectura] = useState(null);
   const [nombreArchivo, setNombreArchivo] = useState('');
+  // Separar es una decisión explícita: por defecto se respeta el diseño.
+  const [separar, setSeparar] = useState(false);
 
   const procesar = (file) => {
     const lector = new FileReader();
@@ -144,23 +146,34 @@ export function ImportarDXF({ abierto, alCerrar }) {
     lector.readAsText(file);
   };
 
-  const agregar = (p, n) => {
-    const shape = { outer: p.outer, holes: p.holes, pliegues: [] };
+  const nuevoItemDXF = (shape, sufijo = '') => {
     const it = itemNuevo(materiales, {
       origen: 'dxf',
-      nombre: `${nombreArchivo.replace(/\.dxf$/i, '')}${n > 1 ? ' · ' + n : ''}`,
+      nombre: `${nombreArchivo.replace(/\.dxf$/i, '')}${sufijo}`,
       shape,
       archivo: nombreArchivo,
       meta: { modelo3D: { tipo: 'plano' } },
     });
     delete it.piezaId;
     delete it.params;
-    agregarItem(it);
+    return it;
+  };
+
+  /** El dibujo tal cual lo mandó el cliente, con sus posiciones relativas. */
+  const agregarConjunto = () => {
+    agregarItem(nuevoItemDXF({ ...lectura.conjunto, pliegues: [] }));
+    cerrar();
+    toast.success('Dibujo importado como una pieza');
+  };
+
+  const agregarParte = (p, n) => {
+    agregarItem(nuevoItemDXF({ outer: p.outer, holes: p.holes, pliegues: [] }, n > 1 ? ' · ' + n : ''));
   };
 
   const cerrar = () => {
     setLectura(null);
     setNombreArchivo('');
+    setSeparar(false);
     alCerrar();
   };
 
@@ -213,52 +226,104 @@ export function ImportarDXF({ abierto, alCerrar }) {
           </Aviso>
         ))}
 
-        {lectura?.piezas?.length ? (
+        {lectura?.conjunto ? (
           <>
             <p className="mt-4 text-[11.5px] text-suave">
               {lectura.stats.entidades} entidades · {lectura.stats.contornosCerrados} contornos
               cerrados · unidades: {lectura.unidades}
             </p>
 
-            <div className="mt-3 grid gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
-              {lectura.piezas.map((p, i) => {
-                const sh = { outer: p.outer, holes: p.holes, pliegues: [] };
-                const b = shapeBBox(sh);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      agregar(p, i + 1);
-                      cerrar();
-                      toast.success('Pieza importada y cotizada');
-                    }}
-                    className="rounded-xl border border-borde bg-panel p-2.5 text-left transition-all cursor-pointer hover:border-corte-500 hover:-translate-y-px"
-                  >
-                    <img
-                      src={miniatura(sh, 220, 170)} alt=""
-                      className="w-full rounded-lg bg-white"
-                    />
-                    <div className="mt-2 text-[13px] font-semibold">Pieza {i + 1}</div>
-                    <div className="text-[11px] text-suave tabular">
-                      {num(b.w, 1)} × {num(b.h, 1)} mm · {p.holes.length} agujeros
-                    </div>
-                  </button>
-                );
-              })}
+            {/* El dibujo completo, tal cual vino. Es lo que se ofrece primero:
+                varios contornos sueltos pueden ser un cartel o un juego que se
+                entrega armado, y separarlos de oficio rompe el diseño. */}
+            <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start">
+              <img
+                src={miniatura(lectura.conjunto, 360, 260)} alt="Dibujo completo"
+                className="w-full sm:w-[300px] shrink-0 rounded-xl border border-borde bg-white"
+              />
+              <div className="min-w-0 flex-1">
+                <h4 className="text-[15px] font-semibold">El dibujo completo</h4>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-suave">
+                  {(() => {
+                    const b = shapeBBox(lectura.conjunto);
+                    const n = lectura.piezas.length;
+                    return `${num(b.w, 1)} × ${num(b.h, 1)} mm · ${n} contorno${n === 1 ? '' : 's'} exterior${n === 1 ? '' : 'es'}`;
+                  })()}
+                </p>
+                <p className="mt-2 text-[12px] leading-relaxed text-tenue">
+                  Se importa como una sola pieza, respetando las posiciones que dibujó el cliente.
+                </p>
+                <Boton tono="corte" className="mt-3" onClick={agregarConjunto}>
+                  <FileUp />
+                  Importar el dibujo completo
+                </Boton>
+              </div>
             </div>
 
             {lectura.piezas.length > 1 && (
-              <Boton
-                tono="corte" ancho="completo" className="mt-4"
-                onClick={() => {
-                  lectura.piezas.forEach((p, i) => agregar(p, i + 1));
-                  cerrar();
-                  toast.success(`${lectura.piezas.length} piezas importadas`);
-                }}
-              >
-                <FileUp />
-                Agregar las {lectura.piezas.length} piezas al presupuesto
-              </Boton>
+              <div className="mt-5 border-t border-borde pt-4">
+                {!separar ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-[12.5px] text-suave">
+                      ¿En realidad son {lectura.piezas.length} piezas sueltas y no un solo diseño?
+                    </p>
+                    <Boton tam="sm" onClick={() => setSeparar(true)}>
+                      <Scissors />
+                      Separarlas
+                    </Boton>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-[12.5px] text-suave">
+                        Cada contorno pasa a ser un ítem propio, y se anida por su cuenta.
+                      </p>
+                      <Boton tam="sm" tono="fantasma" onClick={() => setSeparar(false)}>
+                        Volver
+                      </Boton>
+                    </div>
+
+                    <div className="mt-3 grid gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+                      {lectura.piezas.map((p, i) => {
+                        const sh = { outer: p.outer, holes: p.holes, pliegues: [] };
+                        const b = shapeBBox(sh);
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => {
+                              agregarParte(p, i + 1);
+                              cerrar();
+                              toast.success('Pieza importada y cotizada');
+                            }}
+                            className="rounded-xl border border-borde bg-panel p-2.5 text-left transition-all cursor-pointer hover:border-corte-500 hover:-translate-y-px"
+                          >
+                            <img
+                              src={miniatura(sh, 220, 170)} alt=""
+                              className="w-full rounded-lg bg-white"
+                            />
+                            <div className="mt-2 text-[13px] font-semibold">Pieza {i + 1}</div>
+                            <div className="text-[11px] text-suave tabular">
+                              {num(b.w, 1)} × {num(b.h, 1)} mm · {p.holes.length} agujeros
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <Boton
+                      ancho="completo" className="mt-4"
+                      onClick={() => {
+                        lectura.piezas.forEach((p, i) => agregarParte(p, i + 1));
+                        cerrar();
+                        toast.success(`${lectura.piezas.length} piezas importadas por separado`);
+                      }}
+                    >
+                      <Scissors />
+                      Agregar las {lectura.piezas.length} por separado
+                    </Boton>
+                  </>
+                )}
+              </div>
             )}
           </>
         ) : null}

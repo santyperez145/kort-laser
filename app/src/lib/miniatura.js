@@ -11,7 +11,7 @@
  * interfaz anterior del cotizador.
  */
 
-import { pathBBox, arcSweep } from '@core/geometry.js';
+import { arcSweep, partesDe, shapeBBox } from '@core/geometry.js';
 
 export function miniatura(shape, w = 320, h = 260, opts = {}) {
   const cv = document.createElement('canvas');
@@ -22,7 +22,8 @@ export function miniatura(shape, w = 320, h = 260, opts = {}) {
   c.fillRect(0, 0, w, h);
   if (!shape) return cv.toDataURL('image/jpeg', 0.86);
 
-  const b = pathBBox(shape.outer);
+  const partes = partesDe(shape);
+  const b = shapeBBox(shape);
   const m = 14;
   const esc = Math.min((w - 2 * m) / Math.max(b.w, 1), (h - 2 * m) / Math.max(b.h, 1));
   const ox = (w - b.w * esc) / 2 - b.minX * esc;
@@ -48,24 +49,32 @@ export function miniatura(shape, w = 320, h = 260, opts = {}) {
     c.closePath();
   };
 
+  // Relleno de todas las partes de una: la regla par-impar deja los agujeros
+  // calados sin importar cuántos contornos exteriores haya.
   c.beginPath();
-  trazar(shape.outer);
-  for (const hh of shape.holes || []) trazar(hh);
+  for (const p of partes) {
+    trazar(p.outer);
+    for (const hh of p.holes || []) trazar(hh);
+  }
   c.fillStyle = '#e8eef5';
   c.fill('evenodd');
 
   c.lineWidth = Math.max(1, esc * 0.9);
   c.strokeStyle = '#12161c';
-  c.beginPath();
-  trazar(shape.outer);
-  c.stroke();
+  for (const p of partes) {
+    c.beginPath();
+    trazar(p.outer);
+    c.stroke();
+  }
 
   c.lineWidth = Math.max(0.8, esc * 0.7);
   c.strokeStyle = '#1b6fc2';
-  for (const hh of shape.holes || []) {
-    c.beginPath();
-    trazar(hh);
-    c.stroke();
+  for (const p of partes) {
+    for (const hh of p.holes || []) {
+      c.beginPath();
+      trazar(hh);
+      c.stroke();
+    }
   }
 
   const lp = shape.pliegues || opts.pliegues || [];

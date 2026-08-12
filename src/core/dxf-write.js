@@ -10,7 +10,7 @@
  * corten.
  */
 
-import { TAU, deg } from './geometry.js';
+import { TAU, deg, partesDe } from './geometry.js';
 
 export const CAPAS = {
   CORTE: { nombre: 'CORTE', color: 7 },
@@ -138,7 +138,7 @@ export function generarDXF(shapes, opts = {}) {
     if (y > maxY) maxY = y;
   };
   for (const { shape, dx = 0, dy = 0 } of lista) {
-    for (const p of [shape.outer, ...(shape.holes || [])]) {
+    for (const p of partesDe(shape).flatMap((x) => [x.outer, ...(x.holes || [])])) {
       for (const s of p.segs) {
         if (s.t === 'L') {
           track(s.x1 + dx, s.y1 + dy);
@@ -181,8 +181,12 @@ export function generarDXF(shapes, opts = {}) {
           : { ...s, cx: s.cx + dx, cy: s.cy + dy }
       ),
     });
-    writePath(b, CAPAS.CORTE.nombre, mv(shape.outer));
-    for (const h of shape.holes || []) writePath(b, CAPAS.INTERIOR.nombre, mv(h));
+    // Cada parte lleva su exterior a la capa de CORTE y sus interiores a la
+    // de INTERIOR: el CAM distingue por capa qué cae y qué queda.
+    for (const parte of partesDe(shape)) {
+      writePath(b, CAPAS.CORTE.nombre, mv(parte.outer));
+      for (const h of parte.holes || []) writePath(b, CAPAS.INTERIOR.nombre, mv(h));
+    }
     for (const g of shape.grabados || []) writePath(b, CAPAS.GRABADO.nombre, mv(g));
     for (const lp of shape.pliegues || []) {
       entLine(b, CAPAS.PLEGADO.nombre, lp.x1 + dx, lp.y1 + dy, lp.x2 + dx, lp.y2 + dy);

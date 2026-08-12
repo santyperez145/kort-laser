@@ -276,36 +276,107 @@ export function transformShape(sh, tr) {
     ...sh,
     outer: transformPath(sh.outer, tr),
     holes: (sh.holes || []).map((h) => transformPath(h, tr)),
+    ...(sh.partes
+      ? {
+          partes: sh.partes.map((p) => ({
+            outer: transformPath(p.outer, tr),
+            holes: (p.holes || []).map((h) => transformPath(h, tr)),
+          })),
+        }
+      : null),
   };
 }
 
 /* ------------------------------------------------------------------ */
 /* Shape (pieza)                                                       */
+/*                                                                     */
+/* Una pieza tiene un contorno exterior y sus agujeros. Pero un DXF de  */
+/* cliente puede traer un dibujo con VARIOS contornos exteriores        */
+/* sueltos —las letras de un cartel, un juego de piezas que se entrega  */
+/* junto— y eso también es una sola pieza a cotizar, con las posiciones */
+/* relativas que el cliente dibujó.                                     */
+/*                                                                     */
+/* Para eso está `partes`: una lista de { outer, holes }. Cuando no     */
+/* está, la pieza es de una sola parte y `outer`/`holes` alcanzan, que  */
+/* es el caso de TODA la biblioteca paramétrica. `partesDe()` unifica   */
+/* los dos casos para que ninguna cuenta tenga que preguntar cuál es.   */
 /* ------------------------------------------------------------------ */
 
 export function makeShape(outer, holes = [], meta = {}) {
   return { outer, holes, meta };
 }
 
+/**
+ * Pieza de varias partes disjuntas. `outer`/`holes` quedan apuntando a la
+ * parte más grande para que cualquier lector viejo siga viendo algo coherente
+ * en vez de romperse, pero la verdad está en `partes`.
+ */
+export function makeShapeMulti(partes, meta = {}) {
+  const limpias = (partes || []).filter((p) => p?.outer);
+  if (!limpias.length) return null;
+  if (limpias.length === 1) return { outer: limpias[0].outer, holes: limpias[0].holes || [], meta };
+  const mayor = limpias.reduce((a, b) =>
+    Math.abs(pathArea(b.outer)) > Math.abs(pathArea(a.outer)) ? b : a
+  );
+  return {
+    outer: mayor.outer,
+    holes: mayor.holes || [],
+    partes: limpias.map((p) => ({ outer: p.outer, holes: p.holes || [] })),
+    meta,
+  };
+}
+
+/** Las partes de una pieza, sea de una o de varias. */
+export function partesDe(sh) {
+  if (!sh) return [];
+  if (sh.partes?.length) return sh.partes;
+  return sh.outer ? [{ outer: sh.outer, holes: sh.holes || [] }] : [];
+}
+
+/** true si la pieza tiene más de un contorno exterior. */
+export function esMultiParte(sh) {
+  return (sh?.partes?.length || 0) > 1;
+}
+
+/** Caja envolvente de la pieza entera, incluyendo todas sus partes. */
 export function shapeBBox(sh) {
-  return pathBBox(sh.outer);
+  const partes = partesDe(sh);
+  if (!partes.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, h: 0 };
+  if (partes.length === 1) return pathBBox(partes[0].outer);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of partes) {
+    const b = pathBBox(p.outer);
+    if (b.minX < minX) minX = b.minX;
+    if (b.minY < minY) minY = b.minY;
+    if (b.maxX > maxX) maxX = b.maxX;
+    if (b.maxY > maxY) maxY = b.maxY;
+  }
+  return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
 }
 
-/** Área neta de material (exterior menos agujeros), en mm². */
+/** Área neta de material (exteriores menos agujeros), en mm². */
 export function shapeArea(sh) {
-  const a = Math.abs(pathArea(sh.outer));
-  const h = (sh.holes || []).reduce((s, p) => s + Math.abs(pathArea(p)), 0);
-  return Math.max(0, a - h);
+  let total = 0;
+  for (const p of partesDe(sh)) {
+    const a = Math.abs(pathArea(p.outer));
+    const h = (p.holes || []).reduce((s, x) => s + Math.abs(pathArea(x)), 0);
+    total += Math.max(0, a - h);
+  }
+  return total;
 }
 
-/** Longitud total de corte: contorno + todos los interiores, en mm. */
+/** Longitud total de corte: todos los contornos e interiores, en mm. */
 export function shapeCutLength(sh) {
-  return pathLength(sh.outer) + (sh.holes || []).reduce((s, p) => s + pathLength(p), 0);
+  let total = 0;
+  for (const p of partesDe(sh)) {
+    total += pathLength(p.outer) + (p.holes || []).reduce((s, x) => s + pathLength(x), 0);
+  }
+  return total;
 }
 
-/** Cantidad de perforaciones (piercings) necesarias = contornos cerrados. */
+/** Perforaciones necesarias = un piercing por contorno cerrado. */
 export function shapePiercings(sh) {
-  return 1 + (sh.holes || []).length;
+  return partesDe(sh).reduce((s, p) => s + 1 + (p.holes || []).length, 0);
 }
 
 /** Normaliza la pieza al primer cuadrante con margen opcional. */
@@ -316,7 +387,11 @@ export function normalizeShape(sh, margin = 0) {
 
 /** Lista plana de todos los paths de la pieza. */
 export function allPaths(sh) {
-  return [sh.outer, ...(sh.holes || [])];
+  const out = [];
+  for (const p of partesDe(sh)) {
+    out.push(p.outer, ...(p.holes || []));
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
