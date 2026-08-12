@@ -27,38 +27,42 @@ tiene sentido agregarle funciones.
 
 ## Fase 1 — Precisión de lo que ya existe
 
-### 🔜 1.1 Nesting por presupuesto, no por ítem
+### ✅ 1.1 Nesting por presupuesto, no por ítem
 
-**La limitación más importante que tiene hoy el sistema.**
+**Era la limitación más importante que tenía el sistema. Ya está hecho.**
 
-Cada ítem se anida en su propia chapa. Si cotizás tres piezas distintas del
-mismo material y espesor, el sistema reporta tres chapas cuando la máquina las
-haría en una.
+Los ítems se agrupan por (material, espesor, gas, chapa) y se anidan juntos en
+`planificarNesting()`. Lo que le toca a cada uno —chapas, material y setup— se
+reparte **por el área que ocupa en el layout real**, no por cantidad de piezas:
+una pieza grande consume más chapa y la paga.
 
-Medido con tres piezas de acero de 3 mm (600×400, 500×300, 400×250, 4 de cada
-una):
+Medido con el mismo caso de antes (tres placas de acero de 3 mm: 600×400,
+500×300 y 400×250, cuatro de cada una, sobre chapa de 2440×1220):
 
-| | Chapas | Aprovechamiento |
-|---|---|---|
-| Hoy (ítem por ítem) | **3** | 32 % / 20 % / 13 % |
-| Anidando junto | **1** | 66 % |
+| | Chapas | Aprovechamiento | Setup + carga | Costo |
+|---|---|---|---|---|
+| Antes (ítem por ítem) | **3** | 32 % / 20 % / 13 % | 13,5 min | $199.662 |
+| Ahora (agrupado) | **1** | **65,8 %** | **4,5 min** | **$194.566** |
 
-**Impacto real, siendo honesto:** el precio no se va 3× porque el modo
-automático de material cobra por área consumida y no por chapas enteras. Lo que
-sí está mal es:
+El 65,8 % es el techo teórico de ese lote: 1.960.000 mm² de piezas sobre una
+chapa de 2.976.800 mm². El motor llega al máximo posible.
 
-- El **número de chapas** que muestra: no sirve para comprar material.
-- El **setup y la carga de chapa**: cuenta 3 programas y 3 cargas en vez de 1.
-  En el ejemplo son 9 minutos de máquina de más ≈ $5.100, un 1,4 % del total.
-- El **aprovechamiento** que informa está subestimado, y con él la oportunidad
-  de ofrecerle más piezas al cliente.
+El ahorro es de $5.096, un 2,6 %. Coincide con lo que estimaba este documento
+("9 minutos de máquina de más ≈ $5.100"), y viene del setup y la carga de
+chapa, no del material — el modo automático ya cobraba por área consumida.
 
-**Qué hay que hacer:** agrupar los ítems por (material, espesor, gas), anidarlos
-juntos, y prorratear el material y el setup entre ellos según el área que ocupa
-cada uno. El motor de nesting ya soporta varias piezas distintas; el trabajo
-está en `cotizarPresupuesto()` y en cómo se reparte el costo.
+Lo que además se arregló y no era de plata: el **número de chapas** ahora sirve
+para comprar material, y el **aprovechamiento** dejó de estar subestimado, que
+es el número que dice si conviene ofrecerle más piezas al cliente.
 
-**Esfuerzo:** medio. **Prioridad: la más alta del roadmap.**
+Cubierto por 10 tests en `tests/run.js` → "Nesting por presupuesto", incluyendo
+que un ítem solo se cotiza exactamente igual que antes del cambio.
+
+⚠️ **Distinto gas es distinto programa y distinta boquilla**, así que no
+comparten chapa aunque el material y el espesor coincidan. Lo mismo si la
+chapa estándar difiere. Y si el motor no logra colocar todas las piezas del
+grupo, se cae a cotizar por ítem: un número conservador y verificable es mejor
+que uno optimista que no se puede cortar.
 
 ### 📋 1.2 Corte en línea común
 

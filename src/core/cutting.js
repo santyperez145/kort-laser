@@ -316,13 +316,26 @@ export function tiempoCortePieza(shape, material, espesor, machine = DEFAULT_MAC
   };
 }
 
-/** Tiempo total de un lote, incluyendo tiempos de chapa y setup. */
+/**
+ * Tiempo total de un lote, incluyendo tiempos de chapa y setup.
+ *
+ * `incluirSetup` acepta un booleano o un número entre 0 y 1. La fracción
+ * existe para el anidado por presupuesto: cuando varios ítems comparten una
+ * misma chapa, el operario prepara UN programa, no uno por ítem, y ese setup
+ * se reparte entre ellos según el área que ocupa cada uno. Contarlo entero en
+ * cada ítem era cobrar tres puestas a punto que nunca pasaron.
+ *
+ * `chapas` también puede venir fraccionario por el mismo motivo.
+ */
 export function tiempoCorteLote(shape, material, espesor, machine, cantidad, chapas = 1, incluirSetup = true, gas = null) {
   const uni = tiempoCortePieza(shape, material, espesor, machine, gas);
   if (uni.error) return uni;
+  const factorSetup =
+    incluirSetup === true ? 1 : incluirSetup === false || incluirSetup == null ? 0
+      : Math.max(0, Math.min(1, Number(incluirSetup) || 0));
   const tProduccion = (uni.tPieza + uni.tDescarga) * cantidad;
   const tChapas = (machine.tiempoCargaChapa || 0) * chapas;
-  const tSetup = incluirSetup ? machine.tiempoSetupPrograma || 0 : 0;
+  const tSetup = factorSetup * (machine.tiempoSetupPrograma || 0);
   return {
     ...uni,
     cantidad,

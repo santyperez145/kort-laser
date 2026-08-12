@@ -122,6 +122,154 @@ export function descuentoPorCantidad(cantidad, escalones = []) {
   return pct;
 }
 
+/* ================================================================== */
+/* Nesting por presupuesto                                             */
+/* ================================================================== */
+
+/** La chapa del material, recortada al área de trabajo de la máquina. */
+function chapaDe(item, material, laser) {
+  const std = item.chapa || material.chapaStd || { w: 3000, h: 1500 };
+  return {
+    w: Math.min(std.w, laser.areaTrabajo?.w ?? std.w),
+    h: Math.min(std.h, laser.areaTrabajo?.h ?? std.h),
+  };
+}
+
+/** Si la pieza entra en la chapa, en cualquiera de las dos orientaciones. */
+function entraEnChapa(bbox, chapa, margen) {
+  const w = chapa.w - 2 * margen;
+  const h = chapa.h - 2 * margen;
+  return (bbox.w <= w && bbox.h <= h) || (bbox.h <= w && bbox.w <= h);
+}
+
+/**
+ * Agrupa los ítems que van juntos a la misma chapa y los anida de una sola vez.
+ *
+ * Por qué existe: la máquina no corta un ítem por chapa, corta un PROGRAMA por
+ * chapa. Tres piezas distintas del mismo material y espesor entran juntas y se
+ * cortan de una. Anidando por ítem el sistema reportaba tres chapas donde va
+ * una, cobraba tres puestas a punto que nunca ocurren, y mostraba un
+ * aprovechamiento subestimado — que es justo el número que dice si conviene
+ * ofrecerle más piezas al cliente.
+ *
+ * Medido con tres placas de acero de 3 mm (600×400, 500×300 y 400×250, cuatro
+ * de cada una): 3 chapas al 32/20/13 % pasan a 1 chapa al 65,8 % —el techo
+ * teórico de ese lote sobre la chapa de 2440×1220— y 13,5 minutos de setup y
+ * carga pasan a 4,5. El costo baja $5.096 sobre $199.662, un 2,6 %.
+ *
+ * La clave del grupo lleva el gas además del material y el espesor: cambiar de
+ * gas es cambiar de programa y de boquilla, así que no comparten chapa aunque
+ * el material sea el mismo.
+ *
+ * Lo que le toca a cada ítem se reparte **por el área que ocupa en el layout
+ * real**, no por cantidad de piezas: una pieza grande consume más chapa y más
+ * carga de material, y tiene que pagarla.
+ *
+ * Los grupos de un solo ítem no se planifican acá — los anida `cotizarItem`
+ * como siempre. Así el camino de siempre queda intacto y este código sólo
+ * corre cuando efectivamente hay algo que compartir.
+ *
+ * @returns {Map<number, Object>} índice del ítem -> su parte del grupo
+ */
+export function planificarNesting(itemsCrudos, ctx) {
+  const cfg = ctx.config || DEFAULT_CONFIG;
+  const prod = cfg.produccion;
+  const laser = (ctx.maquinas || []).find((m) => m.tipo === 'laser') || DEFAULT_MACHINE;
+  const nestOpts = {
+    separacion: prod.separacionPiezas,
+    margen: prod.margenChapa,
+    formaReal: prod.nestingFormaReal !== false,
+  };
+
+  /* --- Agrupar --- */
+  const grupos = new Map();
+  (itemsCrudos || []).forEach((item, indice) => {
+    if (!item?.shape) return;
+    const material = findMaterial(ctx.materiales, item.materialId);
+    if (!material) return;
+    const t = nz(item.espesor, material.espesores?.[0] ?? 2);
+    const gas = item.gas || gasRecomendado(material, t);
+    const chapa = chapaDe(item, material, laser);
+    const bbox = shapeBBox(item.shape);
+    if (!entraEnChapa(bbox, chapa, prod.margenChapa)) return;
+
+    const clave = `${material.id}|${t}|${gas}|${chapa.w}x${chapa.h}`;
+    if (!grupos.has(clave)) {
+      grupos.set(clave, { clave, materialId: material.id, espesor: t, gas, chapa, miembros: [] });
+    }
+    grupos.get(clave).miembros.push({
+      indice,
+      item,
+      bbox,
+      cantidad: Math.max(1, Math.round(nz(item.cantidad, 1))),
+    });
+  });
+
+  /* --- Anidar cada grupo compartido --- */
+  const plan = new Map();
+  for (const g of grupos.values()) {
+    if (g.miembros.length < 2) continue;
+
+    const piezas = g.miembros.map((m) => ({
+      id: 'i' + m.indice,
+      nombre: m.item.nombre || 'Pieza',
+      w: m.bbox.w,
+      h: m.bbox.h,
+      cantidad: m.cantidad,
+      shape: m.item.shape,
+    }));
+
+    let r;
+    try {
+      r = nest(piezas, g.chapa, nestOpts);
+    } catch {
+      continue; // ante cualquier problema, cada ítem se anida solo como antes
+    }
+    if (!r?.cantidadChapas) continue;
+
+    // Si el motor no pudo colocar todo, no se comparte: cotizar por ítem da un
+    // número conservador y verificable, y esto no es lugar para adivinar.
+    if (r.noEntran?.length || r.piezasColocadas < r.piezasPedidas) continue;
+
+    // Área consumida por ítem, leída del layout que efectivamente salió
+    const areaPorItem = {};
+    for (const ch of r.chapas) {
+      for (const p of ch.piezas) {
+        areaPorItem[p.id] = (areaPorItem[p.id] || 0) + (p.areaReal ?? p.w * p.h);
+      }
+    }
+    const areaGrupo = Object.values(areaPorItem).reduce((a, b) => a + b, 0);
+    if (!(areaGrupo > 0)) continue;
+
+    for (const m of g.miembros) {
+      const id = 'i' + m.indice;
+      const areaItem = areaPorItem[id] || 0;
+      const fraccion = areaItem / areaGrupo;
+      plan.set(m.indice, {
+        compartido: true,
+        clave: g.clave,
+        idEnLayout: id,
+        chapa: g.chapa,
+        // Su parte de las chapas del grupo. Las fracciones de todos los ítems
+        // suman exactamente la cantidad de chapas del grupo.
+        chapas: r.cantidadChapas * fraccion,
+        chapasGrupo: r.cantidadChapas,
+        fraccion,
+        fraccionSetup: fraccion,
+        areaConsumida: areaItem,
+        aprovechamiento: r.aprovechamientoGlobal,
+        aprovechamientoUltima: r.aprovechamientoUltima,
+        metodo: r.metodo,
+        layout: r.chapas,
+        itemsEnGrupo: g.miembros.length,
+        piezasEnGrupo: r.piezasColocadas,
+        nombresEnGrupo: g.miembros.map((x) => x.item.nombre || 'Pieza'),
+      });
+    }
+  }
+  return plan;
+}
+
 /**
  * Cotiza UN ítem (una pieza × cantidad).
  *
@@ -130,8 +278,11 @@ export function descuentoPorCantidad(cantidad, escalones = []) {
  *   plegado {pliegues, largoPliegue, angulo, matrizV, herramentales},
  *   acabadoId, procesos[], ingenieriaHoras, margen, urgencia, descuento
  * @param {Object} ctx { materiales, maquinas, config }
+ * @param {Object} [planItem] parte del grupo cuando comparte chapa con otros
+ *   ítems (ver `planificarNesting`). Sin esto el ítem se anida solo, que es
+ *   el comportamiento de siempre y el que usa cualquier llamada directa.
  */
-export function cotizarItem(item, ctx) {
+export function cotizarItem(item, ctx, planItem = null) {
   const cfg = ctx.config || DEFAULT_CONFIG;
   const com = cfg.comercial;
   const prod = cfg.produccion;
@@ -154,30 +305,28 @@ export function cotizarItem(item, ctx) {
   const pesoPieza = pesoKg(areaNeta, t, material.densidad);
 
   /* --- Nesting --------------------------------------------------------- */
-  const chapaStd = item.chapa || material.chapaStd || { w: 3000, h: 1500 };
-  const chapa = {
-    w: Math.min(chapaStd.w, laser.areaTrabajo?.w ?? chapaStd.w),
-    h: Math.min(chapaStd.h, laser.areaTrabajo?.h ?? chapaStd.h),
-  };
+  const compartido = planItem?.compartido ? planItem : null;
+  const chapa = compartido?.chapa || chapaDe(item, material, laser);
   const nestOpts = {
     separacion: prod.separacionPiezas,
     margen: prod.margenChapa,
     formaReal: prod.nestingFormaReal !== false,
   };
-  const cabe =
-    (bbox.w <= chapa.w - 2 * prod.margenChapa && bbox.h <= chapa.h - 2 * prod.margenChapa) ||
-    (bbox.h <= chapa.w - 2 * prod.margenChapa && bbox.w <= chapa.h - 2 * prod.margenChapa);
+  const cabe = entraEnChapa(bbox, chapa, prod.margenChapa);
 
+  // Cuando el ítem comparte chapa con otros, el anidado ya lo hizo
+  // `planificarNesting` con todo el grupo junto: volver a anidarlo solo daría
+  // un número distinto del que se va a cortar.
   let nesting = null;
-  if (cabe) {
+  if (!compartido && cabe) {
     nesting = nest(
       [{ id: 'p', nombre: item.nombre || 'Pieza', w: bbox.w, h: bbox.h, cantidad, shape }],
       chapa,
       nestOpts
     );
   }
-  const chapas = nesting ? nesting.cantidadChapas : Math.ceil(cantidad);
-  const aprovechamiento = nesting ? nesting.aprovechamientoGlobal : 0;
+  const chapas = compartido ? compartido.chapas : nesting ? nesting.cantidadChapas : Math.ceil(cantidad);
+  const aprovechamiento = compartido ? compartido.aprovechamiento : nesting ? nesting.aprovechamientoGlobal : 0;
 
   /* --- Costo de material ----------------------------------------------- */
   const areaChapa = chapa.w * chapa.h;
@@ -187,7 +336,9 @@ export function cotizarItem(item, ctx) {
   const costoPorChapasEnteras = chapas * costoChapa;
   // El área realmente consumida sale del nesting cuando está disponible:
   // con nesting de forma real, dos piezas que encastran consumen menos.
-  const areaConsumida = nesting?.areaConsumidaTotal ?? areaBBox * cantidad;
+  const areaConsumida = compartido
+    ? compartido.areaConsumida
+    : nesting?.areaConsumidaTotal ?? areaBBox * cantidad;
   const costoProrrateado =
     (areaConsumida / (areaChapa * Math.max(0.3, com.aprovechamientoObjetivo))) *
     costoChapa *
@@ -213,7 +364,10 @@ export function cotizarItem(item, ctx) {
   const pesoTotal = pesoPieza * cantidad;
 
   /* --- Corte láser ------------------------------------------------------ */
-  const corte = tiempoCorteLote(shape, material, t, laser, cantidad, chapas, item.incluirSetup !== false, gas);
+  // El setup es UNO por programa. Si el ítem comparte chapa, le toca su parte
+  // según el área que ocupa; si va solo, lo paga entero.
+  const factorSetup = compartido ? compartido.fraccionSetup : item.incluirSetup !== false;
+  const corte = tiempoCorteLote(shape, material, t, laser, cantidad, chapas, factorSetup, gas);
   if (corte.error) return { error: corte.error, nombre: item.nombre };
 
   const costoHoraLaser = calcularCostoHoraMaquina(laser, estructura);
@@ -315,17 +469,38 @@ export function cotizarItem(item, ctx) {
       pesoPieza,
       pesoTotal,
     },
-    nesting: nesting
+    nesting: compartido
       ? {
+          // Fraccionario a propósito: es la parte que le toca de las chapas
+          // del grupo. Las partes de todos los ítems suman `chapasGrupo`.
           chapas,
+          compartido: true,
+          grupo: compartido.clave,
+          chapasGrupo: compartido.chapasGrupo,
+          itemsEnGrupo: compartido.itemsEnGrupo,
+          nombresEnGrupo: compartido.nombresEnGrupo,
+          piezasEnGrupo: compartido.piezasEnGrupo,
+          fraccion: compartido.fraccion,
+          idEnLayout: compartido.idEnLayout,
           aprovechamiento,
-          aprovechamientoUltima: nesting.aprovechamientoUltima,
-          piezasPorChapa: nesting.chapas[0]?.piezas.length || 0,
-          metodo: nesting.metodo,
+          aprovechamientoUltima: compartido.aprovechamientoUltima,
+          piezasPorChapa: compartido.layout[0]?.piezas.length || 0,
+          metodo: compartido.metodo,
           chapa,
-          layout: nesting.chapas,
+          layout: compartido.layout,
         }
-      : { error: 'La pieza no entra en la chapa / área de trabajo', chapa },
+      : nesting
+        ? {
+            chapas,
+            compartido: false,
+            aprovechamiento,
+            aprovechamientoUltima: nesting.aprovechamientoUltima,
+            piezasPorChapa: nesting.chapas[0]?.piezas.length || 0,
+            metodo: nesting.metodo,
+            chapa,
+            layout: nesting.chapas,
+          }
+        : { error: 'La pieza no entra en la chapa / área de trabajo', chapa },
     corte,
     plegado,
     datosPliegue,
@@ -380,13 +555,17 @@ export function cotizarPresupuesto(presupuesto, ctx) {
   const estructura = ctx.estructura || calcularEstructura(cfg.estructura || DEFAULT_ESTRUCTURA);
   const ctx2 = { ...ctx, estructura };
 
+  // Primero se decide qué va junto a la misma chapa: la máquina corta un
+  // programa por chapa, no un ítem por chapa.
+  const plan = planificarNesting(presupuesto.items, ctx2);
+
   const items = [];
   const errores = [];
-  for (const it of presupuesto.items || []) {
-    const r = cotizarItem(it, ctx2);
+  (presupuesto.items || []).forEach((it, i) => {
+    const r = cotizarItem(it, ctx2, plan.get(i));
     if (r.error) errores.push(r);
     else items.push(r);
-  }
+  });
 
   const subtotalCosto = items.reduce((a, i) => a + i.costos.total, 0);
   let subtotal = items.reduce((a, i) => a + i.precio.neto, 0);
@@ -406,7 +585,21 @@ export function cotizarPresupuesto(presupuesto, ctx) {
 
   const tiempoTotal = items.reduce((a, i) => a + i.tiempos.total, 0);
   const pesoTotal = items.reduce((a, i) => a + i.geometria.pesoTotal, 0);
-  const chapasTotal = items.reduce((a, i) => a + (i.nesting?.chapas || 0), 0);
+  // Las chapas de un grupo compartido se cuentan UNA vez, no una por ítem.
+  // Sumar las fracciones daría lo mismo salvo por el error de coma flotante,
+  // y este número se usa para comprar material: tiene que ser entero y exacto.
+  const gruposContados = new Set();
+  let chapasTotal = 0;
+  for (const i of items) {
+    const n = i.nesting;
+    if (!n || n.error) continue;
+    if (!n.compartido) {
+      chapasTotal += n.chapas;
+    } else if (!gruposContados.has(n.grupo)) {
+      gruposContados.add(n.grupo);
+      chapasTotal += n.chapasGrupo;
+    }
+  }
   const gasTotal = items.reduce((a, i) => a + i.costos.gas, 0);
 
   return {

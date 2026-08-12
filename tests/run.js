@@ -29,7 +29,7 @@ import { calcularPliegue, calcularDesarrollo, matrizRecomendada, validarPlegado,
 import { nest, piezasPorChapa, compararMetodos } from '../src/core/nesting.js';
 import { generarDXF } from '../src/core/dxf-write.js';
 import { leerDXF } from '../src/core/dxf-read.js';
-import { cotizarItem, cotizarPresupuesto, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
+import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto } from '../src/core/library.js';
 import { construirMesh } from '../src/core/mesh3d.js';
 import { PDF, anchoTexto } from '../src/core/pdf.js';
@@ -587,6 +587,110 @@ test('un espesor por encima del máximo devuelve error explicativo', () => {
 });
 
 /* ================================================================== */
+/* ================================================================== */
+
+grupo('Nesting por presupuesto');
+
+/* El caso del ROADMAP 1.1, que es el que motivó todo esto: tres placas
+   distintas del mismo material y espesor. La máquina las corta en UNA chapa
+   con UN programa; el sistema reportaba tres de cada cosa. */
+const TRES_PLACAS = [
+  { nombre: 'A', shape: makeShape(rect(0, 0, 600, 400)), materialId: 'acero-sae1010', espesor: 3, cantidad: 4 },
+  { nombre: 'B', shape: makeShape(rect(0, 0, 500, 300)), materialId: 'acero-sae1010', espesor: 3, cantidad: 4 },
+  { nombre: 'C', shape: makeShape(rect(0, 0, 400, 250)), materialId: 'acero-sae1010', espesor: 3, cantidad: 4 },
+];
+
+test('tres piezas del mismo material y espesor comparten una sola chapa', () => {
+  const r = cotizarPresupuesto({ items: TRES_PLACAS }, CTX);
+  assert.equal(r.resumen.chapasTotal, 1, 'tienen que entrar en una chapa, no en tres');
+  for (const it of r.items) assert.ok(it.nesting.compartido, `${it.nombre} debería compartir chapa`);
+  assert.equal(r.items[0].nesting.itemsEnGrupo, 3);
+});
+
+test('el setup se cobra una vez, no una por ítem', () => {
+  const r = cotizarPresupuesto({ items: TRES_PLACAS }, CTX);
+  const setup = r.items.reduce((a, i) => a + i.corte.tSetup, 0);
+  cerca(setup, DEFAULT_MACHINE.tiempoSetupPrograma, 1e-6, 'un programa, un setup');
+});
+
+test('las partes de chapa de cada ítem suman las chapas del grupo', () => {
+  const r = cotizarPresupuesto({ items: TRES_PLACAS }, CTX);
+  const suma = r.items.reduce((a, i) => a + i.nesting.chapas, 0);
+  cerca(suma, r.items[0].nesting.chapasGrupo, 1e-9, 'el prorrateo no puede perder ni inventar chapa');
+});
+
+test('el área prorrateada suma exactamente el área anidada del grupo', () => {
+  const plan = planificarNesting(TRES_PLACAS, { ...CTX, estructura: undefined });
+  const areas = [...plan.values()].map((p) => p.areaConsumida);
+  const fracciones = [...plan.values()].map((p) => p.fraccion);
+  cerca(fracciones.reduce((a, b) => a + b, 0), 1, 1e-9, 'las fracciones tienen que sumar 1');
+  assert.ok(areas.every((a) => a > 0), 'ningún ítem puede quedar con área cero');
+});
+
+test('agrupar baja el costo, nunca lo sube', () => {
+  const r = cotizarPresupuesto({ items: TRES_PLACAS }, CTX);
+  // Lo mismo cotizado de a uno, que es como se hacía antes
+  const suelto = TRES_PLACAS.reduce((a, it) => a + cotizarItem(it, CTX).costos.total, 0);
+  assert.ok(r.resumen.costo < suelto, `agrupado ${r.resumen.costo.toFixed(0)} debe ser menor que suelto ${suelto.toFixed(0)}`);
+  // El ahorro viene del setup y la carga de chapa, no del material
+  assert.ok(r.resumen.costo > suelto * 0.9, 'un ahorro mayor al 10 % sería sospechoso: revisar');
+});
+
+test('materiales distintos NO comparten chapa', () => {
+  const items = [
+    { nombre: 'A', shape: makeShape(rect(0, 0, 300, 200)), materialId: 'acero-sae1010', espesor: 2, cantidad: 2 },
+    { nombre: 'B', shape: makeShape(rect(0, 0, 300, 200)), materialId: 'inox-304', espesor: 2, cantidad: 2 },
+  ];
+  const r = cotizarPresupuesto({ items }, CTX);
+  for (const it of r.items) assert.ok(!it.nesting.compartido, `${it.nombre} no puede compartir chapa con otro material`);
+  assert.equal(r.resumen.chapasTotal, 2);
+});
+
+test('espesores distintos NO comparten chapa', () => {
+  const sh = makeShape(rect(0, 0, 300, 200));
+  const items = [
+    { nombre: 'A', shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 2 },
+    { nombre: 'B', shape: sh, materialId: 'acero-sae1010', espesor: 5, cantidad: 2 },
+  ];
+  const r = cotizarPresupuesto({ items }, CTX);
+  for (const it of r.items) assert.ok(!it.nesting.compartido, 'dos espesores no salen de la misma chapa');
+});
+
+test('gases distintos NO comparten chapa (es otro programa y otra boquilla)', () => {
+  const disponibles = gasesDisponibles(acero, 3).map((g) => g.id);
+  if (disponibles.length < 2) return; // el material no da para probarlo
+  const sh = makeShape(rect(0, 0, 300, 200));
+  const items = [
+    { nombre: 'A', shape: sh, materialId: 'acero-sae1010', espesor: 3, cantidad: 2, gas: disponibles[0] },
+    { nombre: 'B', shape: sh, materialId: 'acero-sae1010', espesor: 3, cantidad: 2, gas: disponibles[1] },
+  ];
+  const r = cotizarPresupuesto({ items }, CTX);
+  for (const it of r.items) assert.ok(!it.nesting.compartido, 'distinto gas es distinto programa');
+});
+
+test('un ítem solo se cotiza igual que antes del cambio', () => {
+  const it = TRES_PLACAS[0];
+  const solo = cotizarItem(it, CTX);
+  const enPresupuesto = cotizarPresupuesto({ items: [it] }, CTX).items[0];
+  cerca(enPresupuesto.costos.total, solo.costos.total, 1e-9, 'no debe cambiar nada con un solo ítem');
+  cerca(enPresupuesto.precio.neto, solo.precio.neto, 1e-9);
+  assert.equal(enPresupuesto.nesting.chapas, solo.nesting.chapas);
+  assert.ok(!enPresupuesto.nesting.compartido);
+});
+
+test('una pieza que no entra en la chapa no rompe el grupo', () => {
+  const items = [
+    { nombre: 'chica', shape: makeShape(rect(0, 0, 300, 200)), materialId: 'acero-sae1010', espesor: 2, cantidad: 2 },
+    { nombre: 'gigante', shape: makeShape(rect(0, 0, 9000, 4000)), materialId: 'acero-sae1010', espesor: 2, cantidad: 1 },
+  ];
+  const r = cotizarPresupuesto({ items }, CTX);
+  const gigante = r.items.find((i) => i.nombre === 'gigante');
+  assert.ok(gigante.nesting.error, 'la pieza gigante tiene que seguir avisando que no entra');
+  assert.ok(r.resumen.chapasTotal >= 1);
+});
+
+/* ================================================================== */
+
 grupo('Gases de asistencia (3 kW)');
 
 test('cada material declara sus gases con límite de espesor coherente', () => {

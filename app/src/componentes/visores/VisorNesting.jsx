@@ -6,10 +6,10 @@
  * que se puede guardar entera. Cuando ese retazo es grande conviene ofrecerle
  * más piezas al cliente — casi no suben el costo de material.
  *
- * ⚠ Hoy el anidado es POR ÍTEM, no por presupuesto: tres piezas distintas del
- * mismo material y espesor se reportan en tres chapas donde la máquina las
- * haría en una. Está en el ROADMAP como 1.1 y es la limitación más cara que
- * tiene el sistema.
+ * Cuando la chapa es compartida —varios ítems del mismo material, espesor y
+ * gas van juntos— el ítem que se está mirando va en naranja y los demás en
+ * gris. Sin esa distinción el layout se lee como una sola pieza repetida y no
+ * se entiende de dónde sale el número de chapas.
  */
 
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -18,7 +18,18 @@ import { usarTema } from '@/lib/estado';
 
 const MARGEN = 26;
 
-export function VisorNesting({ nesting, alto = 400, indiceChapa = 0 }) {
+/**
+ * Naranja el ítem que se está mirando, gris el resto. Si la chapa no es
+ * compartida, `idResaltado` viene vacío y todo va en naranja como siempre.
+ */
+function colorDe(idPieza, idResaltado) {
+  if (!idResaltado || idPieza === idResaltado) {
+    return { relleno: 'rgba(228,87,46,.34)', borde: '#e4572e' };
+  }
+  return { relleno: 'rgba(120,140,165,.22)', borde: '#7a8ea5' };
+}
+
+export function VisorNesting({ nesting, alto = 400, indiceChapa = 0, idResaltado = null }) {
   const oscuro = usarTema((s) => s.oscuro);
   const caja = useRef(null);
   const [ancho, setAncho] = useState(600);
@@ -90,13 +101,14 @@ export function VisorNesting({ nesting, alto = 400, indiceChapa = 0 }) {
 
           {/* Las piezas anidadas */}
           {layout.piezas.map((p, i) => {
+            const c = colorDe(p.id, idResaltado);
             if (p.poly && p.poly.length > 2) {
               // Anidado de forma real: se dibuja el contorno tal cual quedó
               const pts = p.poly.flatMap(([x, y]) => [X(x), Y(y)]);
               return (
                 <Line
                   key={i} points={pts} closed
-                  fill="rgba(228,87,46,.34)" stroke="#e4572e" strokeWidth={1}
+                  fill={c.relleno} stroke={c.borde} strokeWidth={1}
                 />
               );
             }
@@ -108,7 +120,7 @@ export function VisorNesting({ nesting, alto = 400, indiceChapa = 0 }) {
                 key={i}
                 x={X(p.x)} y={oy + (layout.h - p.y - (rot90 ? p.w : p.h)) * esc}
                 width={w} height={h}
-                fill="rgba(228,87,46,.34)" stroke="#e4572e" strokeWidth={1}
+                fill={c.relleno} stroke={c.borde} strokeWidth={1}
               />
             );
           })}

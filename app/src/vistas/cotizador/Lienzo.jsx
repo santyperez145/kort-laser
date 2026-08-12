@@ -161,12 +161,31 @@ export function Lienzo() {
             </ContenidoPestania>
 
             <ContenidoPestania value="nest" className="relative">
-              <VisorNesting nesting={r?.nesting} alto={ALTO} />
+              <VisorNesting
+                nesting={r?.nesting}
+                alto={ALTO}
+                idResaltado={r?.nesting?.compartido ? r.nesting.idEnLayout : null}
+              />
               {r?.nesting?.chapas != null ? (
                 <div className="pointer-events-none absolute bottom-2.5 left-2.5 rounded-lg bg-black/65 px-2.5 py-1 font-mono text-[11px] text-white tabular">
-                  {r.nesting.piezasPorChapa} piezas por chapa · {r.nesting.chapas} chapa(s) ·
+                  {r.nesting.piezasPorChapa} piezas por chapa ·{' '}
+                  {r.nesting.compartido
+                    ? `${r.nesting.chapasGrupo} chapa(s) entre ${r.nesting.itemsEnGrupo} ítems`
+                    : `${num(r.nesting.chapas, 0)} chapa(s)`} ·
                   aprovechamiento {pct(r.nesting.aprovechamiento * 100, 1)} · anidado por{' '}
                   {r.nesting.metodo || 'rectángulo'}
+                </div>
+              ) : null}
+              {r?.nesting?.compartido ? (
+                <div className="pointer-events-none absolute right-2.5 bottom-2.5 flex flex-col gap-1 rounded-lg bg-black/65 px-2.5 py-1.5 text-[11px] text-white">
+                  <span className="flex items-center gap-1.5">
+                    <span className="size-2.5 rounded-sm bg-[#e4572e]" />
+                    {item.nombre || 'Este ítem'}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-white/70">
+                    <span className="size-2.5 rounded-sm bg-[#7a8ea5]" />
+                    Otros {r.nesting.itemsEnGrupo - 1} ítem(s) de la misma chapa
+                  </span>
                 </div>
               ) : null}
             </ContenidoPestania>

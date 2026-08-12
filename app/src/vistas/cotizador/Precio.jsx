@@ -146,7 +146,14 @@ export function Precio() {
               <Dato etiqueta="Velocidad media real" valor={num(r.corte.vMediaEfectiva, 0) + ' mm/min'} />
               <Dato etiqueta="Pérdida por geometría" valor={pct(r.corte.penalizacion * 100, 0)} />
               <Dato etiqueta="Tiempo por pieza" valor={fmtTiempo(r.corte.tPieza)} />
-              <Dato etiqueta="Chapas necesarias" valor={String(r.nesting.chapas ?? '—')} />
+              <Dato
+                etiqueta="Chapas necesarias"
+                valor={
+                  r.nesting.compartido
+                    ? `${num(r.nesting.chapas, 2)} de ${r.nesting.chapasGrupo}`
+                    : String(r.nesting.chapas ?? '—')
+                }
+              />
               <Dato etiqueta="Aprovechamiento" valor={pct((r.nesting.aprovechamiento || 0) * 100, 1)} />
             </dl>
 
@@ -155,6 +162,16 @@ export function Precio() {
               valor={(r.nesting.aprovechamiento || 0) * 100}
               tono={(r.nesting.aprovechamiento || 0) > 0.7 ? 'verde' : 'corte'}
             />
+
+            {/* Sin esta línea el "0,49 de 1" de arriba no se entiende. */}
+            {r.nesting.compartido ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-tenue">
+                Comparte chapa con {r.nesting.itemsEnGrupo - 1} ítem
+                {r.nesting.itemsEnGrupo - 1 === 1 ? '' : 's'} del mismo material, espesor y gas:
+                se cortan juntos en un solo programa. El material y la puesta a punto se reparten
+                por el área que ocupa cada uno.
+              </p>
+            ) : null}
 
             <dl className="mt-2 border-t border-borde pt-1">
               <Dato etiqueta="Costo hora láser" valor={money(r.costos.costoHoraLaser, sim, 0) + '/h'} />

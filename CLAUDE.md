@@ -116,6 +116,18 @@ Son la razón de ser de varios tests.
    polígono inscripto. Aproximar subestima el peso del material y con él el
    precio. Ya pasó una vez.
 
+5. **El nesting es por PRESUPUESTO, no por ítem.** La máquina corta un programa
+   por chapa, no un ítem por chapa. `planificarNesting()` agrupa por
+   (material, espesor, gas, chapa) y reparte chapas, material y setup **por el
+   área que ocupa cada ítem en el layout real**. Volver a anidar un ítem por su
+   cuenta cuando comparte grupo da un número distinto del que se va a cortar.
+   El gas va en la clave a propósito: cambiarlo es cambiar de programa y de
+   boquilla. Y `nesting.chapas` es **fraccionario** cuando la chapa es
+   compartida — para el total se suma `chapasGrupo` una vez por grupo, que es
+   lo que `cotizarPresupuesto()` hace con el `Set` de grupos contados. Sumar
+   las fracciones da lo mismo salvo por el error de coma flotante, y ese número
+   se usa para comprar material.
+
 ## Trampas conocidas
 
 - **Node 21.7 + `better-sqlite3` = segfault.** No hay prebuilds para esa ABI y
