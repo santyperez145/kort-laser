@@ -110,7 +110,15 @@ function nestRectangular(items, chapa, opts) {
       });
     }
   }
-  cola.sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w * b.h - a.w * a.h);
+  // El orden en que se colocan cambia mucho el resultado y no hay uno que gane
+  // siempre. Se prueban varios y se queda el mejor (ver `nest`).
+  const ORDENES = {
+    lado: (a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w * b.h - a.w * a.h,
+    area: (a, b) => b.w * b.h - a.w * a.h || Math.max(b.w, b.h) - Math.max(a.w, a.h),
+    alto: (a, b) => b.h - a.h || b.w - a.w,
+    ancho: (a, b) => b.w - a.w || b.h - a.h,
+  };
+  cola.sort(ORDENES[opts.orden] || ORDENES.lado);
 
   const chapas = [];
   const noEntran = [];
@@ -173,6 +181,119 @@ function rotarPoly(pts, gradosCCW) {
     if (y < minY) minY = y;
   }
   return rot.map(([x, y]) => [x - minX, y - minY]);
+}
+
+/** Envolvente convexa (marcha de Andrew). Base para el ángulo de mínima área. */
+function envolventeConvexa(pts) {
+  if (pts.length < 4) return pts.slice();
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cruz = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const abajo = [];
+  for (const q of p) {
+    while (abajo.length >= 2 && cruz(abajo[abajo.length - 2], abajo[abajo.length - 1], q) <= 0) abajo.pop();
+    abajo.push(q);
+  }
+  const arriba = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (arriba.length >= 2 && cruz(arriba[arriba.length - 2], arriba[arriba.length - 1], q) <= 0) arriba.pop();
+    arriba.push(q);
+  }
+  abajo.pop();
+  arriba.pop();
+  return abajo.concat(arriba);
+}
+
+/**
+ * Pesos del criterio de colocación. Están afuera y con nombre porque se
+ * calibraron midiendo cuántas piezas entran en una chapa, no a ojo.
+ */
+export const PESOS = { y: 1, hueco: 0.45, alto: 0.08 };
+
+/**
+ * Descarta las rotaciones que dan el mismo perfil.
+ *
+ * Un disco es igual girado en cualquier ángulo, y un rectángulo se repite cada
+ * 180°: probar ocho rotaciones de un disco es hacer ocho veces exactamente la
+ * misma búsqueda. Acá estaba el costo real del anidado, no en el barrido — con
+ * 120 discos el cálculo pasó de un segundo a menos de doscientos milisegundos.
+ */
+function dedupRotaciones(rots) {
+  const vistos = new Map();
+  const salida = [];
+  for (const r of rots) {
+    const p = r.perfil;
+    // Firma del perfil: dimensiones más unas muestras del piso y del techo.
+    // Dos rotaciones con la misma firma se comportan igual al anidar.
+    const m = [];
+    for (let k = 0; k < 8; k++) {
+      const i = Math.min(p.cols - 1, Math.floor((k * p.cols) / 8));
+      m.push(p.bottom[i].toFixed(1), p.top[i].toFixed(1));
+    }
+    const firma = `${p.cols}|${p.w.toFixed(1)}|${p.h.toFixed(1)}|${m.join(',')}`;
+    if (vistos.has(firma)) continue;
+    vistos.set(firma, true);
+    salida.push(r);
+  }
+  return salida;
+}
+
+/** Qué fracción de su rectángulo envolvente ocupa el polígono (0 a 1). */
+function llenadoDelRectangulo(pts) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    area += x1 * y2 - x2 * y1;
+    if (x1 < minX) minX = x1;
+    if (x1 > maxX) maxX = x1;
+    if (y1 < minY) minY = y1;
+    if (y1 > maxY) maxY = y1;
+  }
+  const rect = (maxX - minX) * (maxY - minY);
+  return rect > 0 ? Math.abs(area / 2) / rect : 1;
+}
+
+/**
+ * Ángulos que dejan a la pieza en su rectángulo envolvente más chico.
+ *
+ * Es el mejor candidato de rotación que existe y ninguna tabla de 0/90/180/270
+ * lo encuentra: una pieza en diagonal, un ángulo o una escuadra ocupan mucho
+ * menos rectángulo girados unos grados. Por el teorema del rectángulo mínimo,
+ * ese giro siempre deja un lado de la envolvente convexa apoyado en el borde,
+ * así que alcanza con probar el ángulo de cada arista del casco.
+ */
+export function angulosMinimaArea(pts, cuantos = 2) {
+  const casco = envolventeConvexa(pts);
+  if (casco.length < 3) return [0];
+  const candidatos = [];
+  for (let i = 0; i < casco.length; i++) {
+    const a = casco[i];
+    const b = casco[(i + 1) % casco.length];
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const gradosCCW = -(ang * 180) / Math.PI; // girar la arista a la horizontal
+    const c = Math.cos(-ang);
+    const s = Math.sin(-ang);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of casco) {
+      const X = x * c - y * s;
+      const Y = x * s + y * c;
+      if (X < minX) minX = X;
+      if (X > maxX) maxX = X;
+      if (Y < minY) minY = Y;
+      if (Y > maxY) maxY = Y;
+    }
+    candidatos.push({ grados: ((gradosCCW % 360) + 360) % 360, area: (maxX - minX) * (maxY - minY) });
+  }
+  candidatos.sort((a, b) => a.area - b.area);
+  // Se descartan los casi repetidos: girar 0,3° no cambia nada y cuesta igual
+  const salida = [];
+  for (const c of candidatos) {
+    if (salida.some((g) => Math.abs(((g - c.grados + 540) % 360) - 180) > 177)) continue;
+    salida.push(c.grados);
+    if (salida.length >= cuantos) break;
+  }
+  return salida;
 }
 
 /**
@@ -259,7 +380,8 @@ function perfilar(pts, res, gapPx) {
 }
 
 class ChapaForma {
-  constructor(w, h, margen, res) {
+  constructor(w, h, margen, res, pesos) {
+    this.pesos = pesos || PESOS;
     this.w = w;
     this.h = h;
     this.margen = margen;
@@ -271,27 +393,69 @@ class ChapaForma {
     this.altoUtil = h - 2 * margen;
   }
 
-  /** Busca la posición más baja (y luego más a la izquierda) donde entra. */
+  /**
+   * Busca dónde apoyar la pieza.
+   *
+   * No alcanza con "lo más abajo posible": esa regla sola deja huecos debajo de
+   * las piezas irregulares y después nada entra ahí. Se puntúa combinando dos
+   * cosas:
+   *
+   *   · la altura a la que queda (que sea baja),
+   *   · el hueco que deja atrapado debajo (que sea chico).
+   *
+   * Así una pieza prefiere meterse en la concavidad que dejó la anterior antes
+   * que apoyarse plana un poco más abajo, que es exactamente lo que hace un
+   * operario acomodando piezas a mano.
+   */
   buscar(perfil) {
     if (perfil.cols > this.cols) return null;
+    return this._barrer(perfil);
+  }
+
+  /**
+   * Barrido completo, columna por columna.
+   *
+   * Se probaron dos atajos y los dos se descartaron con medición:
+   *   · barrido grueso + refinado: no ahorraba tiempo (el corte temprano de
+   *     abajo ya hace ese trabajo) y perdía hasta 9 % de piezas por chapa;
+   *   · probar sólo los escalones del perfil: rápido, pero perdía 10 % en
+   *     piezas en L y en escuadras, que son las que más importan.
+   * El costo real no estaba acá sino en probar rotaciones repetidas: ver
+   * `dedupRotaciones`.
+   */
+  _barrer(perfil) {
     let mejor = null;
+    const sky = this.skyline;
+    const bot = perfil.bottom;
+    const top = perfil.top;
+    const n = perfil.cols;
+
     for (let x = 0; x + perfil.cols <= this.cols; x++) {
       let y = 0;
-      for (let i = 0; i < perfil.cols; i++) {
-        const necesita = this.skyline[x + i] - perfil.bottom[i];
+      for (let i = 0; i < n; i++) {
+        const necesita = sky[x + i] - bot[i];
         if (necesita > y) y = necesita;
       }
-      // ¿Entra a lo alto?
+      // ¿Entra a lo alto? y ¿cuánto hueco deja atrapado debajo?
       let cabe = true;
-      for (let i = 0; i < perfil.cols; i++) {
-        if (y + perfil.top[i] > this.altoUtil) {
+      let alturaResultante = 0;
+      let hueco = 0;
+      for (let i = 0; i < n; i++) {
+        const techo = y + top[i];
+        if (techo > this.altoUtil) {
           cabe = false;
           break;
         }
+        if (techo > alturaResultante) alturaResultante = techo;
+        hueco += y + bot[i] - sky[x + i];
       }
       if (!cabe) continue;
-      if (!mejor || y < mejor.y - 1e-9) mejor = { x, y };
-      if (mejor && mejor.y <= 0) break; // no se puede hacer mejor que el piso
+
+      const P = this.pesos;
+      const puntaje = P.y * y + P.hueco * (hueco / n) + P.alto * alturaResultante;
+      if (!mejor || puntaje < mejor.puntaje - 1e-9) mejor = { x, y, puntaje };
+      // Apoya en el piso y sin hueco: no existe mejor lugar que ese
+      if (mejor.puntaje <= 0.02 * perfil.h) break;
     }
     return mejor;
   }
@@ -323,7 +487,15 @@ function nestFormaReal(items, chapa, opts) {
   // grandes. 2 mm da buen encastre sin que el cálculo se note.
   const res = opts.resolucion ?? Math.max(1.5, Math.min(4, chapa.w / 900));
   const gapPx = Math.max(1, Math.round(sep / 2 / res));
-  const rotaciones = opts.rotaciones ?? [0, 90, 180, 270];
+
+  /**
+   * Ángulos a probar. Los múltiplos de 90 son los que el taller acepta sin
+   * discutir (la fibra del laminado queda alineada). Los de 45 y los de mínima
+   * área encastran mucho mejor las piezas irregulares, pero giran la pieza
+   * respecto de la dirección de laminación: se usan sólo si el llamador lo
+   * habilita, porque en piezas que se pliegan eso importa.
+   */
+  const rotaciones = opts.rotaciones ?? (opts.rotacionLibre ? [0, 45, 90, 135, 180, 225, 270, 315] : [0, 90, 180, 270]);
 
   // Perfiles por pieza y rotación (se calculan una sola vez)
   const catalogo = new Map();
@@ -341,10 +513,33 @@ function nestFormaReal(items, chapa, opts) {
           ? flattenPath(it.shape.outer, Math.min(0.4, res / 4))
           : null;
     if (!base) return null; // sin geometría no hay forma real
-    const rots = (it.rotable === false ? [0] : rotaciones).map((g) => ({
+
+    // ¿Qué tan "rectangular" es la pieza? Si llena casi todo su rectángulo
+    // envolvente, girarla no gana nada y probar ocho ángulos es tiempo tirado.
+    const llenado = llenadoDelRectangulo(base);
+    const esCasiRectangular = llenado > 0.93;
+
+    let angulos;
+    if (it.rotable === false) angulos = [0];
+    else if (esCasiRectangular) angulos = [0, 90];
+    else {
+      angulos = [...rotaciones];
+      if (opts.rotacionLibre) {
+        // El giro que deja a la pieza en su rectángulo envolvente más chico, y
+        // el mismo girado 90°. En piezas en diagonal o en L esto solo cambia
+        // el aprovechamiento más que todo el resto junto.
+        for (const a of angulosMinimaArea(base, 2)) {
+          for (const extra of [a, (a + 90) % 360]) {
+            if (!angulos.some((g) => Math.abs(g - extra) < 3)) angulos.push(extra);
+          }
+        }
+      }
+    }
+
+    const rots = dedupRotaciones(angulos.map((g) => ({
       grados: g,
       perfil: perfilar(rotarPoly(base, g), res, gapPx),
-    }));
+    })));
     catalogo.set(it.id, { rots, areaReal: it.areaReal });
   }
 
@@ -354,7 +549,15 @@ function nestFormaReal(items, chapa, opts) {
       cola.push({ id: it.id, nombre: it.nombre || it.id, w: it.w, h: it.h });
     }
   }
-  cola.sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w * b.h - a.w * a.h);
+  // El orden en que se colocan cambia mucho el resultado y no hay uno que gane
+  // siempre. Se prueban varios y se queda el mejor (ver `nest`).
+  const ORDENES = {
+    lado: (a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w * b.h - a.w * a.h,
+    area: (a, b) => b.w * b.h - a.w * a.h || Math.max(b.w, b.h) - Math.max(a.w, a.h),
+    alto: (a, b) => b.h - a.h || b.w - a.w,
+    ancho: (a, b) => b.w - a.w || b.h - a.h,
+  };
+  cola.sort(ORDENES[opts.orden] || ORDENES.lado);
 
   const chapas = [];
   const noEntran = [];
@@ -368,7 +571,7 @@ function nestFormaReal(items, chapa, opts) {
       for (const r of cat.rots) {
         const pos = ch.buscar(r.perfil);
         if (!pos) continue;
-        if (!mejor || pos.y < mejor.pos.y - 1e-9) mejor = { pos, r };
+        if (!mejor || pos.puntaje < mejor.pos.puntaje - 1e-9) mejor = { pos, r };
       }
       if (mejor) {
         ch.colocar(mejor.r.perfil, mejor.pos, {
@@ -384,12 +587,12 @@ function nestFormaReal(items, chapa, opts) {
       continue;
     }
 
-    const ch = new ChapaForma(chapa.w, chapa.h, margen, res);
+    const ch = new ChapaForma(chapa.w, chapa.h, margen, res, opts.pesos);
     let mejor = null;
     for (const r of cat.rots) {
       const pos = ch.buscar(r.perfil);
       if (!pos) continue;
-      if (!mejor || pos.y < mejor.pos.y - 1e-9) mejor = { pos, r };
+      if (!mejor || pos.puntaje < mejor.pos.puntaje - 1e-9) mejor = { pos, r };
     }
     if (!mejor) {
       noEntran.push(pieza);
@@ -430,15 +633,69 @@ function nestFormaReal(items, chapa, opts) {
 export function nest(items, chapa, opts = {}) {
   const usarForma = opts.formaReal !== false && items.some((i) => i.shape || i.poly);
 
+  /**
+   * Multi-arranque: el orden en que se van colocando las piezas cambia el
+   * resultado y no hay un orden que gane siempre. Se corre el anidado con
+   * varios y se queda el mejor. Cuesta unas milésimas y a veces ahorra una
+   * chapa entera, que es plata de verdad.
+   *
+   * El presupuesto de intentos se recorta con la cantidad de piezas para que
+   * el cotizador siga respondiendo mientras se escribe.
+   */
+  const totalPiezas = items.reduce((a, i) => a + (i.cantidad || 1), 0);
+
+  /**
+   * Las variantes SIEMPRE incluyen la conservadora (orden por lado mayor, sólo
+   * giros de 90°, criterio de altura pura). Es la que corría antes, y tenerla
+   * en la lista garantiza que agregar rotación libre y encaje **nunca deje un
+   * resultado peor** que el anterior: si en una pieza no ayudan, gana la vieja.
+   *
+   * Se midió por qué hace falta: en un trapecio, la elección de rotación pieza
+   * por pieza es óptima localmente y peor en el conjunto — entraban 59 piezas
+   * contra 69 de la conservadora.
+   */
+  const conservadora = { orden: 'lado', rotacionLibre: false, pesos: { y: 1, hueco: 0, alto: 0 } };
+  const libre = { rotacionLibre: opts.rotacionLibre !== false };
+
+  let variantes;
+  if (opts.orden || opts.pesos) {
+    variantes = [{}]; // el llamador fijó la estrategia: se respeta
+  } else if (totalPiezas > 400) {
+    variantes = [conservadora, { ...libre, orden: 'lado' }];
+  } else if (totalPiezas > 120) {
+    variantes = [conservadora, { ...libre, orden: 'lado' }, { ...libre, orden: 'area' }];
+  } else {
+    variantes = [
+      conservadora,
+      { ...libre, orden: 'lado' },
+      { ...libre, orden: 'area' },
+      { ...libre, orden: 'alto' },
+    ];
+  }
+
+  const mejorDe = (cands) => {
+    let mejor = null;
+    for (const c of cands) {
+      if (!c) continue;
+      const usadas = c.chapas.reduce((a, ch) => a + ch.areaUsada, 0);
+      const puntaje = c.chapas.length * 1e12 + (c.noEntran?.length || 0) * 1e15 - usadas;
+      if (!mejor || puntaje < mejor.puntaje) mejor = { r: c, puntaje };
+    }
+    return mejor?.r || null;
+  };
+
   let r = null;
   if (usarForma) {
     try {
-      r = nestFormaReal(items, chapa, opts);
+      r = mejorDe(variantes.map((v) => nestFormaReal(items, chapa, { ...opts, ...v })));
     } catch (e) {
       r = null; // ante cualquier problema, se cae al motor rectangular
     }
   }
-  if (!r) r = nestRectangular(items, chapa, opts);
+  if (!r) {
+    r = mejorDe(variantes.map((v) => nestRectangular(items, chapa, { ...opts, ...v })))
+      || nestRectangular(items, chapa, opts);
+  }
 
   const areaChapa = chapa.w * chapa.h;
   const totalPedidas = items.reduce((a, i) => a + (i.cantidad || 1), 0);

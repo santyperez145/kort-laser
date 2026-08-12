@@ -1137,6 +1137,189 @@ test('sin geometría cae al motor rectangular sin romperse', () => {
 });
 
 /* ================================================================== */
+grupo('Nesting: rotación y acomodado');
+
+const { PESOS, angulosMinimaArea } = await import('../src/core/nesting.js');
+
+/** Configuración equivalente a la del motor anterior, para comparar. */
+const NEST_VIEJO = { rotacionLibre: false, orden: 'lado', pesos: { y: 1, hueco: 0, alto: 0 } };
+
+function piezasEnUnaChapa(shape, w, h, areaReal, opts = {}) {
+  const chapa = { w: 2440, h: 1220 };
+  const r = nest([{ id: 'x', nombre: 'p', w, h, cantidad: 400, shape, areaReal }], chapa,
+    { margen: 10, separacion: 5, maxChapas: 1, ...opts });
+  return r.chapas[0]?.piezas.length || 0;
+}
+
+test('el ángulo de mínima área encuentra el giro de una pieza en diagonal', () => {
+  // Un rectángulo girado 30°: el mejor giro tiene que devolverlo a la horizontal
+  const a = rad(30);
+  const pts = [[0, 0], [200, 0], [200, 80], [0, 80]].map(([x, y]) => [
+    x * Math.cos(a) - y * Math.sin(a),
+    x * Math.sin(a) + y * Math.cos(a),
+  ]);
+  const angulos = angulosMinimaArea(pts, 2);
+  const bueno = angulos.some((g) => {
+    const d = Math.abs(((g - 330) % 180 + 180) % 180);
+    return d < 3 || Math.abs(d - 90) < 3;
+  });
+  assert.ok(bueno, `esperaba un giro cerca de 330° o 60°, dio ${angulos.map((x) => x.toFixed(0)).join(', ')}`);
+});
+
+test('el anidado nunca queda peor que el motor anterior', () => {
+  const casos = [
+    ['triángulo', makeShape(polyline([[0, 0], [240, 0], [120, 200]], true)), 240, 200, 24000],
+    ['perfil L', makeShape(polyline([[0, 0], [200, 0], [200, 60], [70, 60], [70, 180], [0, 180]], true)), 200, 180, 200 * 60 + 70 * 120],
+    ['trapecio', makeShape(polyline([[0, 0], [300, 0], [220, 150], [80, 150]], true)), 300, 150, ((300 + 140) / 2) * 150],
+    ['escuadra', makeShape(polyline([[0, 0], [220, 0], [220, 50], [50, 50], [50, 220], [0, 220]], true)), 220, 220, 220 * 50 + 50 * 170],
+    ['disco', makeShape(circle(90, 90, 90)), 180, 180, Math.PI * 8100],
+    ['placa', makeShape(rect(0, 0, 300, 200)), 300, 200, 60000],
+  ];
+  let viejas = 0;
+  let nuevas = 0;
+  for (const [nombre, sh, w, h, area] of casos) {
+    const antes = piezasEnUnaChapa(sh, w, h, area, NEST_VIEJO);
+    const ahora = piezasEnUnaChapa(sh, w, h, area);
+    assert.ok(ahora >= antes,
+      `en ${nombre} entraban ${antes} piezas y ahora entran ${ahora}: el multi-arranque debe incluir la variante conservadora`);
+    viejas += antes;
+    nuevas += ahora;
+  }
+  assert.ok(nuevas > viejas, 'en el conjunto tiene que haber mejora');
+  console.log(`      → ${viejas} piezas antes, ${nuevas} ahora (+${(((nuevas - viejas) / viejas) * 100).toFixed(1)} %)`);
+});
+
+test('los triángulos ganan mucho al poder girarse', () => {
+  const tri = makeShape(polyline([[0, 0], [240, 0], [120, 200]], true));
+  const sinGiro = piezasEnUnaChapa(tri, 240, 200, 24000, NEST_VIEJO);
+  const conGiro = piezasEnUnaChapa(tri, 240, 200, 24000);
+  assert.ok(conGiro >= sinGiro * 1.15,
+    `esperaba al menos 15 % más triángulos por chapa, pasó de ${sinGiro} a ${conGiro}`);
+});
+
+test('las rotaciones repetidas se descartan: un disco no se prueba ocho veces', () => {
+  // Si no se dedupliaran, un disco tardaría varias veces más que una placa de
+  // área parecida. Se compara el tiempo relativo, no un umbral en ms.
+  const disco = makeShape(circle(90, 90, 90));
+  const placa = makeShape(rect(0, 0, 180, 180));
+  const t0 = Date.now();
+  piezasEnUnaChapa(disco, 180, 180, Math.PI * 8100);
+  const tDisco = Date.now() - t0;
+  const t1 = Date.now();
+  piezasEnUnaChapa(placa, 180, 180, 32400);
+  const tPlaca = Date.now() - t1;
+  assert.ok(tDisco < tPlaca * 6 + 250,
+    `el disco tardó ${tDisco} ms contra ${tPlaca} ms de la placa: parece que prueba rotaciones repetidas`);
+});
+
+test('una pieza marcada como no rotable se respeta', () => {
+  const tri = makeShape(polyline([[0, 0], [240, 0], [120, 200]], true));
+  const r = nest([{ id: 'x', nombre: 'p', w: 240, h: 200, cantidad: 20, shape: tri, areaReal: 24000, rotable: false }],
+    { w: 2440, h: 1220 }, { margen: 10, separacion: 5 });
+  for (const ch of r.chapas) for (const p of ch.piezas) {
+    assert.equal(p.rot, 0, 'no se puede girar una pieza marcada como no rotable');
+  }
+});
+
+test('los pesos del criterio de colocación están calibrados, no en cero', () => {
+  assert.ok(PESOS.hueco > 0, 'sin el término de hueco las piezas dejan huecos atrapados');
+  assert.ok(PESOS.y > 0);
+});
+
+/* ================================================================== */
+grupo('Tarifario por m²');
+
+const { generarTarifario, evaluarTarifaPlana, techoDeTarifa, BANDAS } = await import('../src/core/tarifario.js');
+
+test('genera una fila por espesor y una columna por banda', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  assert.equal(t.filas.length, acero.espesores.length);
+  for (const f of t.filas) {
+    if (f.error) continue;
+    for (const b of BANDAS) {
+      assert.ok(f.bandas[b.id], `falta la banda ${b.id} en ${f.espesor} mm`);
+      assert.ok(f.bandas[b.id].precioM2 > 0);
+    }
+  }
+});
+
+test('a más espesor, más caro el m²', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const validas = t.filas.filter((f) => !f.error);
+  for (let i = 1; i < validas.length; i++) {
+    assert.ok(
+      validas[i].bandas.media.precioM2 > validas[i - 1].bandas.media.precioM2,
+      `${validas[i].espesor} mm no es más caro que ${validas[i - 1].espesor} mm`
+    );
+  }
+});
+
+test('a más densidad de corte, más caro el m²', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const f = t.filas.find((x) => x.espesor === 2 && !x.error);
+  assert.ok(f);
+  assert.ok(f.bandas.simple.precioM2 < f.bandas.media.precioM2);
+  assert.ok(f.bandas.media.precioM2 < f.bandas.compleja.precioM2);
+  assert.ok(f.bandas.compleja.precioM2 < f.bandas.perforada.precioM2);
+});
+
+test('sin material el precio es menor que con material', () => {
+  const con = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem, conMaterial: true });
+  const sin = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem, conMaterial: false });
+  const fc = con.filas.find((f) => f.espesor === 2);
+  const fs = sin.filas.find((f) => f.espesor === 2);
+  assert.ok(fs.bandas.media.precioM2 < fc.bandas.media.precioM2,
+    'si el cliente trae la chapa tiene que salir más barato');
+  // La diferencia tiene que ser del orden del material
+  const dif = fc.bandas.media.precioM2 - fs.bandas.media.precioM2;
+  cerca(dif, fc.bandas.media.materialM2 * 1.45 * 1.03, fc.bandas.media.materialM2 * 0.35,
+    'la diferencia debería ser el material más su margen');
+});
+
+test('el material domina el costo en chapa fina', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const fino = t.filas.find((f) => f.espesor === 1.2);
+  const d = fino.bandas.simple;
+  const pesoMaterial = d.materialM2 / d.costoM2;
+  assert.ok(pesoMaterial > 0.8,
+    `en 1,2 mm simple el material debería ser >80 % del costo, dio ${(pesoMaterial * 100).toFixed(0)} %`);
+});
+
+test('una tarifa plana deja de convenir a partir de cierto espesor', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const ev = evaluarTarifaPlana(t, 90000);
+  assert.ok(ev.primerEspesorAPerdida, 'con $90.000/m² tiene que haber un espesor donde se pierda');
+  // En chapa fina y simple tiene que estar sano
+  const fino = ev.filas.find((f) => f.espesor === 1.2);
+  assert.equal(fino.bandas.simple.estado, 'sano');
+  // En chapa gruesa tiene que estar en pérdida
+  const grueso = ev.filas.find((f) => f.espesor === 6);
+  assert.equal(grueso.bandas.simple.estado, 'perdida');
+});
+
+test('el techo de la tarifa baja cuando sube la densidad', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const techoSimple = techoDeTarifa(t, 90000, 'simple');
+  const techoCompleja = techoDeTarifa(t, 90000, 'compleja');
+  assert.ok(techoSimple != null, 'con $90.000 tiene que haber techo en simple');
+  assert.ok(techoCompleja <= techoSimple,
+    'una pieza compleja no puede tolerar más espesor que una simple a la misma tarifa');
+});
+
+test('una tarifa más alta corre el techo hacia arriba', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  assert.ok(techoDeTarifa(t, 200000, 'media') > techoDeTarifa(t, 90000, 'media'));
+});
+
+test('el tarifario no inventa espesores que la máquina no corta', () => {
+  const t = generarTarifario(CTX, { materialId: 'inox-304', cotizarItem, espesores: [3, 12, 20] });
+  const f20 = t.filas.find((x) => x.espesor === 20);
+  assert.ok(f20.error, 'inox de 20 mm a 3 kW tiene que dar error, no precio');
+  const f3 = t.filas.find((x) => x.espesor === 3);
+  assert.ok(!f3.error && f3.bandas.media.precioM2 > 0);
+});
+
+/* ================================================================== */
 grupo('PDF');
 
 test('el generador produce un PDF con cabecera y EOF', () => {
