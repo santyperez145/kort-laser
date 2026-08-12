@@ -13,6 +13,10 @@ import { Canvas, useThree } from '@react-three/fiber';
 // puede estar sin internet (además de que la CSP del servidor no lo permite).
 // La iluminación es de tres puntos, hecha a mano y servida desde acá.
 import { OrbitControls, Grid } from '@react-three/drei';
+// RoomEnvironment es PROCEDURAL: arma la escena de reflejos con geometría y
+// luces en código, sin bajar ningún HDRI. Por eso sí se puede usar sin
+// internet, a diferencia del <Environment> de drei.
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import * as THREE from 'three';
 import { Box, Move3d, Square, Layers2, Spline } from 'lucide-react';
 import { geometriasDelModelo } from '@/lib/geometria3d';
@@ -51,6 +55,35 @@ function Camara({ vista, radio }) {
   return null;
 }
 
+/**
+ * Mapa de reflejos.
+ *
+ * Es lo que separa "una forma gris" de "una chapa". Un metal sin entorno que
+ * reflejar se ve plano por más que se le suba el `metalness`: el brillo del
+ * acero es, literalmente, el reflejo de lo que tiene alrededor.
+ *
+ * Se genera una sola vez y se libera al desmontar: el PMREM ocupa memoria de
+ * GPU y el cotizador cambia de pieza muchas veces mientras se escribe.
+ */
+function Entorno() {
+  const gl = useThree((s) => s.gl);
+  const escena = useThree((s) => s.scene);
+
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const entorno = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    escena.environment = entorno.texture;
+    escena.environmentIntensity = 0.55;
+    return () => {
+      escena.environment = null;
+      entorno.texture.dispose();
+      pmrem.dispose();
+    };
+  }, [gl, escena]);
+
+  return null;
+}
+
 function Pieza({ modelo, aristas }) {
   const geoms = useMemo(() => geometriasDelModelo(modelo), [modelo]);
 
@@ -69,12 +102,12 @@ function Pieza({ modelo, aristas }) {
     <group>
       {geoms.caras && (
         <mesh geometry={geoms.caras} castShadow receiveShadow>
-          <meshStandardMaterial color="#9fb3c8" metalness={0.72} roughness={0.38} side={THREE.DoubleSide} flatShading />
+          <meshStandardMaterial color="#aebecd" metalness={0.85} roughness={0.28} envMapIntensity={1.15} side={THREE.DoubleSide} flatShading />
         </mesh>
       )}
       {geoms.cantos && (
         <mesh geometry={geoms.cantos} castShadow receiveShadow>
-          <meshStandardMaterial color="#7c8ea3" metalness={0.6} roughness={0.55} side={THREE.DoubleSide} flatShading />
+          <meshStandardMaterial color="#7f909f" metalness={0.55} roughness={0.62} envMapIntensity={0.8} side={THREE.DoubleSide} flatShading />
         </mesh>
       )}
       {aristas && geoms.caras && (
@@ -119,7 +152,14 @@ export function Visor3D({ modelo, alto = 400 }) {
         shadows
         dpr={[1, 2]}
         camera={{ fov: 42, position: [radio * 2, radio * 1.6, radio * 2.4] }}
-        gl={{ antialias: true, preserveDrawingBuffer: true }}
+        gl={{
+          antialias: true,
+          preserveDrawingBuffer: true,
+          // ACES comprime los brillos en vez de quemarlos: sin esto, el
+          // reflejo del entorno sobre el metal sale como una mancha blanca.
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.05,
+        }}
       >
         <color attach="background" args={[oscuro ? '#0f141b' : '#f7f9fb']} />
         {/* Tres puntos: principal con sombra, relleno frío del lado opuesto y
@@ -130,12 +170,21 @@ export function Visor3D({ modelo, alto = 400 }) {
           position={[radio * 1.2, radio * 2, radio * 2.4]}
           intensity={oscuro ? 1.7 : 2.2}
           castShadow
-          shadow-mapSize={[1024, 1024]}
+          shadow-mapSize={[2048, 2048]}
+          shadow-bias={-0.0005}
         />
         <directionalLight position={[-radio * 2, radio * 0.6, -radio]} intensity={0.55} color="#9fc4e8" />
         <directionalLight position={[0, -radio, -radio * 1.6]} intensity={0.35} color="#ffd7c2" />
 
+        <Entorno />
         <Pieza modelo={modelo} aristas={aristas} />
+
+        {/* Plano que sólo recibe sombra: apoya la pieza en el piso. Sin él la
+            sombra no tiene dónde caer y la pieza flota. */}
+        <mesh position={[0, alturaPiso + 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+          <planeGeometry args={[radio * 8, radio * 8]} />
+          <shadowMaterial opacity={oscuro ? 0.32 : 0.18} />
+        </mesh>
 
         <Grid
           position={[0, alturaPiso, 0]}
