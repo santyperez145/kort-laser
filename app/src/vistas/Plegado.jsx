@@ -30,10 +30,10 @@ import { num, descargar } from '@/lib/formato';
 import {
   perfilNuevo, calcularPerfil, PLANTILLAS, desdePlantilla,
   agregarTramo, quitarTramo, invertirPliegue,
-} from '/src/core/perfil-plegado.js';
-import { MATRICES_V, matrizRecomendada } from '/src/core/bending.js';
-import { generarDXF } from '/src/core/dxf-write.js';
-import { construirMesh } from '/src/core/mesh3d.js';
+} from '@core/perfil-plegado.js';
+import { MATRICES_V, matrizRecomendada } from '@core/bending.js';
+import { generarDXF } from '@core/dxf-write.js';
+import { construirMesh } from '@core/mesh3d.js';
 
 const LS_CLAVE = 'kort-perfil-plegado';
 
