@@ -9,6 +9,14 @@ en PDF y sigue el trabajo hasta la entrega.
 Argentina** (agosto 2026). Todos los datos y sus fuentes están documentados en
 [docs/PRECIOS.md](docs/PRECIOS.md), clasificados según qué tan verificados están.
 
+> **Antes de cotizar en serio, leé [ROADMAP.md → Paso 0](ROADMAP.md).** El
+> sistema calcula bien, pero los datos de entrada todavía son de referencia.
+> Media hora de carga los convierte en los tuyos.
+>
+> Y una limitación conocida: **el nesting es por ítem, no por presupuesto.** Si
+> cotizás varias piezas del mismo material, el número de chapas que informa es
+> mayor al real. Está medido y explicado en el roadmap.
+
 Funciona **sin internet** y arranca con doble clic. Los datos viven en una base
 SQLite dentro de esta carpeta.
 
