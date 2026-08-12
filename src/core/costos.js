@@ -243,14 +243,24 @@ export function calcularCostoHoraMaquina(maquina, estructura) {
   return { ...items, total, estructuraMes: est.totalMes, horasProductivas: est.horasProductivas };
 }
 
-/** Nombre y verbo de cada componente, para que el aviso se lea bien. */
+/**
+ * Componentes SIN ancla física, que son los únicos donde un tipeo pasa
+ * desapercibido.
+ *
+ * Los otros cuatro se calculan a partir de algo verificable y por eso no se
+ * revisan: la amortización sale de valor ÷ horas de vida, la energía de kW ×
+ * $/kWh, el operario de la escala UOM y la estructura del cuadro de gastos.
+ * Que alguno de esos domine puede ser perfectamente correcto — en la
+ * plegadora el operario es el 52 % del costo horario, porque una plegadora es
+ * barata y el trabajo es casi todo mano de obra. Avisar ahí sería enseñar a
+ * ignorar los avisos.
+ *
+ * "Consumibles por hora" y "mantenimiento por hora" son dos campos libres en
+ * pesos: nada los ata a la realidad, y un cero de más no lo nota nadie.
+ */
 const COMPONENTES = {
-  amortizacion: ['la amortización del equipo', 'es'],
-  energia: ['la energía', 'es'],
   mantenimiento: ['el mantenimiento', 'es'],
   consumibles: ['los consumibles', 'son'],
-  operario: ['el operario', 'es'],
-  estructura: ['la estructura del taller', 'es'],
 };
 
 /**

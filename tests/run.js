@@ -33,6 +33,7 @@ import { generarDXF } from '../src/core/dxf-write.js';
 import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto } from '../src/core/library.js';
+import { revisarDatos } from '../src/core/salud.js';
 import { construirMesh } from '../src/core/mesh3d.js';
 import { PDF, anchoTexto } from '../src/core/pdf.js';
 import { generarPresupuestoPDF } from '../src/core/quote-pdf.js';
@@ -632,6 +633,83 @@ test('un espesor por encima del máximo devuelve error explicativo', () => {
 });
 
 /* ================================================================== */
+/* ================================================================== */
+
+grupo('Revisión de los datos cargados');
+
+const DATOS_OK = { config: DEFAULT_CONFIG, maquinas: [DEFAULT_MACHINE, DEFAULT_PLEGADORA], materiales: DEFAULT_MATERIALS };
+
+test('los valores de fábrica no disparan NINGÚN aviso', () => {
+  const r = revisarDatos(DATOS_OK);
+  assert.ok(r.ok, 'un aviso que salta siempre enseña a ignorar los avisos: ' +
+    r.hallazgos.map((h) => `[${h.nivel}] ${h.donde}: ${h.msg}`).join(' | '));
+});
+
+test('detecta el caso real: un componente que se come el costo horario', () => {
+  const rota = { ...DEFAULT_MACHINE, costo: { ...DEFAULT_MACHINE.costo, consumiblesHora: 150000 } };
+  const r = revisarDatos({ ...DATOS_OK, maquinas: [rota, DEFAULT_PLEGADORA] });
+  assert.equal(r.errores, 1);
+  assert.ok(/consumibles/.test(r.hallazgos[0].msg));
+  assert.ok(/Máquinas/.test(r.hallazgos[0].donde), 'tiene que decir dónde se arregla');
+});
+
+test('detecta una densidad que no es la de un metal', () => {
+  const mats = DEFAULT_MATERIALS.map((m) => (m.id === 'acero-sae1010' ? { ...m, densidad: 785 } : m));
+  const r = revisarDatos({ ...DATOS_OK, materiales: mats });
+  assert.ok(r.hallazgos.some((h) => h.nivel === 'error' && /densidad/i.test(h.msg)));
+});
+
+test('detecta un material sin precio por kilo', () => {
+  const mats = DEFAULT_MATERIALS.map((m) => (m.id === 'inox-304' ? { ...m, precioKg: 0 } : m));
+  const r = revisarDatos({ ...DATOS_OK, materiales: mats });
+  assert.ok(r.hallazgos.some((h) => h.nivel === 'error' && /precio por kilo/i.test(h.msg)));
+});
+
+test('detecta los dos mínimos contradictorios', () => {
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, minimoPorItem: 90000, minimoFacturacion: 60000 } };
+  const r = revisarDatos({ ...DATOS_OK, config: cfg });
+  assert.ok(r.hallazgos.some((h) => /mínimo por ítem/i.test(h.msg)));
+});
+
+test('detecta el aire más caro que el nitrógeno, que es imposible', () => {
+  // El aire lo genera el compresor del taller: no puede salir más que un gas
+  // comprado. Es la única relación entre gases que se sostiene siempre.
+  const cfg = {
+    ...DEFAULT_CONFIG,
+    produccion: { ...DEFAULT_CONFIG.produccion, gases: { O2: 4500, N2: 1400, AIRE: 2000 } },
+  };
+  const r = revisarDatos({ ...DATOS_OK, config: cfg });
+  assert.ok(r.hallazgos.some((h) => /aire comprimido figura más caro/i.test(h.msg)));
+});
+
+test('NO se queja de que el oxígeno salga más que el nitrógeno', () => {
+  // Es lo normal: el O2 va en cilindros a 1-3 m³/h y el N2 se compra líquido
+  // a granel para consumir 25-95. Avisar acá sería inventar una regla.
+  const r = revisarDatos(DATOS_OK);
+  assert.ok(!r.hallazgos.some((h) => /nitrógeno/i.test(h.msg)));
+});
+
+test('NO se queja del operario dominante en la plegadora', () => {
+  // Una plegadora es barata y el trabajo es casi todo mano de obra: el 52 %
+  // de operario es correcto, no un error de carga.
+  const r = revisarDatos({ ...DATOS_OK, maquinas: [DEFAULT_PLEGADORA] });
+  assert.ok(!r.hallazgos.some((h) => /operario/i.test(h.msg)));
+});
+
+test('detecta el margen en cero, que sería vender al costo', () => {
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, margen: 0 } };
+  const r = revisarDatos({ ...DATOS_OK, config: cfg });
+  assert.ok(r.hallazgos.some((h) => h.nivel === 'error' && /margen/i.test(h.msg)));
+});
+
+test('los errores se listan antes que los avisos', () => {
+  const rota = { ...DEFAULT_MACHINE, costo: { ...DEFAULT_MACHINE.costo, consumiblesHora: 150000 } };
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, minimoPorItem: 90000, minimoFacturacion: 60000 } };
+  const r = revisarDatos({ config: cfg, maquinas: [rota], materiales: DEFAULT_MATERIALS });
+  assert.ok(r.errores >= 1 && r.avisos >= 1);
+  assert.equal(r.hallazgos[0].nivel, 'error', 'lo que rompe va primero');
+});
+
 /* ================================================================== */
 
 grupo('Piezas de varias partes (carteles, juegos, DXF de cliente)');

@@ -153,13 +153,29 @@ Son la razón de ser de varios tests.
   "corte láser 4m 42s" para una placa de 200×150 en 1,2 mm, cuando cortarla son
   **7 segundos**: el resto es preparación. Un tiempo que no existe hace que
   nadie confíe en el resto de los números.
-- **Un costo horario mal cargado multiplica TODOS los precios en silencio.**
-  Pasó: $150.000/h en "consumibles" (el valor de fábrica es $2.800) llevó la
-  hora de máquina de $30.000 a $177.000. `revisarCostoHora()` avisa cuando un
-  componente se lleva más de la mitad del costo horario, y el aviso sale en el
-  cotizador, sobre el precio — no escondido en Máquinas. El chequeo es
-  **relativo y no por monto fijo**: con la inflación argentina cualquier umbral
-  en pesos queda viejo en meses.
+- **Un dato mal cargado multiplica TODOS los precios en silencio.** Pasó:
+  $150.000/h en "consumibles" (el valor de fábrica es $2.800) llevó la hora de
+  máquina de $30.000 a $177.000. `src/core/salud.js` → `revisarDatos()` revisa
+  config, máquinas y materiales; la tarjeta sale primera en el Panel y el aviso
+  de la máquina también en el cotizador, sobre el precio.
+
+  Al agregar una regla, dos condiciones **no negociables**:
+
+  1. **Relativa y estructural, nunca un umbral en pesos.** Con la inflación
+     argentina cualquier "avisá si supera $X" queda viejo en meses y termina
+     saltando siempre.
+  2. **Que no dispare con los valores de fábrica.** Hay un test que lo fija, y
+     ya atajó dos reglas mal pensadas: "ningún componente supera el 50 % del
+     costo horario" (falso — en la plegadora el operario es el 52 % y está
+     bien) y "el N₂ es más caro que el O₂" (falso — el O₂ va en cilindros a 1-3
+     m³/h y el N₂ se compra líquido a granel; lo que encarece el inox es el
+     caudal, no el precio unitario). Un aviso que salta siempre enseña a
+     ignorar los avisos.
+
+  Por eso `revisarCostoHora()` sólo mira **consumibles y mantenimiento**: son
+  los únicos componentes sin ancla física. La amortización sale de valor ÷
+  horas, la energía de kW × $/kWh, el operario de la escala UOM y la estructura
+  del cuadro de gastos — ahí un tipeo se nota solo.
 
 - **Node 21.7 + `better-sqlite3` = segfault.** No hay prebuilds para esa ABI y
   no hay toolchain de compilación en la máquina. Por eso se usa

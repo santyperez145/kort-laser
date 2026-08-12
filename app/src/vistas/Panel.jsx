@@ -7,6 +7,7 @@
  * con anillo, y la facturación al lado.
  */
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -15,7 +16,7 @@ import {
 } from 'recharts';
 import {
   Plus, FileText, TrendingUp, Target, CheckCircle2, Percent,
-  Layers, Users, Gauge, ArrowRight,
+  Layers, Users, Gauge, ArrowRight, OctagonAlert, TriangleAlert,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
@@ -25,6 +26,8 @@ import { Boton } from '@/componentes/ui/boton';
 import { InsigniaEstado } from '@/componentes/ui/insignia';
 import { PALETA, usarColores, ejeMoneda, Globo } from '@/componentes/graficos';
 import { calcularEstructura, calcularCostoHoraMaquina, puntoEquilibrio } from '@core/costos.js';
+import { revisarDatos } from '@core/salud.js';
+import { Aviso } from '@/componentes/ui/varios';
 import { cn } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ */
@@ -67,6 +70,62 @@ function Kpi({ etiqueta, valor, nota, Icono, tono = 'acero', chispas }) {
           </div>
         ) : null}
       </div>
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Revisión de los datos cargados                                      */
+/*                                                                     */
+/* Va arriba de todo y sólo aparece cuando hay algo mal. Un dato mal    */
+/* cargado no rompe nada: hace que todos los precios salgan mal, en     */
+/* silencio. Pasó con $150.000/h de consumibles, que multiplicó por     */
+/* seis cada presupuesto hasta que alguien miró un número raro.         */
+/* ------------------------------------------------------------------ */
+
+function RevisionDatos() {
+  const config = usarEstado((s) => s.config);
+  const maquinas = usarEstado((s) => s.maquinas);
+  const materiales = usarEstado((s) => s.materiales);
+
+  const revision = useMemo(
+    () => (config ? revisarDatos({ config, maquinas, materiales }) : null),
+    [config, maquinas, materiales]
+  );
+
+  if (!revision || revision.ok) return null;
+
+  const hayErrores = revision.errores > 0;
+
+  return (
+    <Panel className={cn('border-l-4', hayErrores ? 'border-l-peligro-500' : 'border-l-alerta-500')}>
+      <PanelCab
+        acciones={
+          <span className="text-[11px] text-tenue">
+            {revision.errores > 0 ? `${revision.errores} error${revision.errores === 1 ? '' : 'es'}` : null}
+            {revision.errores > 0 && revision.avisos > 0 ? ' · ' : null}
+            {revision.avisos > 0 ? `${revision.avisos} aviso${revision.avisos === 1 ? '' : 's'}` : null}
+          </span>
+        }
+      >
+        {hayErrores ? (
+          <OctagonAlert className="size-3.5 text-peligro-500" />
+        ) : (
+          <TriangleAlert className="size-3.5 text-alerta-500" />
+        )}
+        <PanelTitulo>Revisá estos datos antes de cotizar</PanelTitulo>
+      </PanelCab>
+
+      <PanelCuerpo className="space-y-2">
+        {revision.hallazgos.map((h, i) => (
+          <Aviso key={i} nivel={h.nivel}>
+            <span className="font-semibold">{h.donde}</span> — {h.msg}
+          </Aviso>
+        ))}
+        <p className="pt-1 text-[11px] text-tenue">
+          Un dato mal cargado no rompe nada: hace que todos los precios salgan mal sin avisar.
+        </p>
+      </PanelCuerpo>
     </Panel>
   );
 }
@@ -193,6 +252,8 @@ export function VistaPanel() {
           />
         )}
       </div>
+
+      <RevisionDatos />
 
       {/* ---------------- Facturación + equilibrio ---------------- */}
       <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
