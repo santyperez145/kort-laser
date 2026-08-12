@@ -7,6 +7,7 @@ import { Estructura } from '@/componentes/Estructura';
 import { usarEstado, usarTema } from '@/lib/estado';
 import { VistaPanel } from '@/vistas/Panel';
 import { VistaCotizador } from '@/vistas/Cotizador';
+import { VistaPlegado } from '@/vistas/Plegado';
 import { Legacy } from '@/vistas/Legacy';
 import { Aviso } from '@/componentes/ui/varios';
 import { Boton } from '@/componentes/ui/boton';
@@ -34,6 +35,7 @@ function Contenido() {
       <Routes>
         <Route path="/" element={<VistaPanel />} />
         <Route path="/cotizador" element={<VistaCotizador />} />
+        <Route path="/plegado" element={<VistaPlegado />} />
         <Route path="/presupuestos" element={<Legacy ruta="presupuestos" />} />
         <Route path="/ordenes" element={<Legacy ruta="ordenes" />} />
         <Route path="/clientes" element={<Legacy ruta="clientes" />} />

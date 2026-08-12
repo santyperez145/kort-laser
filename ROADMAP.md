@@ -19,9 +19,42 @@ datos de entrada todavía son de referencia.
 | Pedir cotización de gases, sobre todo N₂ | Configuración → Gases | Es el número más incierto del sistema |
 | Preguntarle al contador tu alícuota de IIBB | Configuración | La Rioja tiene exenciones industriales: son 3 puntos |
 | Cronometrar 2-3 espesores | Materiales → ⚡ | Convierte la estimación en cálculo |
+| **Revisar tu tarifa de $90.000/m²** | Tarifario | Con 4 mm o más **estás trabajando a pérdida**: ver abajo |
 
 Después de esto, el cotizador deja de estimar y empieza a calcular. Recién ahí
 tiene sentido agregarle funciones.
+
+---
+
+## Lo primero: tu tarifa plana
+
+Hoy cobrás **$90.000/m² en acero de 1,2 mm poniendo vos la chapa**. Medido
+contra el motor de costos, esa tarifa:
+
+| Espesor | Simple | Media | Compleja | Perforada |
+|---|---|---|---|---|
+| 0,9 mm | ✓ 68 % | ✓ 62 % | ✓ 52 % | ✓ 29 % |
+| **1,2 mm** | **✓ 57 %** | **✓ 52 %** | ✓ 40 % | ⚠ 16 % |
+| 1,5 mm | ✓ 47 % | ✓ 41 % | ✓ 28 % | ⚠ 0 % |
+| 2 mm | ✓ 30 % | ⚠ 22 % | ⚠ 4 % | ⛔ −32 % |
+| 3 mm | ⛔ −6 % | ⛔ −20 % | ⛔ −51 % | ⛔ −118 % |
+| 6 mm | ⛔ −108 % | ⛔ −128 % | ⛔ −171 % | ⛔ −262 % |
+
+Dos conclusiones, las dos plata:
+
+**1. En 1,2 mm te sobra margen.** Con 52 % de utilidad podés bajar a
+$65.000-70.000/m² y seguir arriba del 35 %. Eso es precio para ganar trabajos
+que hoy perdés, no para regalar.
+
+**2. La tarifa plana se rompe con el espesor.** El material escala con el
+espesor y el precio plano no. De 3 mm para arriba cada trabajo que tomes a
+$90.000/m² lo hacés a pérdida, y cuanto más grande, peor.
+
+**Qué hacer:** usar la tabla de *Tarifario* como lista de precios por espesor.
+Sale del costo real y se actualiza sola cuando cambiás el precio de la chapa.
+
+> ⚠️ Todo esto depende de que tu chapa cueste ~$2.950/kg. Si pagás más, la
+> tabla cambia: cargá tu precio real en Materiales antes de usarla para vender.
 
 ---
 
@@ -98,6 +131,33 @@ dan lo mismo. 8 tests nuevos.
 partes viajan juntas, así que usar el contorno de una prometería un encastre
 que en la chapa no existe.
 
+### ✅ 1.5 El anidado rota y acomoda las piezas
+
+Antes probaba sólo 0/90/180/270. Ahora prueba además 45° y **el giro que deja a
+la pieza en su rectángulo envolvente más chico** (envolvente convexa + teorema
+del rectángulo mínimo), y en vez de bajar la pieza a lo bruto puntúa la altura
+y el hueco que deja atrapado debajo, así se mete en las concavidades.
+
+| Pieza | Antes | Ahora |
+|---|---|---|
+| Triángulo 240×200 | 73 por chapa | **92** (+26 %) |
+| Escuadra 220×220 | 87 | **92** (+6 %) |
+| Perfil L, trapecio, disco, placa | — | igual |
+
+**+4,1 % de piezas por chapa y ningún caso peor**, porque el multi-arranque
+incluye siempre la variante conservadora: si girar no ayuda, gana la de antes.
+
+### ✅ 1.6 Diseñador gráfico de plegado
+
+Vista propia (`/plegado`) para armar piezas plegadas dibujando la sección
+transversal tramo por tramo. De ahí salen juntos y coherentes el desarrollo, las
+líneas de plegado, el 3D, el tonelaje, los avisos de fabricabilidad y el orden
+en que hay que plegar. Incluye 7 plantillas (L, U, Z, omega, cajón, goterón,
+canto rebatido), todas verificadas como plegables de verdad.
+
+Detecta lo que arruina una pieza en la plegadora: alas por debajo del mínimo,
+piezas más largas que la máquina y **tramos que se cruzan al cerrarse**.
+
 ### 📋 1.2 Corte en línea común
 
 Dos piezas rectangulares pegadas comparten el corte del medio: se corta una vez
@@ -128,6 +188,27 @@ usa entrada en arco tangente. Cambia el tiempo y la calidad; hoy se modela una
 sola entrada recta para todo.
 
 **Esfuerzo:** bajo.
+
+---
+
+### 📋 1.7 Anidado dentro del hueco de otra pieza
+
+El anidado por perfil no mete piezas en las "cuevas": si una pieza en U deja un
+hueco cerrado adentro, ahí no entra nada aunque quepa. Para piezas grandes con
+recortes internos (bridas, marcos) eso es material tirado.
+
+Requiere pasar del perfil por columna a una malla de ocupación real. Es el
+salto grande del anidado y el que más material queda por ganar.
+
+**Esfuerzo:** alto.
+
+### 📋 1.8 Anidar también los agujeros grandes
+
+Una brida de Ø400 con agujero central de Ø250 deja adentro un disco de material
+que hoy se tira. Si el agujero es más grande que la pieza más chica del
+presupuesto, se podría cortar ahí adentro.
+
+**Esfuerzo:** medio, y depende de 1.7.
 
 ---
 
@@ -278,7 +359,7 @@ el prefijo `--k-` de las variables CSS, que existe sólo para convivir.
 | ✅ | ~~`cotizador.js` tiene 1.100 líneas y hace demasiado~~ | Partido en `app/src/vistas/cotizador/` |
 | 📋 | No hay tests de la interfaz, sólo del núcleo | Medio: una vista puede romperse sin que nadie se entere. Ahora que hay React conviene Vitest + Testing Library |
 | 📋 | El bundle son ~2,3 MB (620 kB gzip) en 4 trozos | Bajo: se sirve desde localhost, no por red |
-| 💭 | Node 21.7 no es LTS y ya bloqueó `better-sqlite3` | Bajo hoy; pasar a Node 22 LTS cuando convenga |
+| 🔜 | **Node 21.7 no es LTS y ahora BLOQUEA el build** | **Alto**: Vite 8 usa rolldown, que necesita Node ≥ 22.12. En esta máquina `npm run build` no corre. Ya había bloqueado `better-sqlite3`. Instalar Node 22 LTS lo resuelve todo junto |
 | 💭 | El nesting por skyline no mete piezas en "cuevas" | Bajo: da del lado seguro, nunca promete un encastre falso |
 
 ---

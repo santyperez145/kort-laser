@@ -12,7 +12,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Calculator, FileText, Factory, Users,
-  Layers, Cpu, Wallet, Settings, Moon, Sun, Wifi, WifiOff,
+  Layers, Cpu, Wallet, Settings, Moon, Sun, Wifi, WifiOff, FoldVertical,
 } from 'lucide-react';
 import { usarEstado, usarTema } from '@/lib/estado';
 import { Boton } from '@/componentes/ui/boton';
@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 export const RUTAS = [
   { a: '/', txt: 'Panel', Icono: LayoutDashboard, nuevo: true },
   { a: '/cotizador', txt: 'Cotizador', Icono: Calculator, nuevo: true },
+  { a: '/plegado', txt: 'Plegado', Icono: FoldVertical, nuevo: true },
   { a: '/presupuestos', txt: 'Presupuestos', Icono: FileText },
   { a: '/ordenes', txt: 'Producción', Icono: Factory },
   { a: '/clientes', txt: 'Clientes', Icono: Users },

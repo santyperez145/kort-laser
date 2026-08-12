@@ -1137,6 +1137,165 @@ test('sin geometría cae al motor rectangular sin romperse', () => {
 });
 
 /* ================================================================== */
+grupo('Diseñador de plegado');
+
+const {
+  perfilNuevo, calcularPerfil, PLANTILLAS, desdePlantilla,
+  agregarTramo, quitarTramo, invertirPliegue, secuenciaSugerida,
+} = await import('../src/core/perfil-plegado.js');
+
+const PLEG = DEFAULT_PLEGADORA;
+
+test('el desarrollo es la suma de cotas menos las deducciones', () => {
+  const p = { ...perfilNuevo(), tramos: [40, 100, 40], espesor: 2, ancho: 500,
+    angulos: [{ grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'arriba' }] };
+  const r = calcularPerfil(p, acero, PLEG);
+  cerca(r.sumaCotas, 180, 1e-9);
+  cerca(r.desarrollo, r.sumaCotas - r.sumaBD, 1e-9);
+  assert.ok(r.desarrollo < r.sumaCotas, 'el desarrollo siempre es menor que la suma de cotas');
+  assert.equal(r.pliegues.length, 2);
+});
+
+test('una chapa sin pliegues no tiene deducción', () => {
+  const p = { ...perfilNuevo(), tramos: [200], angulos: [], espesor: 2, ancho: 500 };
+  const r = calcularPerfil(p, acero, PLEG);
+  cerca(r.desarrollo, 200, 1e-9);
+  cerca(r.sumaBD, 0, 1e-9);
+  assert.equal(r.lineas.length, 0);
+});
+
+test('las líneas de plegado caen dentro del desarrollo y en orden', () => {
+  const r = calcularPerfil(desdePlantilla('omega', { espesor: 2, ancho: 500 }), acero, PLEG);
+  assert.equal(r.lineas.length, r.pliegues.length);
+  let anterior = 0;
+  for (const l of r.lineas) {
+    assert.ok(l.x > anterior, `las líneas tienen que ir creciendo, ${l.x} vino después de ${anterior}`);
+    assert.ok(l.x < r.desarrollo, `la línea en ${l.x} cae fuera del desarrollo de ${r.desarrollo}`);
+    anterior = l.x;
+  }
+});
+
+test('el desarrollo generado es una pieza cortable con sus pliegues', () => {
+  const r = calcularPerfil(desdePlantilla('u', { espesor: 2, ancho: 500 }), acero, PLEG);
+  const b = shapeBBox(r.shape);
+  cerca(b.w, r.desarrollo, 0.01);
+  cerca(b.h, r.ancho, 0.01);
+  assert.equal(r.shape.pliegues.length, r.pliegues.length);
+});
+
+test('a más espesor, más deducción', () => {
+  const base = { ...perfilNuevo(), tramos: [50, 100, 50], ancho: 500,
+    angulos: [{ grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'arriba' }] };
+  const fino = calcularPerfil({ ...base, espesor: 1 }, acero, PLEG);
+  const grueso = calcularPerfil({ ...base, espesor: 4 }, acero, PLEG);
+  assert.ok(grueso.sumaBD > fino.sumaBD, 'la chapa gruesa consume más material en el pliegue');
+  assert.ok(grueso.desarrollo < fino.desarrollo);
+});
+
+test('el sentido del pliegue cambia la forma pero no el desarrollo', () => {
+  const u = desdePlantilla('u', { espesor: 2, ancho: 500 });
+  const z = invertirPliegue(u, 1);
+  const ru = calcularPerfil(u, acero, PLEG);
+  const rz = calcularPerfil(z, acero, PLEG);
+  cerca(rz.desarrollo, ru.desarrollo, 1e-9, 'plegar para el otro lado no cambia cuánta chapa hace falta');
+  // En una U las dos alas vuelven sobre el mismo lado, así que la sección es
+  // angosta; en una Z una se va para cada lado y la sección se ensancha.
+  // La altura, que la fija el alma, no cambia.
+  cerca(rz.seccion.bbox.h, ru.seccion.bbox.h, 0.01, 'el alma es la misma, la altura no cambia');
+  assert.ok(rz.seccion.bbox.w > ru.seccion.bbox.w * 1.5,
+    `la Z tiene que ser más ancha que la U: ${ru.seccion.bbox.w.toFixed(1)} contra ${rz.seccion.bbox.w.toFixed(1)}`);
+});
+
+test('avisa cuando el ala es menor que el mínimo plegable', () => {
+  const p = { ...perfilNuevo(), tramos: [5, 100, 50], espesor: 3, ancho: 500,
+    angulos: [{ grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'arriba' }] };
+  const r = calcularPerfil(p, acero, PLEG);
+  const err = r.avisos.filter((a) => a.nivel === 'error');
+  assert.ok(err.some((a) => /ala/i.test(a.msg)), 'un ala de 5 mm en 3 mm de chapa no se puede plegar');
+});
+
+test('avisa cuando la pieza no entra en la plegadora', () => {
+  const p = { ...perfilNuevo(), tramos: [50, 100, 50], espesor: 2, ancho: PLEG.largoUtil + 500,
+    angulos: [{ grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'arriba' }] };
+  const r = calcularPerfil(p, acero, PLEG);
+  assert.ok(r.avisos.some((a) => a.nivel === 'error' && /largo útil/i.test(a.msg)));
+});
+
+test('detecta tramos que se cruzan al plegar', () => {
+  // Dos alas paralelas NO chocan por más juntas que estén: la que choca es la
+  // pieza sobrecerrada, donde los pliegues pasan de 90° y las alas convergen.
+  const paralelas = { ...perfilNuevo(), tramos: [80, 12, 80], espesor: 2, ancho: 500,
+    angulos: [{ grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'arriba' }] };
+  assert.equal(calcularPerfil(paralelas, acero, PLEG).seccion.colisiones.length, 0,
+    'dos alas paralelas a 12 mm no se tocan, no hay que avisar de más');
+
+  const cerrada = { ...perfilNuevo(), tramos: [90, 30, 90], espesor: 2, ancho: 500,
+    angulos: [{ grados: 150, sentido: 'arriba' }, { grados: 150, sentido: 'arriba' }] };
+  const r = calcularPerfil(cerrada, acero, PLEG);
+  assert.ok(r.seccion.colisiones.length > 0, 'con pliegues de 150° las alas se cruzan');
+  assert.ok(r.avisos.some((a) => /cerca o se cruzan/i.test(a.msg)));
+});
+
+test('todas las plantillas se pliegan sin error en 1,5 y 2 mm', () => {
+  for (const esp of [1.5, 2]) {
+    for (const pl of PLANTILLAS) {
+      const r = calcularPerfil(desdePlantilla(pl.id, { espesor: esp, ancho: 500 }), acero, PLEG);
+      const err = r.avisos.filter((a) => a.nivel === 'error');
+      assert.equal(err.length, 0,
+        `la plantilla "${pl.nombre}" da error en ${esp} mm: ${err.map((e) => e.msg).join(' / ')}`);
+      assert.ok(r.desarrollo > 0);
+    }
+  }
+});
+
+test('la secuencia sugerida cubre todos los pliegues una sola vez', () => {
+  const r = calcularPerfil(desdePlantilla('omega', { espesor: 2, ancho: 500 }), acero, PLEG);
+  assert.equal(r.secuencia.length, r.pliegues.length);
+  const vistos = new Set(r.secuencia.map((s) => s.pliegue));
+  assert.equal(vistos.size, r.pliegues.length, 'no puede repetir ni saltear un pliegue');
+  assert.equal(r.secuencia[0].paso, 1);
+});
+
+test('la secuencia empieza por el lado que menos sobresale', () => {
+  // Tramos muy desparejos: el ala corta tiene que plegarse primero
+  const s = secuenciaSugerida([20, 300, 400], [{ indice: 1 }, { indice: 2 }]);
+  assert.equal(s[0].pliegue, 1, 'primero el pliegue del lado corto');
+});
+
+test('agregar y quitar tramos mantiene la coherencia', () => {
+  let p = perfilNuevo();
+  assert.equal(p.angulos.length, p.tramos.length - 1);
+  p = agregarTramo(p, 60, 90, 'abajo');
+  assert.equal(p.tramos.length, 3);
+  assert.equal(p.angulos.length, 2);
+  p = quitarTramo(p, 1);
+  assert.equal(p.angulos.length, p.tramos.length - 1, 'siempre un pliegue menos que tramos');
+  // No se puede bajar de dos tramos: dejaría de ser un perfil
+  const minimo = quitarTramo({ ...perfilNuevo() }, 0);
+  assert.equal(minimo.tramos.length, 2);
+});
+
+test('cuenta los cambios de herramental por ángulos distintos', () => {
+  const igual = calcularPerfil({ ...perfilNuevo(), tramos: [40, 100, 40], espesor: 2, ancho: 500,
+    angulos: [{ grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'arriba' }] }, acero, PLEG);
+  const distinto = calcularPerfil({ ...perfilNuevo(), tramos: [40, 100, 40], espesor: 2, ancho: 500,
+    angulos: [{ grados: 90, sentido: 'arriba' }, { grados: 135, sentido: 'arriba' }] }, acero, PLEG);
+  assert.equal(igual.plegado.herramentales, 1);
+  assert.ok(distinto.plegado.herramentales > 1, 'dos ángulos distintos obligan a cambiar herramienta');
+});
+
+test('el perfil se puede cotizar como ítem', () => {
+  const r = calcularPerfil(desdePlantilla('u', { espesor: 2, ancho: 500 }), acero, PLEG);
+  const cot = cotizarItem({
+    nombre: 'Canal U', shape: r.shape, materialId: 'acero-sae1010',
+    espesor: r.espesor, cantidad: 20, plegado: r.plegado,
+  }, CTX);
+  assert.ok(!cot.error, cot.error);
+  assert.ok(cot.costos.plegado > 0, 'el plegado tiene que costar algo');
+  assert.equal(cot.plegado.nPliegues, 2);
+});
+
+/* ================================================================== */
 grupo('Nesting: rotación y acomodado');
 
 const { PESOS, angulosMinimaArea } = await import('../src/core/nesting.js');
