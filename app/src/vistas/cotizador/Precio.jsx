@@ -6,7 +6,9 @@
  * evidente cuando un costo se disparó por un parámetro mal cargado.
  */
 
+import { useMemo } from 'react';
 import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2 } from 'lucide-react';
+import { cotizarItem } from '@core/pricing.js';
 
 import { usarCotizador } from './contexto';
 import { descargarDXFItem, descargarDXFNesting, exportarPDF, exportarOT } from './acciones';
@@ -45,8 +47,28 @@ function Dato({ etiqueta, valor }) {
 export function Precio() {
   const { doc, item, resuelto, resueltos, coti, r, calculando, actualizarDoc, guardar } = usarCotizador();
   const config = usarEstado((s) => s.config);
+  const ctx = usarEstado((s) => s.ctx);
   const sim = usarEstado((s) => s.simbolo());
   const res = coti?.resumen;
+
+  /**
+   * Cuando la puesta a punto se come el precio, el dato accionable no es el
+   * porcentaje sino cuánto bajaría el unitario cortando más. Se calcula sólo
+   * en ese caso: es una cotización extra y no vale la pena hacerla siempre.
+   */
+  const escala = useMemo(() => {
+    if (!r || !resuelto?.shape) return null;
+    if ((r.costos.preparacionPct || 0) < 0.4) return null;
+    const cantidad = Math.max(1, Math.round(item?.cantidad || 1));
+    const propuesta = cantidad < 10 ? 10 : cantidad * 5;
+    try {
+      const conMas = cotizarItem({ ...resuelto, cantidad: propuesta }, ctx());
+      if (conMas.error || !(conMas.precio.unitario < r.precio.unitario)) return null;
+      return { cantidad: propuesta, unitario: conMas.precio.unitario };
+    } catch {
+      return null;
+    }
+  }, [r, resuelto, item?.cantidad, ctx]);
 
   const args = { doc, coti, config, resueltos, actualizarDoc };
 
@@ -69,7 +91,16 @@ export function Precio() {
           {r ? (
             <div className="text-[12.5px]">
               <Fila etiqueta={`Material · ${r.costos.modoMaterial}`} valor={money(r.costos.material, sim, 0)} />
-              <Fila etiqueta={`Corte láser · ${fmtTiempo(r.corte.tTotal)}`} valor={money(r.costos.corte, sim, 0)} />
+              <Fila
+                etiqueta={`Corte láser · ${fmtTiempo(r.corte.tProduccion)}`}
+                valor={money(r.costos.corte, sim, 0)}
+              />
+              {r.costos.tPreparacion > 0 && (
+                <Fila
+                  etiqueta={`Puesta a punto y carga · ${fmtTiempo(r.costos.tPreparacion)}`}
+                  valor={money(r.costos.preparacion, sim, 0)}
+                />
+              )}
               <Fila
                 etiqueta={`${r.corte.gasNombre} · ${num(r.costos.gasM3, 2)} m³`}
                 valor={money(r.costos.gas, sim, 0)}
@@ -117,6 +148,27 @@ export function Precio() {
                 <span>Subtotal del ítem</span>
                 <span className="tabular font-mono">{money(r.precio.neto, sim, 0)}</span>
               </div>
+
+              {/* El caso del trabajo de una sola pieza: el corte son segundos y
+                  el precio es puesta a punto. Decirlo con el número al lado es
+                  lo que permite ofrecerle al cliente cortar más de una. */}
+              {(r.costos.preparacionPct || 0) >= 0.4 && (
+                <Aviso nivel="info" className="mt-3">
+                  <strong>
+                    {pct(r.costos.preparacionPct * 100, 0)} de este ítem es puesta a punto.
+                  </strong>{' '}
+                  Cortar la pieza son {fmtTiempo(r.corte.tPieza)}; programar la máquina y cargar la
+                  chapa, {fmtTiempo(r.costos.tPreparacion)}.
+                  {escala ? (
+                    <>
+                      {' '}
+                      Con <strong>{escala.cantidad} unidades</strong> el unitario baja de{' '}
+                      {money(r.precio.unitario, sim, 0)} a{' '}
+                      <strong>{money(escala.unitario, sim, 0)}</strong>.
+                    </>
+                  ) : null}
+                </Aviso>
+              )}
             </div>
           ) : (
             <Vacio titulo="Sin cálculo" />
@@ -146,6 +198,9 @@ export function Precio() {
               <Dato etiqueta="Velocidad media real" valor={num(r.corte.vMediaEfectiva, 0) + ' mm/min'} />
               <Dato etiqueta="Pérdida por geometría" valor={pct(r.corte.penalizacion * 100, 0)} />
               <Dato etiqueta="Tiempo por pieza" valor={fmtTiempo(r.corte.tPieza)} />
+              <Dato etiqueta="Producción del lote" valor={fmtTiempo(r.corte.tProduccion)} />
+              <Dato etiqueta="Puesta a punto y carga" valor={fmtTiempo(r.costos.tPreparacion)} />
+              <Dato etiqueta="Máquina ocupada (total)" valor={fmtTiempo(r.corte.tTotal)} />
               <Dato
                 etiqueta="Chapas necesarias"
                 valor={

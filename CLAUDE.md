@@ -148,6 +148,19 @@ Son la razón de ser de varios tests.
 
 ## Trampas conocidas
 
+- **"Corte láser" en el desglose es SÓLO producción.** La puesta a punto (setup
+  del programa + carga de chapa) va en su propia línea. Sumarlas mostraba
+  "corte láser 4m 42s" para una placa de 200×150 en 1,2 mm, cuando cortarla son
+  **7 segundos**: el resto es preparación. Un tiempo que no existe hace que
+  nadie confíe en el resto de los números.
+- **Un costo horario mal cargado multiplica TODOS los precios en silencio.**
+  Pasó: $150.000/h en "consumibles" (el valor de fábrica es $2.800) llevó la
+  hora de máquina de $30.000 a $177.000. `revisarCostoHora()` avisa cuando un
+  componente se lleva más de la mitad del costo horario, y el aviso sale en el
+  cotizador, sobre el precio — no escondido en Máquinas. El chequeo es
+  **relativo y no por monto fijo**: con la inflación argentina cualquier umbral
+  en pesos queda viejo en meses.
+
 - **Node 21.7 + `better-sqlite3` = segfault.** No hay prebuilds para esa ABI y
   no hay toolchain de compilación en la máquina. Por eso se usa
   `node-sqlite3-wasm`. No cambiar sin verificar que la máquina de Santiago

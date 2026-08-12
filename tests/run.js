@@ -24,7 +24,8 @@ import {
 import { tiempoCortePieza, tiempoCorteLote, recorridoRapido, DEFAULT_MACHINE, DEFAULT_PLEGADORA, calcularCostoHora, fmtTiempo } from '../src/core/cutting.js';
 import {
   calcularEstructura, calcularCostoHoraMaquina, costoHoraOperario, puntoEquilibrio,
-  evaluarGeneradorN2, DEFAULT_ESTRUCTURA, TARIFAS_EDELAR, UOM_RAMA17, CARGAS_LABORALES,
+  evaluarGeneradorN2, revisarCostoHora, DEFAULT_ESTRUCTURA, TARIFAS_EDELAR, UOM_RAMA17,
+  CARGAS_LABORALES,
 } from '../src/core/costos.js';
 import { calcularPliegue, calcularDesarrollo, matrizRecomendada, validarPlegado, tiempoPlegado } from '../src/core/bending.js';
 import { nest, piezasPorChapa, compararMetodos, rellenoSinCosto } from '../src/core/nesting.js';
@@ -500,6 +501,49 @@ test('cotiza una placa simple con todos los componentes', () => {
   assert.ok(r.costos.gas > 0, 'gas');
   assert.ok(r.precio.neto > r.costos.total, 'el precio debe cubrir el costo');
   cerca(r.precio.unitario * r.cantidad, r.precio.neto, 1e-6);
+});
+
+test('avisa cuando un componente del costo horario domina de forma absurda', () => {
+  const est = calcularEstructura(DEFAULT_CONFIG.estructura);
+
+  // El caso real: $150.000/h de consumibles contra los $2.800 de fábrica
+  const rota = { ...DEFAULT_MACHINE, costo: { ...DEFAULT_MACHINE.costo, consumiblesHora: 150000 } };
+  const avisos = revisarCostoHora(rota, est);
+  assert.equal(avisos.length, 1, 'tiene que avisar');
+  assert.equal(avisos[0].componente, 'consumibles');
+  assert.ok(avisos[0].pct > 0.7 && avisos[0].nivel === 'error');
+
+  // La máquina de fábrica no puede disparar el aviso, o nadie le da bola
+  assert.equal(revisarCostoHora(DEFAULT_MACHINE, est).length, 0, 'los valores de fábrica son sanos');
+});
+
+test('el corte y la puesta a punto se cobran por separado', () => {
+  // Una placa chica en chapa fina: cortarla son segundos, prepararla minutos.
+  // Mezclarlos mostraba "corte láser 4m 42s", que es un tiempo que no existe.
+  const sh = makeShape(rect(0, 0, 200, 150), [circle(20, 20, 4), circle(180, 130, 4)]);
+  const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 1.2, cantidad: 1 }, CTX);
+
+  assert.ok(r.corte.tPieza < 30, `cortar esta placa no puede tardar ${r.corte.tPieza.toFixed(0)}s`);
+  cerca(r.costos.tPreparacion, r.corte.tSetup + r.corte.tChapas, 1e-9, 'preparación = setup + carga');
+
+  // La suma no cambió: sigue siendo el tiempo de máquina completo
+  const costoHora = r.costos.costoHoraLaser;
+  cerca(r.costos.corte + r.costos.preparacion, (r.corte.tTotal / 3600) * costoHora, 1e-6);
+
+  // Y en un trabajo de una pieza la preparación tiene que dominar
+  assert.ok(r.costos.preparacionPct > 0.5, 'con una sola pieza el precio es casi todo preparación');
+});
+
+test('con más cantidad la preparación se diluye y el unitario se desploma', () => {
+  const sh = makeShape(rect(0, 0, 200, 150));
+  const base = { shape: sh, materialId: 'acero-sae1010', espesor: 1.2 };
+  const uno = cotizarItem({ ...base, cantidad: 1 }, CTX);
+  const cien = cotizarItem({ ...base, cantidad: 100 }, CTX);
+
+  assert.ok(cien.costos.preparacionPct < uno.costos.preparacionPct / 5, 'la preparación se reparte');
+  assert.ok(cien.precio.unitario < uno.precio.unitario / 3, 'el unitario tiene que caer fuerte');
+  // Pero el tiempo de preparación en segundos es el mismo: un programa, una chapa
+  cerca(cien.corte.tSetup, uno.corte.tSetup, 1e-9);
 });
 
 test('el precio unitario baja con la cantidad', () => {

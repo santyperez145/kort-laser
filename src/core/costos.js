@@ -243,6 +243,62 @@ export function calcularCostoHoraMaquina(maquina, estructura) {
   return { ...items, total, estructuraMes: est.totalMes, horasProductivas: est.horasProductivas };
 }
 
+/** Nombre y verbo de cada componente, para que el aviso se lea bien. */
+const COMPONENTES = {
+  amortizacion: ['la amortización del equipo', 'es'],
+  energia: ['la energía', 'es'],
+  mantenimiento: ['el mantenimiento', 'es'],
+  consumibles: ['los consumibles', 'son'],
+  operario: ['el operario', 'es'],
+  estructura: ['la estructura del taller', 'es'],
+};
+
+/**
+ * Revisa que el costo horario de una máquina tenga forma razonable.
+ *
+ * Existe por un caso real: alguien cargó $150.000 en "consumibles por hora"
+ * —el valor de fábrica es $2.800— y la hora de máquina pasó de $30.000 a
+ * $177.000. El 85 % del costo era ese campo, y TODO presupuesto salía inflado
+ * seis veces sin que nada avisara. Un error de tipeo en un campo no puede
+ * multiplicar los precios en silencio.
+ *
+ * El chequeo es RELATIVO a propósito: mira qué porcentaje del total se lleva
+ * cada componente, no si supera un monto fijo. Con la inflación argentina
+ * cualquier umbral en pesos queda viejo en meses y termina avisando siempre
+ * —que es igual de inútil que no avisar nunca—.
+ *
+ * En un costo horario sano ninguna parte domina así: la amortización, el
+ * operario y la estructura son las tres grandes y se reparten el grueso.
+ */
+export function revisarCostoHora(maquina, estructura) {
+  const ch = calcularCostoHoraMaquina(maquina, estructura);
+  const avisos = [];
+  if (!(ch.total > 0)) return avisos;
+
+  const partes = Object.entries(COMPONENTES)
+    .map(([clave, [nombre, verbo]]) => ({
+      clave, nombre, verbo,
+      valor: ch[clave] || 0,
+      pct: (ch[clave] || 0) / ch.total,
+    }))
+    .sort((a, b) => b.pct - a.pct);
+
+  const mayor = partes[0];
+  if (mayor.pct > 0.5) {
+    avisos.push({
+      nivel: mayor.pct > 0.7 ? 'error' : 'aviso',
+      componente: mayor.clave,
+      pct: mayor.pct,
+      msg:
+        `En ${maquina.nombre || 'la máquina'}, ${mayor.nombre} ${mayor.verbo} el ` +
+        `${Math.round(mayor.pct * 100)} % del costo por hora. Eso suele ser un error de carga: ` +
+        `revisá ese valor antes de cotizar, porque multiplica el precio de todos los trabajos.`,
+    });
+  }
+
+  return avisos;
+}
+
 /**
  * ¿Conviene comprar un generador de nitrógeno?
  *

@@ -371,7 +371,16 @@ export function cotizarItem(item, ctx, planItem = null) {
   if (corte.error) return { error: corte.error, nombre: item.nombre };
 
   const costoHoraLaser = calcularCostoHoraMaquina(laser, estructura);
-  const costoCorte = (corte.tTotal / 3600) * costoHoraLaser.total;
+
+  /* Producción y puesta a punto se separan porque son cosas distintas y el
+     cliente pregunta. Cortar una placa de 200×150 en 1,2 mm son ~7 segundos;
+     programar la máquina y cargar la chapa son 4 minutos y medio. Sumarlos en
+     una línea llamada "corte láser" hacía que un trabajo de una pieza mostrara
+     4m 42s de corte, que es un número que no existe: el 96 % de eso es
+     preparación. La suma no cambia — cambia que ahora se puede explicar. */
+  const tPreparacion = (corte.tSetup || 0) + (corte.tChapas || 0);
+  const costoCorte = (corte.tProduccion / 3600) * costoHoraLaser.total;
+  const costoPreparacion = (tPreparacion / 3600) * costoHoraLaser.total;
   const precioGas = nz(prod.gases?.[corte.gasTipo], GASES[corte.gasTipo]?.costoM3 ?? 800);
   const costoGas = corte.gasM3Total * precioGas;
 
@@ -427,7 +436,8 @@ export function cotizarItem(item, ctx, planItem = null) {
 
   /* --- Totales ---------------------------------------------------------- */
   const costoTotal =
-    costoMaterial + costoCorte + costoGas + costoPlegado + costoAcabado + costoProcesos + costoIngenieria;
+    costoMaterial + costoCorte + costoPreparacion + costoGas + costoPlegado +
+    costoAcabado + costoProcesos + costoIngenieria;
   const margen = nz(item.margen, com.margen);
   const precioLista = costoTotal * (1 + margen / 100);
 
@@ -510,7 +520,15 @@ export function cotizarItem(item, ctx, planItem = null) {
       modoMaterial: modoMaterialUsado,
       costoChapa,
       pesoChapa,
+      // `corte` es SÓLO producción (cortar las piezas del lote). La puesta a
+      // punto va aparte: sumarlas escondía que un trabajo de una pieza es casi
+      // todo preparación.
       corte: costoCorte,
+      preparacion: costoPreparacion,
+      tPreparacion,
+      // Qué parte del costo es preparación. Arriba de ~0,4 conviene avisarle a
+      // quien cotiza que subiendo la cantidad el unitario se desploma.
+      preparacionPct: costoTotal > 0 ? costoPreparacion / costoTotal : 0,
       costoHoraLaser: costoHoraLaser.total,
       desgloseHoraLaser: costoHoraLaser,
       gas: costoGas,

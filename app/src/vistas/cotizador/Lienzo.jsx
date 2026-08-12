@@ -25,12 +25,13 @@ import { num, pct } from '@/lib/formato';
 
 import { construirMesh } from '@core/mesh3d.js';
 import { radioInterno, matrizRecomendada, validarPlegado } from '@core/bending.js';
+import { revisarCostoHora } from '@core/costos.js';
 import { shapeBBox } from '@core/geometry.js';
 
 const ALTO = 400;
 
 export function Lienzo() {
-  const { doc, item, resuelto, resueltos, r } = usarCotizador();
+  const { doc, item, resuelto, resueltos, coti, r } = usarCotizador();
   const materiales = usarEstado((s) => s.materiales);
   const config = usarEstado((s) => s.config);
   const laser = usarEstado((s) => s.laser());
@@ -89,8 +90,14 @@ export function Lienzo() {
         msg: `La última chapa queda al ${pct(r.nesting.aprovechamientoUltima * 100, 0)} de uso. Ofrecerle más piezas al cliente casi no aumenta el costo de material.`,
       });
     }
+
+    // Un costo horario mal cargado multiplica el precio de TODOS los trabajos.
+    // El aviso va acá, sobre el precio, y no escondido en Máquinas: es donde
+    // se mira antes de mandar un presupuesto.
+    if (laser && coti?.estructura) out.push(...revisarCostoHora(laser, coti.estructura));
+
     return out;
-  }, [item, resuelto, r, material, plegadora, laser]);
+  }, [item, resuelto, r, coti, material, plegadora, laser]);
 
   /**
    * "¿Qué más entra en esta chapa sin que aumente el material?"
