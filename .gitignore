@@ -1,0 +1,33 @@
+# Dependencias (se reinstalan con: npm install)
+node_modules/
+
+# ── DATOS DEL TALLER ──────────────────────────────────────────────
+# La base se crea sola al arrancar, con los valores de fábrica.
+# Nunca subir la base real: tiene clientes, precios y presupuestos.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/backups/
+data/legado/
+data/*.json
+!data/.gitkeep
+
+# Archivos generados (PDF de presupuestos, DXF para la máquina)
+salidas/*
+!salidas/.gitkeep
+
+# Muestras que dejan los tests
+tests/salida-*.pdf
+tests/salida-*.dxf
+tests/.tmp-db/
+
+# Configuración local de la máquina
+.claude/settings.local.json
+
+# Sistema operativo y editores
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/

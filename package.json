@@ -1,0 +1,20 @@
+{
+  "name": "kort-erp",
+  "version": "1.0.0",
+  "description": "KORT - Sistema integral de cotizacion, diseno y produccion para corte laser y plegado CNC",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/run.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true,
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "node-sqlite3-wasm": "^0.8.60",
+    "three": "^0.185.1"
+  }
+}
