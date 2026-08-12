@@ -21,6 +21,22 @@ tests/salida-*.pdf
 tests/salida-*.dxf
 tests/.tmp-db/
 
+# ── SECRETOS ──────────────────────────────────────────────────────
+# Hoy el sistema no usa ninguno: no hay claves de API, ni servicios
+# externos, ni login. La única variable de entorno es PORT.
+# Esto está por si algún día se agrega (por ejemplo el certificado de
+# ARCA para factura electrónica). El repositorio es PÚBLICO: un secreto
+# commiteado acá queda expuesto para siempre, aunque después se borre.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.json
+credenciales*.json
+
 # Configuración local de la máquina
 .claude/settings.local.json
 
