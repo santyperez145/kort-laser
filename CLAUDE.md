@@ -159,6 +159,13 @@ Son la razón de ser de varios tests.
 
 ## Trampas conocidas
 
+- **Cobrar por kilo: el recorte lo paga el taller.** El kilo que se entrega NO
+  cuesta el kilo que se compró: cuesta el de compra dividido el aprovechamiento.
+  Con chapa a $2.950 y 77 % de nesting, el kilo entregado sale $3.869 antes de
+  encender la máquina. Cualquier cuenta de $/kg que use el precio de compra
+  directo subestima el costo casi un 30 %. Ver `tarifario.js` → `materialKg`.
+
+
 - **El multi-arranque del nesting DEBE incluir la variante conservadora.**
   Elegir la rotación pieza por pieza es óptimo localmente y peor en conjunto:
   en un trapecio entraban 59 piezas contra 69 del método anterior. Tener la

@@ -1386,9 +1386,12 @@ test('los pesos del criterio de colocación están calibrados, no en cero', () =
 });
 
 /* ================================================================== */
-grupo('Tarifario por m²');
+grupo("Tarifario");
 
-const { generarTarifario, evaluarTarifaPlana, techoDeTarifa, BANDAS } = await import('../src/core/tarifario.js');
+const {
+  generarTarifario, evaluarTarifaPlana, techoDeTarifa, rangoRecomendado,
+  sensibilidadChapa, sensibilidadAprovechamiento, BANDAS, BASES,
+} = await import('../src/core/tarifario.js');
 
 test('genera una fila por espesor y una columna por banda', () => {
   const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
@@ -1468,6 +1471,115 @@ test('el techo de la tarifa baja cuando sube la densidad', () => {
 test('una tarifa más alta corre el techo hacia arriba', () => {
   const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
   assert.ok(techoDeTarifa(t, 200000, 'media') > techoDeTarifa(t, 90000, 'media'));
+});
+
+test('calcula las tres bases y son coherentes entre sí', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const f = t.filas.find((x) => x.espesor === 2 && !x.error);
+  const d = f.bandas.simple;
+  // costoM2 = costoKg × kg/m²  (la misma plata mirada de dos maneras)
+  cerca(d.costoM2, d.costoKg * f.kgPorM2, d.costoM2 * 0.01,
+    'el costo por m² y por kg tienen que ser el mismo número en otra unidad');
+  // costoMetro × metros por m² = costoM2
+  cerca(d.costoMetro * d.metrosCorteM2, d.costoM2, d.costoM2 * 0.08,
+    'el costo por metro de corte tiene que cerrar con el costo por m²');
+  for (const c of ['precioM2', 'precioKg', 'precioMetro', 'minimoM2', 'minimoKg', 'minimoMetro']) {
+    assert.ok(d[c] > 0, `falta ${c}`);
+  }
+});
+
+test('el precio siempre está por encima del piso', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem, margen: 45 });
+  for (const f of t.filas.filter((x) => !x.error)) {
+    for (const b of BANDAS) {
+      const d = f.bandas[b.id];
+      assert.ok(d.precioKg > d.minimoKg, `${f.espesor} mm ${b.id}: el precio no puede estar por debajo del piso`);
+      assert.ok(d.precioM2 > d.minimoM2);
+    }
+  }
+});
+
+test('cobrar por kilo es estable con el espesor y por m² no', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const rKg = rangoRecomendado(t, 'kg', 'simple');
+  const rM2 = rangoRecomendado(t, 'm2', 'simple');
+  assert.ok(rKg.dispersion < 1.5,
+    `el $/kg debería variar poco entre espesores, varió ${rKg.dispersion.toFixed(2)}×`);
+  assert.ok(rM2.dispersion > 5,
+    `el $/m² tiene que variar mucho entre espesores, varió ${rM2.dispersion.toFixed(2)}×`);
+  assert.ok(rM2.dispersion > rKg.dispersion * 4,
+    'la diferencia entre las dos bases es el hallazgo: una tarifa plana por kg es mucho más sostenible');
+});
+
+test('el kilo entregado cuesta más que el kilo comprado, por el recorte', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const d = t.filas.find((f) => f.espesor === 2 && !f.error).bandas.simple;
+  assert.ok(d.materialKg > t.material.precioKg,
+    `el material por kg entregado (${d.materialKg.toFixed(0)}) tiene que superar al de compra (${t.material.precioKg})`);
+  // Y la diferencia tiene que explicarse por el aprovechamiento
+  cerca(d.materialKg * (d.aprovechamiento ?? 1), t.material.precioKg, t.material.precioKg * 0.25,
+    'la diferencia entre kilo comprado y kilo entregado es el aprovechamiento');
+});
+
+test('detecta una tarifa por kilo que no cubre el costo', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const barata = evaluarTarifaPlana(t, 3800, 'kg');
+  assert.equal(barata.veredicto, 'todo-perdida',
+    'con la chapa a 2.950 el kilo, cobrar 3.800 no cubre ni el material con su recorte');
+  assert.equal(barata.casosEnPerdida, barata.casos);
+
+  // A $12.000 el kilo ya cierra casi todo, pero todavía no la chapa perforada
+  // gruesa: un kilo de rejilla de 20 mm lleva muchísimo corte por kilo.
+  const casi = evaluarTarifaPlana(t, 12000, 'kg');
+  assert.equal(casi.veredicto, 'parcial');
+  assert.ok(casi.casosEnPerdida > 0 && casi.casosEnPerdida < casi.casos / 4);
+
+  const sana = evaluarTarifaPlana(t, 20000, 'kg');
+  assert.equal(sana.veredicto, 'sana');
+  assert.equal(sana.casosEnPerdida, 0);
+});
+
+test('la sensibilidad al precio de la chapa va en el sentido correcto', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const s = sensibilidadChapa(t, 3800, 'kg', 'simple');
+  assert.ok(s.length >= 4);
+  for (let i = 1; i < s.length; i++) {
+    assert.ok(s[i].precioChapa > s[i - 1].precioChapa, 'la tabla va de más barato a más caro');
+    assert.ok(s[i].utilidadPct < s[i - 1].utilidadPct, 'si la chapa sube, la utilidad baja');
+  }
+  assert.ok(s.some((x) => x.esActual), 'tiene que marcar el precio que está cargado hoy');
+});
+
+test('la sensibilidad al aprovechamiento va en el sentido correcto', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const s = sensibilidadAprovechamiento(t, 3800, 'kg', 'simple');
+  assert.ok(s.length >= 4);
+  for (let i = 1; i < s.length; i++) {
+    assert.ok(s[i].aprovechamiento > s[i - 1].aprovechamiento);
+    assert.ok(s[i].utilidadPct > s[i - 1].utilidadPct,
+      'aprovechar mejor la chapa tiene que mejorar la utilidad');
+    assert.ok(s[i].material < s[i - 1].material, 'y bajar el material por unidad entregada');
+  }
+});
+
+test('el techo de la tarifa funciona en las tres bases', () => {
+  const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  // Por m²: con 90.000 hay techo en chapa fina
+  assert.ok(techoDeTarifa(t, 90000, 'simple', 30, 'm2') != null);
+  // Por kg: con 3.800 no hay techo en ningún espesor
+  assert.equal(techoDeTarifa(t, 3800, 'simple', 30, 'kg'), null,
+    'una tarifa que no cubre el costo no puede tener techo');
+  // Con un valor sano sí
+  assert.ok(techoDeTarifa(t, 12000, 'simple', 30, 'kg') != null);
+});
+
+test('sin material el precio por kg baja', () => {
+  const con = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem, conMaterial: true });
+  const sin = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem, conMaterial: false });
+  const dc = con.filas.find((f) => f.espesor === 2).bandas.media;
+  const ds = sin.filas.find((f) => f.espesor === 2).bandas.media;
+  assert.ok(ds.precioKg < dc.precioKg * 0.5,
+    'si el cliente trae la chapa, el precio por kilo tiene que bajar muchísimo: el material es casi todo');
 });
 
 test('el tarifario no inventa espesores que la máquina no corta', () => {

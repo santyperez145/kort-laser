@@ -1,18 +1,16 @@
 /**
- * Tarifario por m².
+ * Tarifario.
  *
- * Cuando el cliente pregunta por teléfono "¿a cuánto el metro cuadrado?" hace
- * falta un número, y cotizar pieza por pieza no siempre se puede. El problema
- * es que **una tarifa plana para todo es la forma más silenciosa de perder
- * plata**: el costo por m² no depende del m², depende del espesor y de cuánto
- * corte tenga la pieza.
- *
- * Esta vista arma la lista de precios desde el costo real y, además, evalúa la
- * tarifa que se está cobrando hoy para mostrar hasta dónde conviene sostenerla.
+ * Contesta la pregunta del mostrador —"¿a cuánto?"— sin que la respuesta
+ * termine costando plata. Trabaja en las tres bases que se usan de verdad
+ * ($/m², $/kg y $/m de corte) porque cada una se rompe por un lado distinto,
+ * y muestra las dos cosas que hacen falta para no cobrar ni barato ni caro:
+ * el PISO por debajo del cual se pierde, y el precio con el margen que se
+ * quiera.
  */
 
 import { useMemo, useState } from 'react';
-import { Printer, TriangleAlert, Check, Info } from 'lucide-react';
+import { Printer, TriangleAlert, Check, Info, TrendingDown, Scissors, ShoppingCart } from 'lucide-react';
 
 import { Panel, PanelCab, PanelCuerpo, PanelTitulo } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
@@ -22,8 +20,18 @@ import { Insignia } from '@/componentes/ui/insignia';
 import { usarEstado } from '@/lib/estado';
 import { money, num } from '@/lib/formato';
 
-import { generarTarifario, evaluarTarifaPlana, techoDeTarifa, BANDAS } from '@core/tarifario.js';
+import {
+  generarTarifario, evaluarTarifaPlana, techoDeTarifa, rangoRecomendado,
+  sensibilidadChapa, sensibilidadAprovechamiento, BANDAS, BASES,
+} from '@core/tarifario.js';
 import { cotizarItem } from '@core/pricing.js';
+
+/** Tarifa que se está cobrando hoy, por base. Arranca con lo que cobra KORT. */
+const TARIFA_INICIAL = { m2: 90000, kg: 3800, metro: 0 };
+
+const CAMPO_COSTO = { m2: 'costoM2', kg: 'costoKg', metro: 'costoMetro' };
+const CAMPO_PRECIO = { m2: 'precioM2', kg: 'precioKg', metro: 'precioMetro' };
+const CAMPO_MINIMO = { m2: 'minimoM2', kg: 'minimoKg', metro: 'minimoMetro' };
 
 export function VistaTarifario() {
   const config = usarEstado((s) => s.config);
@@ -31,30 +39,38 @@ export function VistaTarifario() {
   const maquinas = usarEstado((s) => s.maquinas);
 
   const [materialId, setMaterialId] = useState('acero-sae1010');
+  const [base, setBase] = useState('kg');
   const [conMaterial, setConMaterial] = useState(true);
-  const [margen, setMargen] = useState(null); // null = el de la config
-  const [tarifaPlana, setTarifaPlana] = useState(90000);
+  const [margen, setMargen] = useState(null);
+  const [tarifas, setTarifas] = useState(TARIFA_INICIAL);
+
+  const tarifaPlana = tarifas[base] || 0;
+  const setTarifa = (v) => setTarifas((t) => ({ ...t, [base]: v }));
 
   const ctx = useMemo(() => ({ materiales, maquinas, config }), [materiales, maquinas, config]);
   const sim = config?.comercial?.simbolo || '$';
+  const baseDef = BASES.find((b) => b.id === base);
 
   const tarifario = useMemo(() => {
     if (!config || !materiales.length) return null;
     try {
-      return generarTarifario(ctx, {
-        materialId,
-        conMaterial,
-        margen: margen ?? undefined,
-        cotizarItem,
-      });
+      return generarTarifario(ctx, { materialId, conMaterial, margen: margen ?? undefined, cotizarItem });
     } catch (e) {
       return { error: e.message };
     }
   }, [ctx, materialId, conMaterial, margen, config, materiales.length]);
 
-  const evaluacion = useMemo(
-    () => (tarifario && !tarifario.error ? evaluarTarifaPlana(tarifario, tarifaPlana) : null),
-    [tarifario, tarifaPlana]
+  const ev = useMemo(
+    () => (tarifario && !tarifario.error && tarifaPlana > 0 ? evaluarTarifaPlana(tarifario, tarifaPlana, base) : null),
+    [tarifario, tarifaPlana, base]
+  );
+  const sensChapa = useMemo(
+    () => (tarifario && !tarifario.error && tarifaPlana > 0 ? sensibilidadChapa(tarifario, tarifaPlana, base, 'simple') : []),
+    [tarifario, tarifaPlana, base]
+  );
+  const sensAprov = useMemo(
+    () => (tarifario && !tarifario.error && tarifaPlana > 0 ? sensibilidadAprovechamiento(tarifario, tarifaPlana, base, 'simple') : []),
+    [tarifario, tarifaPlana, base]
   );
 
   if (!config) return <div className="p-6 text-suave">Cargando…</div>;
@@ -62,15 +78,15 @@ export function VistaTarifario() {
   if (!tarifario) return <div className="p-6 text-suave">Calculando el tarifario…</div>;
 
   const material = materiales.find((m) => m.id === materialId);
-  const filasOk = tarifario.filas.filter((f) => !f.error);
+  const dec = base === 'm2' ? 0 : 0;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Tarifario por m²</h1>
+          <h1 className="text-xl font-semibold">Tarifario</h1>
           <p className="text-sm text-suave">
-            Precios calculados desde tu costo real, por espesor y por cuánto corte tiene la pieza
+            Cuánto cobrar para no regalar ni espantar, calculado desde tu costo real
           </p>
         </div>
         <Boton tono="neutro" onClick={() => window.print()}>
@@ -78,89 +94,162 @@ export function VistaTarifario() {
         </Boton>
       </div>
 
-      {/* Controles */}
+      {/* Base de cobro */}
       <Panel>
-        <PanelCuerpo className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Campo etiqueta="Material">
-            <Selector valor={materialId} alCambiar={setMaterialId}>
-              {materiales.filter((m) => m.activo !== false).map((m) => (
-                <Opcion key={m.id} valor={m.id}>{m.nombre}</Opcion>
-              ))}
-            </Selector>
-          </Campo>
-          <Campo etiqueta="¿Quién pone la chapa?">
-            <Selector valor={conMaterial ? 'kort' : 'cliente'} alCambiar={(v) => setConMaterial(v === 'kort')}>
-              <Opcion valor="kort">La ponés vos (material incluido)</Opcion>
-              <Opcion valor="cliente">La trae el cliente (sólo el proceso)</Opcion>
-            </Selector>
-          </Campo>
-          <Campo etiqueta="Margen sobre costo">
-            <Entrada type="number" min={0} max={300} unidad="%"
-              value={margen ?? config.comercial.margen}
-              onChange={(e) => setMargen(Number(e.target.value) || 0)} />
-          </Campo>
-          <Campo etiqueta="Tu tarifa plana actual" ayuda="Para comparar contra el costo real">
-            <Entrada type="number" min={0} step={1000} unidad={`${sim}/m²`}
-              value={tarifaPlana}
-              onChange={(e) => setTarifaPlana(Number(e.target.value) || 0)} />
-          </Campo>
+        <PanelCab><PanelTitulo>¿Cómo cobrás?</PanelTitulo></PanelCab>
+        <PanelCuerpo className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {BASES.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => setBase(b.id)}
+                className={`rounded-lg border p-3 text-left transition ${
+                  base === b.id ? 'border-corte-500 bg-corte-500/8 shadow-sm' : 'border-borde hover:border-borde-fuerte'
+                }`}
+              >
+                <div className="text-sm font-semibold">{b.nombre}</div>
+                <div className="font-mono text-[11px] text-tenue">{b.unidad}</div>
+                <div className="mt-1 text-[11px] leading-snug text-suave">{b.ayuda}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Campo etiqueta="Material">
+              <Selector valor={materialId} alCambiar={setMaterialId}>
+                {materiales.filter((m) => m.activo !== false).map((m) => (
+                  <Opcion key={m.id} valor={m.id}>{m.nombre}</Opcion>
+                ))}
+              </Selector>
+            </Campo>
+            <Campo etiqueta="¿Quién pone la chapa?">
+              <Selector valor={conMaterial ? 'kort' : 'cliente'} alCambiar={(v) => setConMaterial(v === 'kort')}>
+                <Opcion valor="kort">La ponés vos</Opcion>
+                <Opcion valor="cliente">La trae el cliente</Opcion>
+              </Selector>
+            </Campo>
+            <Campo etiqueta="Margen objetivo">
+              <Entrada type="number" min={0} max={300} unidad="%"
+                value={margen ?? config.comercial.margen}
+                onChange={(e) => setMargen(Number(e.target.value) || 0)} />
+            </Campo>
+            <Campo etiqueta="Lo que cobrás hoy" ayuda="Para compararlo contra el costo">
+              <Entrada type="number" min={0} unidad={baseDef.unidad.replace('$', sim)}
+                value={tarifaPlana} onChange={(e) => setTarifa(Number(e.target.value) || 0)} />
+            </Campo>
+          </div>
         </PanelCuerpo>
       </Panel>
 
-      {/* Semáforo de la tarifa plana */}
-      {evaluacion && (
+      {/* Veredicto */}
+      {ev && <Veredicto ev={ev} sim={sim} baseDef={baseDef} tarifario={tarifario} />}
+
+      {/* Cuánto cobrar */}
+      <Panel>
+        <PanelCab>
+          <PanelTitulo>Cuánto cobrar, por nivel de detalle</PanelTitulo>
+          <span className="text-[11px] text-suave">
+            margen {tarifario.margen} % · {conMaterial ? 'material incluido' : 'sólo proceso'} · sin IVA
+          </span>
+        </PanelCab>
+        <PanelCuerpo className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {BANDAS.map((b) => {
+            const r = rangoRecomendado(tarifario, base, b.id);
+            if (!r) return null;
+            const disperso = r.dispersion > 1.6;
+            return (
+              <div key={b.id} className="rounded-lg border border-borde p-3">
+                <div className="text-[10.5px] font-bold uppercase tracking-wide text-tenue">{b.nombre}</div>
+                <div className="mt-1 text-xl font-bold tabular-nums">
+                  {money(r.maximo, sim, dec)}
+                </div>
+                <div className="text-[11px] text-suave">
+                  piso <span className="font-mono">{money(r.minimo, sim, dec)}</span> · por debajo se pierde
+                </div>
+                <div className="mt-2 text-[11px] leading-snug text-tenue">{b.descripcion}</div>
+                {disperso && (
+                  <div className="mt-2 flex items-start gap-1 text-[11px] text-alerta-500">
+                    <TriangleAlert className="mt-px size-3 shrink-0" />
+                    <span>Varía {num(r.dispersion, 1)}× entre espesores: acá un precio único no sirve, usá la tabla.</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </PanelCuerpo>
+      </Panel>
+
+      {/* Semáforo */}
+      {ev && (
         <Panel>
           <PanelCab>
-            <PanelTitulo>Tu tarifa de {money(tarifaPlana, sim, 0)}/m² contra el costo real</PanelTitulo>
-            {evaluacion.primerEspesorAPerdida
-              ? <Insignia tono="rojo">A pérdida desde {evaluacion.primerEspesorAPerdida.espesor} mm</Insignia>
-              : <Insignia tono="verde">Rentable en todos los espesores</Insignia>}
+            <PanelTitulo>
+              Tu tarifa de {money(tarifaPlana, sim, dec)} {baseDef.unidad.replace('$', '')} contra el costo real
+            </PanelTitulo>
+            <span className="text-[11px] text-suave">utilidad que te queda, sobre el precio</span>
           </PanelCab>
           <PanelCuerpo sinPad>
-            <TablaSemaforo evaluacion={evaluacion} />
+            <TablaSemaforo ev={ev} />
           </PanelCuerpo>
         </Panel>
       )}
 
-      {/* Techos */}
-      {evaluacion && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {BANDAS.map((b) => {
-            const techo = techoDeTarifa(tarifario, tarifaPlana, b.id, 30);
-            return (
-              <Panel key={b.id}>
-                <PanelCuerpo className="space-y-1">
-                  <div className="text-[10.5px] font-bold uppercase tracking-wide text-tenue">{b.nombre}</div>
-                  <div className={`text-2xl font-bold tabular-nums ${techo ? '' : 'text-peligro-500'}`}>
-                    {techo ? `hasta ${techo} mm` : 'nunca'}
-                  </div>
-                  <div className="text-[11px] text-suave">
-                    {techo
-                      ? `Con ${money(tarifaPlana, sim, 0)}/m² te queda al menos 30 % de utilidad hasta ese espesor.`
-                      : `A ${money(tarifaPlana, sim, 0)}/m² esta clase de trabajo no llega al 30 % en ningún espesor.`}
-                  </div>
-                </PanelCuerpo>
-              </Panel>
-            );
-          })}
+      {/* Las dos palancas */}
+      {ev && (sensChapa.length > 0 || sensAprov.length > 0) && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Panel>
+            <PanelCab>
+              <PanelTitulo>¿Comprás caro?</PanelTitulo>
+              <ShoppingCart className="size-4 text-tenue" />
+            </PanelCab>
+            <PanelCuerpo sinPad>
+              <TablaSensibilidad
+                filas={sensChapa} sim={sim} dec={dec}
+                etiqueta={(s) => money(s.precioChapa, sim, 0)}
+                titulo="Chapa $/kg"
+              />
+              <p className="border-t border-borde px-3 py-2 text-[11px] text-suave">
+                Si conseguís la chapa más barata, la misma tarifa empieza a cerrar. Es la mitad de la
+                pregunta que no depende del precio de venta.
+              </p>
+            </PanelCuerpo>
+          </Panel>
+
+          <Panel>
+            <PanelCab>
+              <PanelTitulo>¿O tirás mucho recorte?</PanelTitulo>
+              <Scissors className="size-4 text-tenue" />
+            </PanelCab>
+            <PanelCuerpo sinPad>
+              <TablaSensibilidad
+                filas={sensAprov} sim={sim} dec={dec}
+                etiqueta={(s) => `${(s.aprovechamiento * 100).toFixed(0)} %`}
+                titulo="Aprovechamiento"
+              />
+              <p className="border-t border-borde px-3 py-2 text-[11px] text-suave">
+                <strong>Esta es la palanca que sí controlás.</strong> El recorte lo pagás vos: cobrando por
+                kilo, subir el aprovechamiento es exactamente lo mismo que comprar más barato. Agrupá
+                pedidos del mismo espesor y usá los retazos.
+              </p>
+            </PanelCuerpo>
+          </Panel>
         </div>
       )}
 
       {/* Lista de precios */}
       <Panel>
         <PanelCab>
-          <PanelTitulo>Lista de precios sugerida</PanelTitulo>
+          <PanelTitulo>Lista de precios sugerida · {baseDef.nombre.toLowerCase()}</PanelTitulo>
           <span className="text-[11px] text-suave">
-            {material?.nombre} · chapa a {money(material?.precioKg, sim, 0)}/kg · margen {tarifario.margen} % ·
-            {conMaterial ? ' material incluido' : ' sin material'} · sin IVA
+            {material?.nombre} · chapa a {money(material?.precioKg, sim, 0)}/kg
           </span>
         </PanelCab>
         <PanelCuerpo sinPad>
-          <TablaPrecios tarifario={tarifario} sim={sim} />
+          <TablaPrecios tarifario={tarifario} sim={sim} base={base} dec={dec} />
         </PanelCuerpo>
       </Panel>
 
-      {/* Qué significa cada banda */}
+      {/* Guía */}
       <Panel>
         <PanelCab><PanelTitulo>Cómo clasificar un trabajo</PanelTitulo></PanelCab>
         <PanelCuerpo className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -176,32 +265,171 @@ export function VistaTarifario() {
       </Panel>
 
       <Aviso nivel="aviso">
-        <strong>Esta tabla vale lo que valga el precio de tu chapa.</strong> Está calculada con{' '}
-        {money(material?.precioKg, sim, 0)}/kg. Si pagás otra cosa, actualizalo en Materiales antes de usarla
-        para vender: en chapa fina el material es más del 80 % del costo, así que un error ahí se traslada
-        entero al precio.
+        <strong>Todo esto vale lo que valga el precio de tu chapa.</strong> Está calculado con{' '}
+        {money(material?.precioKg, sim, 0)}/kg, que es un valor de referencia, no tu factura. Cargá el
+        tuyo en Materiales antes de decidir un precio: en chapa fina el material es más del 80 % del
+        costo, así que un error ahí se traslada entero.
       </Aviso>
-
-      {filasOk.length < tarifario.filas.length && (
-        <Aviso nivel="info">
-          Algunos espesores no aparecen porque tu máquina de {tarifario.potenciaKW} kW no los corta con calidad.
-          Es a propósito: es mejor no cotizar un trabajo que no se puede entregar.
-        </Aviso>
-      )}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
 
-function TablaPrecios({ tarifario, sim }) {
+const TEXTO_VEREDICTO = {
+  'todo-perdida': {
+    tono: 'error',
+    titulo: 'Con esta tarifa perdés plata en todos los casos',
+    detalle: 'No hay espesor ni tipo de trabajo donde cierre. Hay que subirla, comprar más barato o aprovechar mejor la chapa.',
+  },
+  'mayoria-perdida': {
+    tono: 'error',
+    titulo: 'Con esta tarifa perdés plata en la mayoría de los trabajos',
+    detalle: 'Sólo cierra en algunos casos puntuales. Como tarifa general no sirve.',
+  },
+  parcial: {
+    tono: 'aviso',
+    titulo: 'La tarifa cierra en algunos trabajos y en otros no',
+    detalle: 'Fijate en la tabla dónde se pone en rojo: ahí hay que cotizar aparte o subir el precio.',
+  },
+  sana: {
+    tono: 'info',
+    titulo: 'La tarifa cubre el costo en todos los casos',
+    detalle: 'Podés sostenerla. Si en algún caso el margen queda muy alto, ahí tenés lugar para competir.',
+  },
+};
+
+function Veredicto({ ev, sim, baseDef, tarifario }) {
+  const v = TEXTO_VEREDICTO[ev.veredicto];
+  const u = baseDef.unidad.replace('$', '');
+  return (
+    <Aviso nivel={v.tono}>
+      <div className="space-y-1">
+        <div className="text-[13px] font-semibold">{v.titulo}</div>
+        <div>{v.detalle}</div>
+        <div className="flex flex-wrap gap-x-5 gap-y-1 pt-1 font-mono text-[11.5px]">
+          <span>{ev.casosEnPerdida} de {ev.casos} casos en pérdida</span>
+          <span>
+            peor: {ev.peor.espesor} mm {ev.peor.banda} ({num(ev.peor.utilidadPct, 0)} %)
+          </span>
+          <span>
+            mejor: {ev.mejor.espesor} mm {ev.mejor.banda} ({num(ev.mejor.utilidadPct, 0)} %)
+          </span>
+        </div>
+        {ev.veredicto !== 'sana' && (
+          <div className="pt-1 text-[12px]">
+            Para dejar {tarifario.margen} % en trabajos simples habría que cobrar{' '}
+            <strong className="font-mono">
+              {money(rangoRecomendado(tarifario, ev.base, 'simple')?.maximo ?? 0, sim, 0)} {u}
+            </strong>.
+          </div>
+        )}
+      </div>
+    </Aviso>
+  );
+}
+
+const TONO = {
+  sano: 'text-chapa-600 dark:text-chapa-300',
+  ajustado: 'text-alerta-500',
+  perdida: 'text-peligro-500 font-semibold',
+};
+const FONDO = {
+  sano: 'bg-chapa-500/8',
+  ajustado: 'bg-alerta-500/10',
+  perdida: 'bg-peligro-500/12',
+};
+const ICONO = { sano: Check, ajustado: TriangleAlert, perdida: TrendingDown };
+
+function Celda({ estado, children }) {
+  const I = ICONO[estado];
+  return (
+    <td className={`px-3 py-2 text-right tabular-nums ${FONDO[estado]}`}>
+      <span className={`inline-flex items-center gap-1 font-mono ${TONO[estado]}`}>
+        <I className="size-3" />
+        {children}
+      </span>
+    </td>
+  );
+}
+
+function TablaSemaforo({ ev }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-[13px]">
         <thead>
           <tr className="border-b border-borde">
             <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wide text-tenue">Espesor</th>
-            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-tenue">kg/m²</th>
+            {BANDAS.map((b) => (
+              <th key={b.id} className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-tenue">
+                {b.nombre}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ev.filas.filter((f) => !f.error).map((f) => (
+            <tr key={f.espesor} className="border-b border-borde/60 last:border-0">
+              <td className="px-3 py-2 font-semibold tabular-nums">{f.espesor} mm</td>
+              {BANDAS.map((b) => {
+                const d = f.bandas[b.id];
+                if (!d) return <td key={b.id} />;
+                return <Celda key={b.id} estado={d.estado}>{num(d.utilidadPct, 0)} %</Celda>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex flex-wrap items-center gap-4 border-t border-borde px-3 py-2 text-[11px] text-suave">
+        <span className="inline-flex items-center gap-1"><Check className="size-3 text-chapa-500" /> Sano (≥ 25 %)</span>
+        <span className="inline-flex items-center gap-1"><TriangleAlert className="size-3 text-alerta-500" /> Ajustado</span>
+        <span className="inline-flex items-center gap-1"><TrendingDown className="size-3 text-peligro-500" /> A pérdida</span>
+        <span className="ml-auto inline-flex items-center gap-1"><Info className="size-3" /> Utilidad sobre el precio, después del costo real</span>
+      </div>
+    </div>
+  );
+}
+
+function TablaSensibilidad({ filas, sim, dec, etiqueta, titulo }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[13px]">
+        <thead>
+          <tr className="border-b border-borde">
+            <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wide text-tenue">{titulo}</th>
+            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-tenue">Costo</th>
+            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-tenue">Utilidad</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((s, i) => (
+            <tr key={i} className={`border-b border-borde/60 last:border-0 ${s.esActual ? 'bg-acero-500/8' : ''}`}>
+              <td className="px-3 py-2 font-mono tabular-nums">
+                {etiqueta(s)}
+                {s.esActual && <span className="ml-2 text-[10px] font-sans text-tenue">hoy</span>}
+              </td>
+              <td className="px-3 py-2 text-right font-mono tabular-nums text-suave">{money(s.costo, sim, dec)}</td>
+              <Celda estado={s.estado}>{num(s.utilidadPct, 0)} %</Celda>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TablaPrecios({ tarifario, sim, base, dec }) {
+  const campoPrecio = CAMPO_PRECIO[base];
+  const campoMinimo = CAMPO_MINIMO[base];
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[13px]">
+        <thead>
+          <tr className="border-b border-borde">
+            <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wide text-tenue">Espesor</th>
+            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-tenue">
+              {base === 'kg' ? 'm²/kg' : 'kg/m²'}
+            </th>
             {BANDAS.map((b) => (
               <th key={b.id} className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-tenue">
                 {b.nombre}
@@ -214,7 +442,7 @@ function TablaPrecios({ tarifario, sim }) {
             <tr key={f.espesor} className="border-b border-borde/60 last:border-0 hover:bg-panel-alto">
               <td className="px-3 py-2 font-semibold tabular-nums">{f.espesor} mm</td>
               <td className="px-3 py-2 text-right font-mono text-[12px] text-suave tabular-nums">
-                {num(f.pesoM2, 1)}
+                {base === 'kg' ? num(f.m2PorKg, 3) : num(f.kgPorM2, 1)}
               </td>
               {f.error ? (
                 <td colSpan={BANDAS.length} className="px-3 py-2 text-[12px] text-tenue">
@@ -222,8 +450,11 @@ function TablaPrecios({ tarifario, sim }) {
                 </td>
               ) : (
                 BANDAS.map((b) => (
-                  <td key={b.id} className="px-3 py-2 text-right font-mono tabular-nums">
-                    {money(f.bandas[b.id].precioM2, sim, 0)}
+                  <td key={b.id} className="px-3 py-2 text-right tabular-nums">
+                    <div className="font-mono font-semibold">{money(f.bandas[b.id][campoPrecio], sim, dec)}</div>
+                    <div className="font-mono text-[10.5px] text-tenue">
+                      piso {money(f.bandas[b.id][campoMinimo], sim, dec)}
+                    </div>
                   </td>
                 ))
               )}
@@ -231,63 +462,6 @@ function TablaPrecios({ tarifario, sim }) {
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-const TONO_ESTADO = {
-  sano: 'text-chapa-600 dark:text-chapa-300',
-  ajustado: 'text-alerta-500',
-  perdida: 'text-peligro-500 font-semibold',
-};
-const FONDO_ESTADO = {
-  sano: 'bg-chapa-500/8',
-  ajustado: 'bg-alerta-500/10',
-  perdida: 'bg-peligro-500/12',
-};
-const ICONO_ESTADO = { sano: Check, ajustado: TriangleAlert, perdida: TriangleAlert };
-
-function TablaSemaforo({ evaluacion }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-borde">
-            <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wide text-tenue">Espesor</th>
-            {BANDAS.map((b) => (
-              <th key={b.id} className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-tenue">
-                {b.nombre}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {evaluacion.filas.filter((f) => !f.error).map((f) => (
-            <tr key={f.espesor} className="border-b border-borde/60 last:border-0">
-              <td className="px-3 py-2 font-semibold tabular-nums">{f.espesor} mm</td>
-              {BANDAS.map((b) => {
-                const d = f.bandas[b.id];
-                if (!d) return <td key={b.id} />;
-                const Icono = ICONO_ESTADO[d.estado];
-                return (
-                  <td key={b.id} className={`px-3 py-2 text-right tabular-nums ${FONDO_ESTADO[d.estado]}`}>
-                    <span className={`inline-flex items-center gap-1 font-mono ${TONO_ESTADO[d.estado]}`}>
-                      <Icono className="size-3" />
-                      {num(d.utilidadPct, 0)} %
-                    </span>
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="flex flex-wrap items-center gap-4 border-t border-borde px-3 py-2 text-[11px] text-suave">
-        <span className="inline-flex items-center gap-1"><Check className="size-3 text-chapa-500" /> Margen sano (≥ 25 %)</span>
-        <span className="inline-flex items-center gap-1"><TriangleAlert className="size-3 text-alerta-500" /> Ajustado</span>
-        <span className="inline-flex items-center gap-1"><TriangleAlert className="size-3 text-peligro-500" /> Se trabaja a pérdida</span>
-        <span className="inline-flex items-center gap-1 ml-auto"><Info className="size-3" /> La utilidad es sobre el precio, después del costo real</span>
-      </div>
     </div>
   );
 }

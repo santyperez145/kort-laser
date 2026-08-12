@@ -26,35 +26,58 @@ tiene sentido agregarle funciones.
 
 ---
 
-## Lo primero: tu tarifa plana
+## Lo primero: tus precios
 
-Hoy cobrás **$90.000/m² en acero de 1,2 mm poniendo vos la chapa**. Medido
-contra el motor de costos, esa tarifa:
+Hoy se cobra de dos formas y las dos están medidas contra el costo real:
 
-| Espesor | Simple | Media | Compleja | Perforada |
-|---|---|---|---|---|
-| 0,9 mm | ✓ 68 % | ✓ 62 % | ✓ 52 % | ✓ 29 % |
-| **1,2 mm** | **✓ 57 %** | **✓ 52 %** | ✓ 40 % | ⚠ 16 % |
-| 1,5 mm | ✓ 47 % | ✓ 41 % | ✓ 28 % | ⚠ 0 % |
-| 2 mm | ✓ 30 % | ⚠ 22 % | ⚠ 4 % | ⛔ −32 % |
-| 3 mm | ⛔ −6 % | ⛔ −20 % | ⛔ −51 % | ⛔ −118 % |
-| 6 mm | ⛔ −108 % | ⛔ −128 % | ⛔ −171 % | ⛔ −262 % |
+### Por kilo — $3.800/kg de chapa lisa cortada ⛔
 
-Dos conclusiones, las dos plata:
+**No cubre el costo en ningún espesor.** Los 56 casos dan negativo, del −6 % en
+6 mm simple al −326 % en chapa perforada gruesa.
 
-**1. En 1,2 mm te sobra margen.** Con 52 % de utilidad podés bajar a
-$65.000-70.000/m² y seguir arriba del 35 %. Eso es precio para ganar trabajos
-que hoy perdés, no para regalar.
+La razón no es el corte, es el recorte: con 77 % de aprovechamiento, la chapa
+de $2.950/kg se convierte en **$3.869 por kilo entregado antes de encender la
+máquina**. Se está vendiendo por debajo del material.
 
-**2. La tarifa plana se rompe con el espesor.** El material escala con el
-espesor y el precio plano no. De 3 mm para arriba cada trabajo que tomes a
-$90.000/m² lo hacés a pérdida, y cuanto más grande, peor.
+| Para trabajos | Piso | Sugerido (45 %) |
+|---|---|---|
+| Simples (chapa lisa cortada) | $4.500/kg | **$6.500/kg** |
+| Medios | $5.000/kg | $8.500/kg |
+| Complejos | $6.500/kg | $12.500/kg |
+| Perforados | $10.500/kg | $24.500/kg |
 
-**Qué hacer:** usar la tabla de *Tarifario* como lista de precios por espesor.
-Sale del costo real y se actualiza sola cuando cambiás el precio de la chapa.
+**La buena noticia: cobrar por kilo es la mejor base.** Varía sólo 1,08× entre
+0,9 y 20 mm, contra 20× del $/m². Una tarifa única por kilo es sostenible; una
+por m² no lo es.
 
-> ⚠️ Todo esto depende de que tu chapa cueste ~$2.950/kg. Si pagás más, la
-> tabla cambia: cargá tu precio real en Materiales antes de usarla para vender.
+### Por m² — $90.000/m² en 1,2 mm ⚠
+
+Cierra bien en chapa fina (52 % en 1,2 mm) y **se rompe con el espesor**: a
+partir de 3 mm se trabaja a pérdida. Techo real: 1,5 mm en trabajos simples,
+1,2 mm en complejos.
+
+### Antes de mover un precio
+
+Todo esto depende de que la chapa cueste **$2.950/kg**, que es un valor de
+referencia y no una factura. La vista *Tarifario* tiene las dos palancas:
+
+| Si la chapa sale | Utilidad con $3.800/kg |
+|---|---|
+| $2.050/kg | ⚠ 20 % |
+| $2.500/kg | ⚠ 5 % |
+| **$2.950/kg** | **⛔ −11 %** |
+| $3.400/kg | ⛔ −26 % |
+
+| Con aprovechamiento | Utilidad con $3.800/kg |
+|---|---|
+| 70 % | ⛔ −20 % |
+| **78 %** | **⛔ −9 %** |
+| 90 % | ⚠ 5 % |
+| 95 % | ⚠ 9 % |
+
+Ni comprando muy barato ni aprovechando al 95 % los $3.800 llegan a un margen
+sano. **Cargá tu precio real de chapa en Materiales y volvé a mirar la tabla
+antes de decidir.**
 
 ---
 
