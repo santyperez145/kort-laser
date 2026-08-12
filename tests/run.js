@@ -26,7 +26,7 @@ import {
   evaluarGeneradorN2, DEFAULT_ESTRUCTURA, TARIFAS_EDELAR, UOM_RAMA17, CARGAS_LABORALES,
 } from '../src/core/costos.js';
 import { calcularPliegue, calcularDesarrollo, matrizRecomendada, validarPlegado, tiempoPlegado } from '../src/core/bending.js';
-import { nest, piezasPorChapa, compararMetodos } from '../src/core/nesting.js';
+import { nest, piezasPorChapa, compararMetodos, rellenoSinCosto } from '../src/core/nesting.js';
 import { generarDXF } from '../src/core/dxf-write.js';
 import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
@@ -676,6 +676,45 @@ test('un ítem solo se cotiza igual que antes del cambio', () => {
   cerca(enPresupuesto.precio.neto, solo.precio.neto, 1e-9);
   assert.equal(enPresupuesto.nesting.chapas, solo.nesting.chapas);
   assert.ok(!enPresupuesto.nesting.compartido);
+});
+
+test('dice cuántas piezas más entran en la chapa sin costo de material', () => {
+  const piezas = [
+    { id: 'a', nombre: 'A', w: 600, h: 400, cantidad: 4, shape: makeShape(rect(0, 0, 600, 400)) },
+    { id: 'b', nombre: 'B', w: 400, h: 250, cantidad: 4, shape: makeShape(rect(0, 0, 400, 250)) },
+  ];
+  const chapa = { w: 2440, h: 1220 };
+  const opts = { separacion: DEFAULT_CONFIG.produccion.separacionPiezas, margen: DEFAULT_CONFIG.produccion.margenChapa };
+  const base = nest(piezas, chapa, opts);
+  const relleno = rellenoSinCosto(piezas, chapa, opts);
+
+  assert.ok(relleno.length > 0, 'en una chapa a medio usar tiene que entrar algo más');
+  // La pieza chica tiene que admitir al menos tantas extra como la grande
+  const a = relleno.find((x) => x.id === 'a');
+  const b = relleno.find((x) => x.id === 'b');
+  if (a && b) assert.ok(b.extra >= a.extra, 'deberían entrar más piezas chicas que grandes');
+
+  // Y lo que promete tiene que ser verdad: agregar esas piezas no suma chapa
+  for (const s of relleno) {
+    const con = nest(
+      piezas.map((p) => (p.id === s.id ? { ...p, cantidad: p.cantidad + s.extra } : p)),
+      chapa,
+      opts
+    );
+    assert.equal(con.cantidadChapas, base.cantidadChapas, `${s.nombre}: +${s.extra} no debe agregar chapa`);
+  }
+});
+
+test('si la chapa ya está llena no promete piezas extra', () => {
+  const piezas = [{ id: 'a', nombre: 'A', w: 1200, h: 600, cantidad: 6, shape: makeShape(rect(0, 0, 1200, 600)) }];
+  const chapa = { w: 2440, h: 1220 };
+  const opts = { separacion: 5, margen: 10 };
+  const relleno = rellenoSinCosto(piezas, chapa, opts);
+  const base = nest(piezas, chapa, opts);
+  for (const s of relleno) {
+    const con = nest([{ ...piezas[0], cantidad: 6 + s.extra }], chapa, opts);
+    assert.equal(con.cantidadChapas, base.cantidadChapas, 'no puede prometer lo que no entra');
+  }
 });
 
 test('una pieza que no entra en la chapa no rompe el grupo', () => {

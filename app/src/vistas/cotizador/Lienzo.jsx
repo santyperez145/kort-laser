@@ -6,11 +6,12 @@
  * ala más corta que el mínimo de la matriz, un espesor fuera de tabla.
  */
 
-import { useMemo, useState } from 'react';
-import { Ruler, Box, Grid3x3, Download, Route, Frame, Grid2x2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Ruler, Box, Grid3x3, Download, Route, Frame, Grid2x2, Gift, Loader2 } from 'lucide-react';
 
 import { usarCotizador } from './contexto';
 import { descargarDXFItem, descargarDXFNesting } from './acciones';
+import { rellenoSinCosto } from '@core/nesting.js';
 import { Visor2D } from '@/componentes/visores/Visor2D';
 import { Visor3D } from '@/componentes/visores/Visor3D';
 import { VisorNesting } from '@/componentes/visores/VisorNesting';
@@ -24,17 +25,26 @@ import { num, pct } from '@/lib/formato';
 
 import { construirMesh } from '@core/mesh3d.js';
 import { radioInterno, matrizRecomendada, validarPlegado } from '@core/bending.js';
+import { shapeBBox } from '@core/geometry.js';
 
 const ALTO = 400;
 
 export function Lienzo() {
-  const { item, resuelto, r } = usarCotizador();
+  const { doc, item, resuelto, resueltos, r } = usarCotizador();
   const materiales = usarEstado((s) => s.materiales);
+  const config = usarEstado((s) => s.config);
   const laser = usarEstado((s) => s.laser());
   const plegadora = usarEstado((s) => s.plegadora());
 
   const [pestania, setPestania] = useState('2d');
   const [ops, setOps] = useState({ grilla: true, cotas: true, recorrido: false });
+  const [relleno, setRelleno] = useState(null);
+  const [calculandoRelleno, setCalculandoRelleno] = useState(false);
+
+  // La sugerencia deja de valer apenas cambia el lote: se borra sola.
+  useEffect(() => {
+    setRelleno(null);
+  }, [r?.nesting?.chapasGrupo, r?.nesting?.aprovechamiento, doc.items.length]);
 
   const material = materiales.find((m) => m.id === item?.materialId) || materiales[0];
 
@@ -82,6 +92,53 @@ export function Lienzo() {
     return out;
   }, [item, resuelto, r, material, plegadora, laser]);
 
+  /**
+   * "¿Qué más entra en esta chapa sin que aumente el material?"
+   *
+   * Se calcula a pedido y no con cada tecla: cada tanteo es un nesting
+   * completo, y en el camino del precio dejaría la pantalla pegajosa.
+   */
+  const calcularRelleno = () => {
+    if (!r?.nesting || r.nesting.error) return;
+    setCalculandoRelleno(true);
+    // Un cuadro para que el botón alcance a pintarse antes de bloquear el hilo
+    setTimeout(() => {
+      try {
+        const prod = config.produccion;
+        const opts = {
+          separacion: prod.separacionPiezas,
+          margen: prod.margenChapa,
+          formaReal: prod.nestingFormaReal !== false,
+        };
+        // Los ids del layout son 'i' + índice del ítem: de ahí sale quién está
+        // en el grupo sin tener que volver a agruparlos acá.
+        const indices = r.nesting.compartido
+          ? [...new Set(r.nesting.layout.flatMap((ch) => ch.piezas.map((p) => Number(String(p.id).slice(1)))))]
+          : [doc.items.indexOf(item)];
+
+        const piezas = indices
+          .filter((i) => i >= 0 && resueltos[i]?.shape)
+          .map((i) => {
+            const b = shapeBBox(resueltos[i].shape);
+            return {
+              id: 'i' + i,
+              nombre: doc.items[i].nombre || 'Pieza',
+              w: b.w,
+              h: b.h,
+              cantidad: Math.max(1, Math.round(doc.items[i].cantidad || 1)),
+              shape: resueltos[i].shape,
+            };
+          });
+
+        setRelleno(piezas.length ? rellenoSinCosto(piezas, r.nesting.chapa, opts) : []);
+      } catch {
+        setRelleno([]);
+      } finally {
+        setCalculandoRelleno(false);
+      }
+    }, 30);
+  };
+
   if (!item) {
     return (
       <Panel>
@@ -102,17 +159,25 @@ export function Lienzo() {
         <Pestanias value={pestania} onValueChange={setPestania}>
           <PanelCab
             acciones={
-              <Boton
-                tam="sm"
-                onClick={() =>
-                  pestania === 'nest'
-                    ? descargarDXFNesting(item, resuelto, r)
-                    : descargarDXFItem(item, resuelto)
-                }
-              >
-                <Download />
-                {pestania === 'nest' ? 'DXF de chapa' : 'DXF'}
-              </Boton>
+              <>
+                {pestania === 'nest' && r?.nesting && !r.nesting.error ? (
+                  <Boton tam="sm" onClick={calcularRelleno} disabled={calculandoRelleno}>
+                    {calculandoRelleno ? <Loader2 className="animate-spin" /> : <Gift />}
+                    ¿Qué más entra?
+                  </Boton>
+                ) : null}
+                <Boton
+                  tam="sm"
+                  onClick={() =>
+                    pestania === 'nest'
+                      ? descargarDXFNesting(item, resuelto, r)
+                      : descargarDXFItem(item, resuelto)
+                  }
+                >
+                  <Download />
+                  {pestania === 'nest' ? 'DXF de chapa' : 'DXF'}
+                </Boton>
+              </>
             }
           >
             <ListaPestanias>
@@ -192,6 +257,34 @@ export function Lienzo() {
           </PanelCuerpo>
         </Pestanias>
       </Panel>
+
+      {/* El material de esa chapa ya está pagado: lo que entre de más sólo
+          cuesta tiempo de máquina y gas. Es la oferta con mejor margen que
+          puede hacer el taller. */}
+      {relleno ? (
+        <Aviso nivel={relleno.length ? 'info' : 'aviso'}>
+          {relleno.length ? (
+            <>
+              <strong>En esta chapa todavía entra más, sin pagar más material:</strong>
+              <ul className="mt-1.5 space-y-0.5">
+                {relleno.map((s) => (
+                  <li key={s.id} className="tabular">
+                    · <strong>{s.extra}</strong> unidad{s.extra === 1 ? '' : 'es'} más de{' '}
+                    {s.nombre}
+                    {s.tope ? ' o más' : ''}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 opacity-80">
+                Sólo suman tiempo de máquina y gas. Sirve para ofrecer repuestos en la misma
+                entrega o para hacer stock.
+              </p>
+            </>
+          ) : (
+            'La chapa ya está aprovechada: no entra ninguna pieza más sin comprar otra.'
+          )}
+        </Aviso>
+      ) : null}
 
       {avisos.length ? (
         <div className="space-y-2">

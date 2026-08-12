@@ -459,6 +459,61 @@ export function piezasExtraSinCosto(items, chapa, opts = {}) {
   return 300;
 }
 
+/**
+ * Lo mismo pero para un lote de varias piezas distintas: cuántas unidades más
+ * de CADA una entran sin que haya que comprar otra chapa.
+ *
+ * Es el número que más plata deja: el material de esa chapa ya está pagado, así
+ * que esas piezas extra sólo cuestan tiempo de máquina y gas. Sirve para
+ * ofrecerle repuestos al cliente en la misma entrega, o para hacer stock.
+ *
+ * ⚠️ **No va en el camino del cálculo del precio.** Cada tanteo es un nesting
+ * completo, y el cotizador recalcula con cada tecla: metido ahí abajo dejaría
+ * la pantalla pegajosa. Se llama a pedido, desde el visor de nesting.
+ *
+ * La búsqueda es por duplicación y después binaria (≈2·log n tanteos por ítem
+ * en vez de n): probar de a uno hasta encontrar el tope costaba cientos de
+ * nestings en lotes de piezas chicas.
+ */
+export function rellenoSinCosto(items, chapa, opts = {}) {
+  const tope = opts.maxExtra ?? 500;
+  const base = nest(items, chapa, opts);
+  if (!base.cantidadChapas || base.noEntran?.length) return [];
+
+  const entra = (k, extra) => {
+    const prueba = items.map((it, i) =>
+      i === k ? { ...it, cantidad: (it.cantidad || 1) + extra } : it
+    );
+    const r = nest(prueba, chapa, opts);
+    return r.cantidadChapas <= base.cantidadChapas && !r.noEntran?.length;
+  };
+
+  const out = [];
+  for (let k = 0; k < items.length; k++) {
+    if (!entra(k, 1)) continue;
+
+    // Duplicar hasta pasarse, para acotar el rango
+    let bajo = 1;
+    let alto = 2;
+    while (alto <= tope && entra(k, alto)) {
+      bajo = alto;
+      alto *= 2;
+    }
+    if (alto > tope) {
+      out.push({ id: items[k].id, nombre: items[k].nombre, extra: bajo, tope: true });
+      continue;
+    }
+    // Binaria entre el último que entró y el primero que no
+    while (alto - bajo > 1) {
+      const medio = Math.floor((bajo + alto) / 2);
+      if (entra(k, medio)) bajo = medio;
+      else alto = medio;
+    }
+    out.push({ id: items[k].id, nombre: items[k].nombre, extra: bajo, tope: false });
+  }
+  return out.sort((a, b) => b.extra - a.extra);
+}
+
 /** Cantidad máxima de piezas por chapa. */
 export function piezasPorChapa(w, h, chapa, opts = {}) {
   const r = nest([{ id: 'x', w, h, cantidad: 400, ...opts.item }], chapa, { ...opts, maxChapas: 1 });

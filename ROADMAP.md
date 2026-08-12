@@ -55,8 +55,18 @@ Lo que además se arregló y no era de plata: el **número de chapas** ahora sir
 para comprar material, y el **aprovechamiento** dejó de estar subestimado, que
 es el número que dice si conviene ofrecerle más piezas al cliente.
 
-Cubierto por 10 tests en `tests/run.js` → "Nesting por presupuesto", incluyendo
+Cubierto por 12 tests en `tests/run.js` → "Nesting por presupuesto", incluyendo
 que un ítem solo se cotiza exactamente igual que antes del cambio.
+
+**De yapa: "¿Qué más entra?"** (`rellenoSinCosto()` + botón en el visor de
+nesting). Dice cuántas unidades más de cada pieza entran en esa chapa sin que
+haya que comprar otra. El material ya está pagado, así que esas piezas sólo
+cuestan tiempo de máquina y gas: es la oferta con mejor margen que puede hacer
+el taller, y sirve para vender repuestos en la misma entrega o hacer stock.
+
+Se calcula **a pedido y no con cada tecla**: cada tanteo es un nesting
+completo. La búsqueda es por duplicación y después binaria (≈2·log n tanteos
+por ítem en vez de n).
 
 ⚠️ **Distinto gas es distinto programa y distinta boquilla**, así que no
 comparten chapa aunque el material y el espesor coincidan. Lo mismo si la
