@@ -1,0 +1,223 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* Tema por clase y no por preferencia del sistema: en el taller la pantalla la
+   elige quien está parado adelante, no la configuración de Windows. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ------------------------------------------------------------------ */
+/* Variables                                                           */
+/*                                                                     */
+/* Van todas con prefijo `--k-` a propósito. Las vistas que todavía no  */
+/* se migraron a React siguen cargando `web/css/app.css`, que define    */
+/* --fondo, --panel, --borde y --tinta como hex. Acá son tripletas RGB  */
+/* (para poder usar /opacidad en Tailwind): si compartieran nombre, la  */
+/* hoja que cargue última rompería el tema de la otra por completo.     */
+/* ------------------------------------------------------------------ */
+
+@layer base {
+  :root {
+    --k-fondo: 244 247 250;
+    --k-hundido: 234 239 245;
+    --k-panel: 255 255 255;
+    --k-panel-alto: 247 249 251;
+    --k-borde: 221 227 234;
+    --k-borde-fuerte: 197 208 221;
+    --k-tinta: 18 22 28;
+    --k-suave: 91 102 114;
+    --k-tenue: 138 151 165;
+    --k-sombra: 0 1px 2px rgb(18 22 28 / 0.04), 0 6px 20px rgb(18 22 28 / 0.07);
+
+    /* Lienzos de los visores. Separados del panel porque el 2D y el 3D
+       necesitan más contraste contra la pieza que el resto de la interfaz. */
+    --k-lienzo: 247 249 251;
+    --k-chapa: 255 255 255;
+    --k-grilla: 227 233 239;
+    --k-grilla-fuerte: 207 216 226;
+  }
+
+  .dark {
+    --k-fondo: 11 15 21;
+    --k-hundido: 7 10 15;
+    --k-panel: 23 29 38;
+    --k-panel-alto: 30 38 50;
+    --k-borde: 42 53 67;
+    --k-borde-fuerte: 58 72 90;
+    --k-tinta: 232 237 243;
+    --k-suave: 154 168 184;
+    --k-tenue: 107 122 139;
+    --k-sombra: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 28px rgb(0 0 0 / 0.35);
+
+    --k-lienzo: 15 20 27;
+    --k-chapa: 26 33 43;
+    --k-grilla: 35 44 56;
+    --k-grilla-fuerte: 46 58 73;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Paleta KORT                                                         */
+/*                                                                     */
+/* Los tres colores de marca vienen de la identidad que ya usaban el    */
+/* PDF del presupuesto y el DXF: azul de chapa, naranja de corte, verde */
+/* de aprobado. No son decorativos — el naranja significa "esto es lo   */
+/* que corta la máquina" en todos los visores, y el azul "esto es un    */
+/* contorno interior". Cambiarlos desalinea la pantalla del plano.      */
+/* ------------------------------------------------------------------ */
+
+@theme {
+  --color-acero-50: #f4f7fa;
+  --color-acero-100: #e6edf4;
+  --color-acero-200: #cbd9e7;
+  --color-acero-300: #a1bad2;
+  --color-acero-400: #7095b8;
+  --color-acero-500: #4f77a0;
+  --color-acero-600: #3d5e84;
+  --color-acero-700: #334c6b;
+  --color-acero-800: #23364b;
+  --color-acero-900: #1b3a5c;
+  --color-acero-950: #0f1c2b;
+
+  --color-corte-50: #fff4f0;
+  --color-corte-100: #ffe5db;
+  --color-corte-200: #ffc9b6;
+  --color-corte-300: #ffa285;
+  --color-corte-400: #fb7a52;
+  --color-corte-500: #e4572e;
+  --color-corte-600: #cf4a24;
+  --color-corte-700: #ab381b;
+  --color-corte-800: #8b301a;
+  --color-corte-900: #732c1b;
+
+  --color-chapa-300: #52c48c;
+  --color-chapa-400: #2ea36a;
+  --color-chapa-500: #1f7a4d;
+  --color-chapa-600: #17603c;
+
+  --color-alerta-400: #e0a534;
+  --color-alerta-500: #b7791f;
+  --color-peligro-400: #e05c4c;
+  --color-peligro-500: #c0392b;
+
+  /* Semánticos: se leen de las variables de arriba, así una sola clase
+     (`bg-panel`) sirve en los dos temas sin escribir `dark:` en cada lugar. */
+  --color-fondo: rgb(var(--k-fondo));
+  --color-hundido: rgb(var(--k-hundido));
+  --color-panel: rgb(var(--k-panel));
+  --color-panel-alto: rgb(var(--k-panel-alto));
+  --color-borde: rgb(var(--k-borde));
+  --color-borde-fuerte: rgb(var(--k-borde-fuerte));
+  --color-tinta: rgb(var(--k-tinta));
+  --color-suave: rgb(var(--k-suave));
+  --color-tenue: rgb(var(--k-tenue));
+  --color-lienzo: rgb(var(--k-lienzo));
+
+  --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  --radius-panel: 14px;
+
+  --animate-latir: latir 2.4s ease-in-out infinite;
+  --animate-entrar: entrar 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-accordion-down: acordeon-abrir 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-accordion-up: acordeon-cerrar 0.18s ease-in;
+}
+
+@keyframes latir {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes entrar {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Radix mide el contenido y publica la altura en esta variable: es la única
+   forma de animar un alto "auto" sin saltos. */
+@keyframes acordeon-abrir {
+  from { height: 0; opacity: 0; }
+  to { height: var(--radix-accordion-content-height); opacity: 1; }
+}
+
+@keyframes acordeon-cerrar {
+  from { height: var(--radix-accordion-content-height); opacity: 1; }
+  to { height: 0; opacity: 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+
+@layer base {
+  html, body, #raiz {
+    height: 100%;
+  }
+
+  body {
+    background: rgb(var(--k-fondo));
+    color: rgb(var(--k-tinta));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Los importes y las medidas se leen en columna: tabulares siempre, o el
+     ojo tiene que releer cada fila para comparar dos números. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--k-borde-fuerte));
+    border-radius: 6px;
+    border: 2px solid rgb(var(--k-fondo));
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--k-tenue)); }
+
+  /* El visor 3D orbita con el arrastre: sin esto se pelea con el scroll de
+     la página en la notebook del taller. */
+  canvas { display: block; touch-action: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Utilidades propias                                                  */
+/* ------------------------------------------------------------------ */
+
+@utility panel-kort {
+  background: rgb(var(--k-panel));
+  border: 1px solid rgb(var(--k-borde));
+  border-radius: var(--radius-panel);
+  box-shadow: var(--k-sombra);
+}
+
+@utility vidrio {
+  background: rgb(var(--k-panel) / 0.75);
+  backdrop-filter: blur(14px) saturate(1.4);
+  border-color: rgb(var(--k-borde) / 0.9);
+}
+
+/* Trama de chapa perforada: fondo de los visores y de la cabecera. Da
+   textura de taller sin competir con los datos que van encima. */
+@utility trama-chapa {
+  background-image: radial-gradient(rgb(var(--k-borde-fuerte) / 0.55) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+@utility resplandor-corte {
+  box-shadow: 0 0 0 1px rgb(228 87 46 / 0.45), 0 0 26px -4px rgb(228 87 46 / 0.5);
+}
+
+/* Franja de peligro de máquina: marca los avisos que frenan la producción. */
+@utility franja-alerta {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgb(228 87 46 / 0.13) 0 7px,
+    transparent 7px 14px
+  );
+}
+
+@media print {
+  .no-imprimir { display: none !important; }
+}

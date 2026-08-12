@@ -1,6 +1,11 @@
 # Dependencias (se reinstalan con: npm install)
 node_modules/
 
+# Front compilado. Se genera con `npm run build` y lo arma solo INICIAR.bat
+# la primera vez. No va al repositorio: son ~2 MB de bundles con hash que
+# cambian en cada build y ensucian todos los diff.
+web-dist/
+
 # ── DATOS DEL TALLER ──────────────────────────────────────────────
 # La base se crea sola al arrancar, con los valores de fábrica.
 # Nunca subir la base real: tiene clientes, precios y presupuestos.

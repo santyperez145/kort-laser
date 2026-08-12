@@ -28,6 +28,23 @@ if not exist "node_modules\node-sqlite3-wasm" (
   )
 )
 
+REM La interfaz se compila con Vite. Se arma sola si falta, asi el doble
+REM clic sigue alcanzando para arrancar. Para rehacerla despues de cambiar
+REM el codigo: npm run build
+if not exist "web-dist\index.html" (
+  echo.
+  echo   Preparando la interfaz. Tarda unos segundos.
+  echo.
+  call npm run build
+  if errorlevel 1 (
+    echo.
+    echo   Fallo la compilacion de la interfaz. El detalle esta arriba.
+    echo.
+    pause
+    exit /b 1
+  )
+)
+
 echo.
 echo   Iniciando KORT...
 echo.

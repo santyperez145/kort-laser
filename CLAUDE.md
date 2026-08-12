@@ -16,11 +16,17 @@ Plegadora CNC 100 t × 3200.
 
 ```bash
 npm install        # sólo la primera vez
-node server.js     # arranca en http://localhost:4321
-node tests/run.js  # 96 verificaciones del núcleo
+npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
+npm start          # arranca en http://localhost:4321
+npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
+npm test           # 96 verificaciones del núcleo
 ```
 
-En Windows, `INICIAR.bat` hace las tres cosas con doble clic.
+En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
+la interfaz si falta y arranca.
+
+⚠️ **`npm start` NO compila.** Si tocaste algo de `app/` y no ves el cambio,
+falta el `npm run build`. Para trabajar, `npm run dev` y listo.
 
 **Corré los tests antes de dar por terminado cualquier cambio en `src/core/`.**
 Varios de ellos existen porque ya atraparon errores reales de datos, no sólo de
@@ -32,27 +38,59 @@ código.
   Voseo en los textos de interfaz ("cargá", "fijate", "tenés").
 - Los comentarios explican **por qué**, no qué. Si un número tiene una fuente
   o un supuesto, va en el comentario.
-- **Sin dependencias nuevas salvo que aporten de verdad.** Hoy hay tres
-  (`node-sqlite3-wasm`, `three`, `chart.js`) y cada una reemplazó algo que
-  valía la pena reemplazar. El resto —motor de corte, plegado, nesting, DXF,
-  PDF— es propio y así debe quedar.
-- Nada de CDN: todo se sirve desde la máquina del taller, que puede estar sin
-  internet.
+- **La interfaz usa librerías; el motor de cálculo no.** Esa es la línea, y es
+  deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
+  react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
+  **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
+  Node y en el navegador, y lo que permite que los 96 tests lo verifiquen sin
+  levantar un navegador.
+- **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
+  sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde
+  Express. Esto ya se comió un intento: el `<Environment>` de drei baja su HDRI
+  de un CDN y hubo que sacarlo — la iluminación del visor 3D es de tres puntos
+  hecha a mano por eso.
 
 ## Arquitectura
 
 ```
 src/core/     Motor de cálculo. Corre igual en Node y en el navegador
-              (ESM puro, sin APIs de Node). La interfaz lo importa directo
-              desde /src/core/*.js, no hay build ni bundler.
+              (ESM puro, sin dependencias). React lo importa con el alias
+              @core; los tests, por ruta. Una sola fuente de verdad.
 src/server/   Base de datos SQLite y su esquema.
-web/          Interfaz: vanilla JS, sin framework, un módulo por vista.
+app/          Interfaz nueva: React + Vite + Tailwind + Radix.
+              app/src/componentes/ui/   kit propio estilo shadcn
+              app/src/componentes/visores/  2D (Konva), 3D (r3f), nesting
+              app/src/vistas/           Panel y Cotizador
+web/          Interfaz anterior: vanilla JS. Siguen vivas 7 vistas.
+web-dist/     Salida de `npm run build`. No se commitea.
+server.js     Express + Helmet + Zod.
 tests/run.js  Suite completa. Un solo archivo, sin runner externo.
 docs/PRECIOS.md  De dónde sale cada número, con nivel de confianza.
 ```
 
-El servidor sólo persiste y sirve archivos: **todo el cálculo pasa en el
-navegador**, para que el cotizador responda mientras se escribe.
+El servidor sólo persiste, sirve y valida la forma de lo que entra: **todo el
+cálculo pasa en el navegador**, para que el cotizador responda mientras se
+escribe. En un mostrador, esperar una vuelta de red por cada tecla se nota.
+
+### Las dos interfaces conviven, y el iframe no es pereza
+
+Panel y Cotizador están rehechos en React. Las otras siete vistas
+(Presupuestos, Producción, Clientes, Materiales, Máquinas, Costos,
+Configuración) siguen siendo las de antes y se muestran **dentro de un
+iframe** apuntando a `/legacy`.
+
+El aislamiento es el punto: `web/css/app.css` estiliza `button`, `input`,
+`table` y `main` **por selector de elemento**. Cargada en el mismo documento
+que la interfaz nueva, le cambia el aspecto a todos los componentes apenas se
+visita una de esas vistas. Por la misma razón las variables CSS nuevas van con
+prefijo `--k-`: las viejas usan `--fondo`, `--panel`, `--borde` y `--tinta`
+como hex y las nuevas como tripletas RGB, así que compartir nombre rompería el
+tema de una de las dos según cuál hoja cargue última.
+
+Para migrar una vista: escribirla en `app/src/vistas/`, cambiar su `<Route>` en
+`app/src/App.jsx` y marcarla `nuevo: true` en `RUTAS` de `Estructura.jsx`. No
+hay nada más que desarmar. Cuando no quede ninguna, se borran `web/`, la
+excepción de CSP del legado y el prefijo `--k-` deja de hacer falta.
 
 ## Invariantes que no se pueden romper
 
@@ -92,6 +130,21 @@ Son la razón de ser de varios tests.
 - **Las líneas de plegado viajan en `shape.pliegues`.** No pasarlas además por
   `opts.lineasPlegado` al generar el DXF o salen duplicadas y el CAM las corta
   dos veces.
+- **Los visores miden el contenedor con `useLayoutEffect`, no con el
+  `ResizeObserver` solo.** El observer sólo entrega notificaciones cuando la
+  página está pintando frames: con la pestaña en segundo plano nunca llega la
+  primera y el visor se queda clavado en 600 px. Por lo mismo, el `div` que
+  lleva la referencia se renderiza **siempre**, con geometría o sin ella — si
+  el estado vacío devolviera otro elemento, el observer quedaría mirando uno ya
+  desmontado.
+- **Konva y three redibujan por `requestAnimationFrame`.** Verificar el lienzo
+  con la pestaña oculta da un canvas en blanco que no es un bug. Para probarlo
+  de verdad: `window.Konva.stages[0].draw()` fuerza un dibujado síncrono.
+- **Vite 8 va sobre rolldown: `manualChunks` tiene que ser una función**, no un
+  mapa. Con un objeto el build falla con `manualChunks is not a function`.
+- **La CSP no permite scripts inline en la aplicación nueva.** El arranque del
+  tema vive en `app/public/tema.js` por eso. `/legacy` sí los permite, acotado,
+  porque su `<script type="importmap">` no se puede sacar del HTML.
 - **La migración desde el formato viejo NO debe importar tablas técnicas.**
   `fusionarMateriales()` conserva precios y medidas del usuario pero descarta
   las `speeds` viejas. Sin eso, actualizar deja el motor de corte con datos

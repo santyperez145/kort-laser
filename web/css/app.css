@@ -294,6 +294,15 @@ canvas { display: block; width: 100%; touch-action: none; }
 .tarjeta-pieza p { margin: 0; font-size: 11.5px; color: var(--suave); line-height: 1.45; }
 .tarjeta-pieza .cat { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--naranja); font-weight: 700; margin-bottom: 5px; }
 
+/* ---------------- Embebida en la interfaz nueva ---------------- */
+
+/* Estas vistas se muestran dentro de la aplicación de React, que ya pone su
+   propia barra de navegación y su propio margen. Sin esto se ven dos menús,
+   uno arriba del otro. */
+body.embebido .topbar { display: none; }
+body.embebido main { padding: 0; max-width: none; }
+body.embebido { background: transparent; }
+
 @media print {
   .topbar, .lienzo-btns, .acciones { display: none !important; }
   body { background: #fff; }

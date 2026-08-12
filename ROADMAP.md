@@ -209,12 +209,37 @@ terminado— tendría sentido cuando haya más de una persona produciendo.
 
 ---
 
+## Migración de la interfaz
+
+La interfaz pasó a React + Vite + Tailwind + Radix, con Recharts para los
+gráficos, Konva para el 2D y react-three-fiber para el 3D. El backend pasó a
+Express + Helmet + Zod. **`src/core/` no se tocó**: sigue siendo ESM sin
+dependencias y los 96 tests pasan igual.
+
+Se migró de a una vista para no quedarse con medio sistema andando. Las que
+faltan siguen funcionando embebidas desde `/legacy` (ver CLAUDE.md).
+
+| | Vista | Qué falta |
+|---|---|---|
+| ✅ | Panel | — |
+| ✅ | Cotizador | — |
+| 🔜 | Materiales | La más grande (361 líneas) y la que más se toca |
+| 📋 | Costos | Tiene gráficos propios: pasarlos a Recharts |
+| 📋 | Presupuestos · Producción · Clientes | Listados; salen rápido y parecidos entre sí |
+| 📋 | Máquinas · Configuración | Formularios largos, poco riesgo |
+
+Al terminar: borrar `web/`, la excepción de CSP de `/legacy` en `server.js` y
+el prefijo `--k-` de las variables CSS, que existe sólo para convivir.
+
+---
+
 ## Deuda técnica
 
 | | Qué | Riesgo |
 |---|---|---|
-| 📋 | `cotizador.js` tiene 1.100 líneas y hace demasiado | Medio: cuesta cambiarlo sin romper algo |
-| 📋 | No hay tests de la interfaz, sólo del núcleo | Medio: una vista puede romperse sin que nadie se entere |
+| ✅ | ~~`cotizador.js` tiene 1.100 líneas y hace demasiado~~ | Partido en `app/src/vistas/cotizador/` |
+| 📋 | No hay tests de la interfaz, sólo del núcleo | Medio: una vista puede romperse sin que nadie se entere. Ahora que hay React conviene Vitest + Testing Library |
+| 📋 | El bundle son ~2,3 MB (620 kB gzip) en 4 trozos | Bajo: se sirve desde localhost, no por red |
 | 💭 | Node 21.7 no es LTS y ya bloqueó `better-sqlite3` | Bajo hoy; pasar a Node 22 LTS cuando convenga |
 | 💭 | El nesting por skyline no mete piezas en "cuevas" | Bajo: da del lado seguro, nunca promete un encastre falso |
 

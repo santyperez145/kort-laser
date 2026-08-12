@@ -34,8 +34,12 @@ Si preferís la terminal:
 
 ```bash
 npm install
-node server.js
+npm run build
+npm start
 ```
+
+`INICIAR.bat` hace esos tres pasos solo la primera vez. El `npm run build`
+compila la interfaz; hace falta repetirlo sólo si cambiás el código de `app/`.
 
 ---
 

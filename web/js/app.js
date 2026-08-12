@@ -58,6 +58,19 @@ async function navegar() {
   }
 }
 
+/**
+ * Cuando esta interfaz se muestra dentro de la aplicación nueva, el tema lo
+ * manda el contenedor por la URL: el iframe no comparte `localStorage` si el
+ * navegador tiene el almacenamiento particionado por sitio.
+ */
+function embebida() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('embebido')) return false;
+  document.body.classList.add('embebido');
+  document.body.classList.toggle('oscuro', q.get('tema') === 'oscuro');
+  return true;
+}
+
 function tema() {
   const guardado = localStorage.getItem('kort-tema');
   if (guardado === 'oscuro') document.body.classList.add('oscuro');
@@ -69,7 +82,7 @@ function tema() {
 }
 
 async function arrancar() {
-  tema();
+  if (!embebida()) tema();
   try {
     await cargarEstado();
     chipEstado('Conectado');

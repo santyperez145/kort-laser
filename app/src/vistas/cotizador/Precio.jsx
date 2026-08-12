@@ -1,0 +1,263 @@
+/**
+ * Columna de precio: desglose del ítem, ficha técnica y total del presupuesto.
+ *
+ * El desglose se muestra entero a propósito. Es lo que permite defender un
+ * número frente al cliente ("el gas de este inoxidable son X") y lo que hace
+ * evidente cuando un costo se disparó por un parámetro mal cargado.
+ */
+
+import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2 } from 'lucide-react';
+
+import { usarCotizador } from './contexto';
+import { descargarDXFItem, descargarDXFNesting, exportarPDF, exportarOT } from './acciones';
+import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/ui/panel';
+import { Boton } from '@/componentes/ui/boton';
+import { Campo, Entrada, AreaTexto } from '@/componentes/ui/campos';
+import { Barra, Aviso } from '@/componentes/ui/varios';
+import { usarEstado } from '@/lib/estado';
+import { money, num, pct } from '@/lib/formato';
+import { cn } from '@/lib/utils';
+import { fmtTiempo } from '@core/cutting.js';
+
+function Fila({ etiqueta, valor, clase }) {
+  return (
+    <div
+      className={cn(
+        'flex items-baseline justify-between gap-3 border-b border-dashed border-borde py-1.5 last:border-0',
+        clase
+      )}
+    >
+      <span className="text-suave min-w-0">{etiqueta}</span>
+      <span className="tabular font-mono whitespace-nowrap">{valor}</span>
+    </div>
+  );
+}
+
+function Dato({ etiqueta, valor }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-1 text-[12.5px]">
+      <dt className="text-suave">{etiqueta}</dt>
+      <dd className="tabular font-semibold text-right">{valor}</dd>
+    </div>
+  );
+}
+
+export function Precio() {
+  const { doc, item, resuelto, resueltos, coti, r, calculando, actualizarDoc, guardar } = usarCotizador();
+  const config = usarEstado((s) => s.config);
+  const sim = usarEstado((s) => s.simbolo());
+  const res = coti?.resumen;
+
+  const args = { doc, coti, config, resueltos, actualizarDoc };
+
+  return (
+    <>
+      {/* ---------------- Desglose del ítem ---------------- */}
+      <Panel>
+        <PanelCab
+          acciones={
+            <span className="flex items-center gap-1.5 font-mono text-[11px] text-suave tabular">
+              {calculando ? <Loader2 className="size-3 animate-spin" /> : null}
+              {r ? `${money(r.precio.unitario, sim, 2)} c/u` : null}
+            </span>
+          }
+        >
+          <PanelTitulo>Precio del ítem</PanelTitulo>
+        </PanelCab>
+
+        <PanelCuerpo>
+          {r ? (
+            <div className="text-[12.5px]">
+              <Fila etiqueta={`Material · ${r.costos.modoMaterial}`} valor={money(r.costos.material, sim, 0)} />
+              <Fila etiqueta={`Corte láser · ${fmtTiempo(r.corte.tTotal)}`} valor={money(r.costos.corte, sim, 0)} />
+              <Fila
+                etiqueta={`${r.corte.gasNombre} · ${num(r.costos.gasM3, 2)} m³`}
+                valor={money(r.costos.gas, sim, 0)}
+              />
+              {r.costos.plegado > 0 && (
+                <Fila etiqueta={`Plegado · ${fmtTiempo(r.plegado.tTotal)}`} valor={money(r.costos.plegado, sim, 0)} />
+              )}
+              {r.costos.acabado > 0 && (
+                <Fila etiqueta={r.costos.detalleAcabado.nombre} valor={money(r.costos.acabado, sim, 0)} />
+              )}
+              {r.costos.procesos > 0 && (
+                <Fila etiqueta="Procesos extra" valor={money(r.costos.procesos, sim, 0)} />
+              )}
+              {r.costos.ingenieria > 0 && (
+                <Fila etiqueta="Ingeniería" valor={money(r.costos.ingenieria, sim, 0)} />
+              )}
+
+              <Fila etiqueta="COSTO" valor={money(r.costos.total, sim, 0)} clase="font-semibold" />
+              <Fila
+                etiqueta={`Margen ${num(r.precio.margen, 0)} %`}
+                valor={money(r.precio.lista - r.costos.total, sim, 0)}
+              />
+              {r.precio.descuentoPct > 0 && (
+                <Fila
+                  etiqueta={`Descuento por cantidad ${num(r.precio.descuentoPct, 0)} %`}
+                  valor={'−' + money((r.precio.lista * r.precio.descuentoPct) / 100, sim, 0)}
+                />
+              )}
+              {r.precio.recargoPct > 0 && (
+                <Fila
+                  etiqueta={`Recargo por urgencia ${num(r.precio.recargoPct, 0)} %`}
+                  valor={money(
+                    r.precio.neto - r.precio.lista * (1 - r.precio.descuentoPct / 100),
+                    sim,
+                    0
+                  )}
+                />
+              )}
+              {r.precio.iibb > 0 && (
+                <Fila etiqueta={`Ingresos brutos ${num(r.precio.iibbPct, 1)} %`} valor={money(r.precio.iibb, sim, 0)} />
+              )}
+              {r.precio.aplicoMinimo && <Fila etiqueta="Mínimo por ítem aplicado" valor="" />}
+
+              <div className="mt-2 flex items-baseline justify-between gap-3 border-t-2 border-tinta pt-2.5 text-[15px] font-bold">
+                <span>Subtotal del ítem</span>
+                <span className="tabular font-mono">{money(r.precio.neto, sim, 0)}</span>
+              </div>
+            </div>
+          ) : (
+            <Vacio titulo="Sin cálculo" />
+          )}
+        </PanelCuerpo>
+      </Panel>
+
+      {/* ---------------- Ficha técnica ---------------- */}
+      {r ? (
+        <Panel>
+          <PanelCab>
+            <PanelTitulo>Ficha técnica</PanelTitulo>
+          </PanelCab>
+          <PanelCuerpo>
+            <dl>
+              <Dato etiqueta="Peso unitario" valor={num(r.geometria.pesoPieza, 3) + ' kg'} />
+              <Dato etiqueta="Peso total" valor={num(r.geometria.pesoTotal, 2) + ' kg'} />
+              <Dato etiqueta="Largo de corte / pieza" valor={num(r.geometria.largoCorteMM / 1000, 2) + ' m'} />
+              <Dato etiqueta="Perforaciones" valor={String(r.geometria.piercings)} />
+              <Dato etiqueta="Gas de asistencia" valor={`${r.corte.gasNombre} · ${num(r.corte.gasPresion, 0)} bar`} />
+              <Dato etiqueta="Boquilla" valor={num(r.corte.boquilla, 1) + ' mm'} />
+              <Dato
+                etiqueta="Consumo de gas"
+                valor={`${num(r.corte.gasCaudal, 0)} m³/h · ${num(r.costos.gasM3, 2)} m³`}
+              />
+              <Dato etiqueta="Velocidad nominal" valor={num(r.corte.vNominal, 0) + ' mm/min'} />
+              <Dato etiqueta="Velocidad media real" valor={num(r.corte.vMediaEfectiva, 0) + ' mm/min'} />
+              <Dato etiqueta="Pérdida por geometría" valor={pct(r.corte.penalizacion * 100, 0)} />
+              <Dato etiqueta="Tiempo por pieza" valor={fmtTiempo(r.corte.tPieza)} />
+              <Dato etiqueta="Chapas necesarias" valor={String(r.nesting.chapas ?? '—')} />
+              <Dato etiqueta="Aprovechamiento" valor={pct((r.nesting.aprovechamiento || 0) * 100, 1)} />
+            </dl>
+
+            <Barra
+              className="mt-2"
+              valor={(r.nesting.aprovechamiento || 0) * 100}
+              tono={(r.nesting.aprovechamiento || 0) > 0.7 ? 'verde' : 'corte'}
+            />
+
+            <dl className="mt-2 border-t border-borde pt-1">
+              <Dato etiqueta="Costo hora láser" valor={money(r.costos.costoHoraLaser, sim, 0) + '/h'} />
+            </dl>
+          </PanelCuerpo>
+        </Panel>
+      ) : null}
+
+      {/* ---------------- Total ---------------- */}
+      {res ? (
+        <Panel>
+          <PanelCab>
+            <PanelTitulo>Total</PanelTitulo>
+          </PanelCab>
+          <PanelCuerpo>
+            <div className="text-[12.5px]">
+              <Fila etiqueta="Subtotal" valor={money(res.subtotal, sim, 2)} />
+              {config.comercial.mostrarIVA && (
+                <Fila etiqueta={`IVA ${num(res.ivaPct, 0)} %`} valor={money(res.iva, sim, 2)} />
+              )}
+            </div>
+
+            {res.aplicoMinimo && (
+              <Aviso nivel="aviso" className="mt-3">
+                Se aplicó el mínimo de facturación de{' '}
+                {money(config.comercial.minimoFacturacion, sim, 0)}. La suma de los ítems daba
+                menos. Ajustalo en Configuración si no corresponde.
+              </Aviso>
+            )}
+
+            <div className="mt-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-tenue">
+                Total del presupuesto
+              </div>
+              <div className="text-[32px] font-extrabold leading-none tracking-tight tabular">
+                {money(res.total, sim, 2)}
+              </div>
+              {res.totalUSD ? (
+                <div className="mt-1 text-[13px] text-suave tabular">≈ US$ {num(res.totalUSD, 2)}</div>
+              ) : null}
+            </div>
+
+            <p className="mt-2 text-[11.5px] text-suave tabular">
+              {res.piezasTotales} pieza{res.piezasTotales === 1 ? '' : 's'} · {num(res.pesoTotal, 1)} kg ·{' '}
+              {res.chapasTotal} chapa{res.chapasTotal === 1 ? '' : 's'} ·{' '}
+              {fmtTiempo(res.tiempoProduccion)} de máquina
+            </p>
+
+            <p className="mt-1.5 text-[12px]">
+              <span className="text-suave">Utilidad estimada: </span>
+              <span className="font-bold text-chapa-500 dark:text-chapa-300 tabular">
+                {money(res.utilidad, sim, 0)} ({pct(res.utilidadPct, 1)})
+              </span>
+            </p>
+
+            <Campo etiqueta="Descuento global" className="mt-4">
+              <Entrada
+                type="number" min={0} max={90} step={1} unidad="%"
+                value={doc.descuentoGlobal || 0}
+                onChange={(e) => actualizarDoc({ descuentoGlobal: +e.target.value || 0 })}
+              />
+            </Campo>
+          </PanelCuerpo>
+        </Panel>
+      ) : null}
+
+      {/* ---------------- Acciones ---------------- */}
+      <Panel>
+        <PanelCab>
+          <PanelTitulo>Acciones</PanelTitulo>
+        </PanelCab>
+        <PanelCuerpo className="space-y-2">
+          <Boton tono="acero" ancho="completo" onClick={guardar}>
+            <Save />
+            Guardar presupuesto
+          </Boton>
+          <Boton tono="corte" ancho="completo" onClick={() => exportarPDF(args)}>
+            <FileText />
+            Generar PDF del presupuesto
+          </Boton>
+          <Boton ancho="completo" onClick={() => exportarOT(args)}>
+            <ClipboardList />
+            Orden de trabajo (taller)
+          </Boton>
+          <div className="grid grid-cols-2 gap-2">
+            <Boton onClick={() => descargarDXFItem(item, resuelto)}>
+              <Download />
+              DXF pieza
+            </Boton>
+            <Boton onClick={() => descargarDXFNesting(item, resuelto, r)}>
+              <Grid3x3 />
+              DXF nesting
+            </Boton>
+          </div>
+
+          <Campo etiqueta="Observaciones para el presupuesto" className="pt-2">
+            <AreaTexto
+              rows={3} value={doc.notas}
+              onChange={(e) => actualizarDoc({ notas: e.target.value })}
+            />
+          </Campo>
+        </PanelCuerpo>
+      </Panel>
+    </>
+  );
+}
