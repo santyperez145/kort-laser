@@ -19,6 +19,7 @@
  */
 
 import { calcularCostoHoraMaquina, calcularEstructura, revisarCostoHora } from './costos.js';
+import { revisarConsumiblesHora } from './consumibles.js';
 
 const n = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
 
@@ -106,9 +107,25 @@ function revisarMaquinas(maquinas, estructura) {
   }
 
   for (const m of maquinas) {
-    // Dominancia de un componente: es lo que detectó el caso de los consumibles
+    const donde = `Máquinas → ${m.nombre || m.id}`;
+
+    /* Contra una lista de piezas reales, no contra una proporción. Es un
+       chequeo distinto del de dominancia y atrapa un caso que aquél no ve: si
+       alguien infla consumibles Y mantenimiento a la vez, ninguno pasa del
+       50 % del total pero los dos están mal. Sólo aplica al láser: la
+       plegadora no tiene lentes ni boquillas. */
+    const aConsumibles = m.tipo === 'laser' ? revisarConsumiblesHora(m.costo?.consumiblesHora) : null;
+    if (aConsumibles) out.push(hallazgo(aConsumibles.nivel, 'maquinas', donde, aConsumibles.msg));
+
+    /* Dominancia dentro de la hora de máquina. Si el chequeo contra la lista
+       ya se quejó de los consumibles, no se repite: un mismo campo mal
+       cargado tiene que dar UN mensaje, y gana el que dice qué hacer
+       ("¿no pusiste un mensual donde va un valor por hora?") sobre el que
+       sólo informa un porcentaje. Dos avisos para un problema se leen como
+       ruido y enseñan a saltearlos. */
     for (const a of revisarCostoHora(m, estructura)) {
-      out.push(hallazgo(a.nivel, 'maquinas', `Máquinas → ${m.nombre || m.id}`, a.msg));
+      if (aConsumibles && a.componente === 'consumibles') continue;
+      out.push(hallazgo(a.nivel, 'maquinas', donde, a.msg));
     }
 
     const ch = calcularCostoHoraMaquina(m, estructura);

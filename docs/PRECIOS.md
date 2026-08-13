@@ -236,6 +236,46 @@ a cotizar por encima):
 
 ---
 
+## 🟡🔴 Consumibles del láser
+
+Era el único costo del sistema **sin fuente ni desglose**: un campo libre en
+pesos. Por eso un `$150.000` mal tipeado —contra los $2.800 de referencia—
+multiplicó por seis todos los precios sin que nada chirriara.
+
+Ahora el número sale de piezas, en `src/core/consumibles.js`, y se edita desde
+el calculador que abre la tarjeta de revisión del Panel.
+
+| Pieza | Precio | Dura | Por hora | |
+|---|---|---|---|---|
+| Filtros de aspiración | $320.000 | 400 h | $800 | 🔴 |
+| Juntas, o-rings y varios | $12.000 | 20 h | $600 | 🔴 |
+| Lente protectora | $28.000 | 60 h | $467 | 🔴 |
+| Boquilla | $18.000 | 45 h | $400 | 🔴 |
+| Lente de enfoque / colimadora | $450.000 | 1.500 h | $300 | 🔴 |
+| Cerámica del cabezal | $45.000 | 250 h | $180 | 🔴 |
+| **TOTAL** | | | **$2.747/h** | 🟡 |
+
+**Las horas de duración son 🟡 y los precios 🔴.** La vida útil sale del
+comportamiento del equipo y es bastante estable entre talleres; los precios en
+pesos son un orden de magnitud para arrancar y **hay que pedírselos al
+proveedor**. Son el dato que más mueve este número.
+
+Las horas son de **corte**, no de taller abierto. Si la máquina corta 4 h por
+día, una lente de 60 h dura tres semanas.
+
+### El cruce que da confianza
+
+La regla práctica en un fibra de 3 kW son **USD 1,5 a 4 por hora de corte**. A
+$1.550 eso da **$2.300 a $6.200/h**, y la lista cae adentro. Los $150.000 que
+llegaron a estar cargados eran **25 veces el techo** de esa banda.
+
+### Ajuste por gas
+
+Cortando con oxígeno hay más salpicadura y humo, así que la lente protectora se
+pica antes: con O₂ el total sube a **$2.947/h** y con N₂ baja a **$2.686/h**.
+
+---
+
 ## 🔴 Gastos de estructura
 
 Todos los valores de *Costos de estructura* (alquiler, seguros, contador, tasa

@@ -95,7 +95,7 @@ costo/hora   = amortización + energía + mantenimiento + consumibles
 | Amortización | $125.000.000 ÷ 20.000 h | $6.250 |
 | Energía | 14 kW × $106,46 | $1.490 |
 | Mantenimiento | dato cargado | $4.000 |
-| Consumibles | dato cargado | $2.800 |
+| Consumibles | lista de piezas ÷ vida útil | $2.747 |
 | Operario | $12.750 × 80 % | $10.200 |
 | Estructura | $15.379 × 60 % | $9.228 |
 | **TOTAL** | | **$33.968/h** |

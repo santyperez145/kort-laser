@@ -28,6 +28,7 @@ import { PALETA, usarColores, ejeMoneda, Globo } from '@/componentes/graficos';
 import { calcularEstructura, calcularCostoHoraMaquina, puntoEquilibrio } from '@core/costos.js';
 import { revisarDatos } from '@core/salud.js';
 import { Aviso } from '@/componentes/ui/varios';
+import { BotonCalculadorConsumibles } from '@/componentes/CalculadorConsumibles';
 import { cn } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ */
@@ -87,6 +88,7 @@ function RevisionDatos() {
   const config = usarEstado((s) => s.config);
   const maquinas = usarEstado((s) => s.maquinas);
   const materiales = usarEstado((s) => s.materiales);
+  const laser = usarEstado((s) => s.laser());
 
   const revision = useMemo(
     () => (config ? revisarDatos({ config, maquinas, materiales }) : null),
@@ -120,6 +122,15 @@ function RevisionDatos() {
         {revision.hallazgos.map((h, i) => (
           <Aviso key={i} nivel={h.nivel}>
             <span className="font-semibold">{h.donde}</span> — {h.msg}
+            {/* Un aviso que sólo señala el problema obliga a ir a buscarlo. El
+                de consumibles trae al lado la herramienta que lo arregla. */}
+            {/consumibles/i.test(h.msg) && laser ? (
+              <div className="mt-2">
+                <BotonCalculadorConsumibles maquina={laser}>
+                  Calcularlo con piezas reales
+                </BotonCalculadorConsumibles>
+              </div>
+            ) : null}
           </Aviso>
         ))}
         <p className="pt-1 text-[11px] text-tenue">

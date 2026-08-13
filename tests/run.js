@@ -36,6 +36,7 @@ import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
+import { costoConsumiblesHora, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { construirMesh } from '../src/core/mesh3d.js';
@@ -795,6 +796,71 @@ test('un espesor por encima del máximo devuelve error explicativo', () => {
 });
 
 /* ================================================================== */
+/* ================================================================== */
+
+grupo('Consumibles del láser');
+
+test('el costo por hora sale de piezas con precio y vida útil', () => {
+  const r = costoConsumiblesHora();
+  assert.ok(r.total > 0);
+  assert.equal(r.detalle.length, CONSUMIBLES_LASER.length);
+  // Cada línea es precio ÷ vida: la cuenta tiene que poder rehacerse a mano
+  for (const d of r.detalle) cerca(d.porHora, d.precio / d.vidaHoras, 1e-9, d.nombre);
+  // Y el total es la suma de las líneas
+  cerca(r.total, r.detalle.reduce((a, b) => a + b.porHora, 0), 1e-9);
+});
+
+test('reproduce el valor de referencia de la máquina de fábrica', () => {
+  // Si esto se despega, el $2.800 del DEFAULT_MACHINE dejó de estar explicado
+  // y vuelve a ser un número mágico.
+  const r = costoConsumiblesHora();
+  const referencia = DEFAULT_MACHINE.costo.consumiblesHora;
+  assert.ok(Math.abs(r.total - referencia) / referencia < 0.1,
+    `la lista da ${r.total.toFixed(0)} y la máquina tiene ${referencia}: se despegaron`);
+});
+
+test('con oxígeno la lente protectora dura menos y sale más caro', () => {
+  const conO2 = costoConsumiblesHora(undefined, { gas: 'O2' }).total;
+  const conN2 = costoConsumiblesHora(undefined, { gas: 'N2' }).total;
+  assert.ok(conO2 > conN2, 'cortando con O₂ hay más salpicadura y la protectora se pica antes');
+});
+
+test('una pieza sin vida útil se ignora en vez de envenenar el total', () => {
+  const lista = [...CONSUMIBLES_LASER, { id: 'x', nombre: 'Rota', precio: 1000, vidaHoras: 0 }];
+  const r = costoConsumiblesHora(lista);
+  assert.ok(isFinite(r.total), 'dividir por cero daría Infinity y arruinaría toda la hora de máquina');
+  cerca(r.total, costoConsumiblesHora().total, 1e-9);
+});
+
+test('detecta un mensual puesto donde va un valor por hora', () => {
+  const a = revisarConsumiblesHora(150000);
+  assert.equal(a?.nivel, 'error');
+  assert.ok(/mensual/i.test(a.msg), 'tiene que sugerir la causa probable');
+  assert.equal(revisarConsumiblesHora(2800), null, 'el valor de referencia no puede disparar');
+  assert.equal(revisarConsumiblesHora(4500), null, 'ni un taller que gasta algo más');
+});
+
+test('detecta un consumible tan bajo que no cubre ni las boquillas', () => {
+  const a = revisarConsumiblesHora(200);
+  assert.equal(a?.nivel, 'aviso');
+});
+
+test('la revisión de datos usa la lista real, no una proporción', () => {
+  // Inflar consumibles Y mantenimiento a la vez: ninguno llega al 50 % del
+  // total, así que el chequeo de dominancia no los ve. Éste sí.
+  const rota = {
+    ...DEFAULT_MACHINE,
+    costo: { ...DEFAULT_MACHINE.costo, consumiblesHora: 45000, mantenimientoHora: 45000 },
+  };
+  const r = revisarDatos({ config: DEFAULT_CONFIG, maquinas: [rota], materiales: DEFAULT_MATERIALS });
+  assert.ok(r.hallazgos.some((h) => /consumibles/i.test(h.msg)), 'lo tiene que atrapar igual');
+});
+
+test('no le pide lentes ni boquillas a la plegadora', () => {
+  const r = revisarDatos({ config: DEFAULT_CONFIG, maquinas: [DEFAULT_PLEGADORA], materiales: DEFAULT_MATERIALS });
+  assert.ok(!r.hallazgos.some((h) => /consumibles/i.test(h.msg)));
+});
+
 /* ================================================================== */
 
 grupo('Revisión de los datos cargados');

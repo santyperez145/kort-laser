@@ -42,6 +42,20 @@ export const usarEstado = create((set, get) => ({
     return clientes;
   },
 
+  /**
+   * Guarda la lista completa de máquinas.
+   *
+   * Va la lista entera y no la máquina suelta porque el endpoint es un
+   * documento único: mandar una sola borraría las demás. El servidor además
+   * rechaza cualquier cuerpo que no sea una lista con ids — se ganó ese
+   * chequeo a los golpes.
+   */
+  async guardarMaquinas(maquinas) {
+    const guardadas = await api.put('maquinas', maquinas);
+    set({ maquinas: Array.isArray(guardadas) ? guardadas : maquinas });
+    return guardadas;
+  },
+
   /** Contexto que espera `cotizarPresupuesto()` del motor de cálculo. */
   ctx() {
     const { materiales, maquinas, config } = get();
