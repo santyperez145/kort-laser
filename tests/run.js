@@ -1654,7 +1654,7 @@ test('el DXF de una pieza de biblioteca se guarda como muestra', () => {
 /* ================================================================== */
 grupo('Base de datos (SQLite)');
 
-const { DB, fusionarMateriales, fusionarMaquinas, fusionarConfig } = await import('../src/server/db.js');
+const { DB, fusionarMateriales, fusionarMaquinas, fusionarConfig, fusionarProfundo } = await import('../src/server/db.js');
 const dirTmp = path.join(__dirname, '.tmp-db');
 fs.rmSync(dirTmp, { recursive: true, force: true });
 let dbt = null;
@@ -1727,6 +1727,69 @@ test('respaldo y restauración conservan todo', () => {
   assert.equal(dbt.lista('clientes').length, clientesAntes);
   assert.equal(dbt.lista('presupuestos').length, presAntes);
   assert.ok(backup.historialPrecios.length > 0, 'el respaldo debe incluir el historial de precios');
+});
+
+test('guardar una parte de la config no borra el resto', () => {
+  // Regresión: el PUT reemplazaba el documento entero. Mandar sólo
+  // {comercial:{margen:50}} borraba empresa, producción y estructura, y el
+  // sistema seguía andando con los valores de fábrica sin avisar nada.
+  const completa = dbt.leerCrudo('config');
+  assert.ok(completa.empresa && completa.produccion && completa.estructura);
+
+  const parcial = fusionarProfundo(completa, { comercial: { margen: 50 } });
+  assert.equal(parcial.comercial.margen, 50, 'tiene que aplicar el cambio');
+  assert.ok(parcial.empresa, 'no puede perder la empresa');
+  assert.ok(parcial.produccion, 'no puede perder producción');
+  assert.ok(parcial.estructura, 'no puede perder la estructura de costos');
+  assert.equal(
+    Object.keys(parcial.comercial).length,
+    Object.keys(completa.comercial).length,
+    'las demás claves de comercial tienen que seguir ahí'
+  );
+});
+
+test('las listas se reemplazan enteras, no se mezclan', () => {
+  // Si el usuario borra un acabado, tiene que desaparecer: fusionar elemento
+  // por elemento lo dejaría resucitado.
+  const base = { acabados: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] };
+  const r = fusionarProfundo(base, { acabados: [{ id: 'a' }] });
+  assert.equal(r.acabados.length, 1);
+  assert.equal(r.acabados[0].id, 'a');
+});
+
+test('la fusión respeta valores nulos y falsos', () => {
+  const r = fusionarProfundo(
+    { comercial: { mostrarIVA: true, aplicarIIBB: true, redondeo: 500 } },
+    { comercial: { mostrarIVA: false, aplicarIIBB: null } }
+  );
+  assert.equal(r.comercial.mostrarIVA, false, 'false es un valor, no un "sin dato"');
+  assert.equal(r.comercial.aplicarIIBB, null);
+  assert.equal(r.comercial.redondeo, 500, 'lo que no vino no se toca');
+});
+
+test('un perfil de plegado se guarda y se recupera entero', () => {
+  const perfil = {
+    tramos: [25, 40, 60, 40, 25],
+    angulos: [
+      { grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'abajo' },
+      { grados: 90, sentido: 'abajo' }, { grados: 90, sentido: 'arriba' },
+    ],
+    ancho: 500, espesor: 2, materialId: 'acero-sae1010', matrizV: 0,
+  };
+  const p = dbt.crear('piezas', { nombre: 'Omega 25-40-60 · 2 mm', origen: 'plegado', perfil });
+  const leida = dbt.obtener('piezas', p.id);
+  assert.equal(leida.nombre, 'Omega 25-40-60 · 2 mm', 'el punto medio y los acentos tienen que sobrevivir');
+  assert.deepEqual(leida.perfil.tramos, perfil.tramos);
+  assert.equal(leida.perfil.angulos.length, 4);
+  assert.equal(leida.perfil.angulos[1].sentido, 'abajo', 'el sentido de cada pliegue importa');
+
+  // Y tiene que poder recalcularse tal cual quedó guardado
+  const r = calcularPerfil(leida.perfil, acero, DEFAULT_PLEGADORA);
+  assert.ok(r.desarrollo > 0);
+  assert.equal(r.pliegues.length, 4);
+
+  assert.ok(dbt.lista('piezas').some((x) => x.origen === 'plegado'), 'tiene que aparecer en la lista');
+  dbt.borrar('piezas', p.id);
 });
 
 test('la migración del formato viejo conserva precios pero descarta tablas obsoletas', () => {

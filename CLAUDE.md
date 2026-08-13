@@ -159,6 +159,27 @@ Son la razón de ser de varios tests.
 
 ## Trampas conocidas
 
+- **`PUT /api/config` FUSIONA, no reemplaza.** Reemplazaba: mandar sólo
+  `{comercial:{margen:50}}` borraba empresa, producción y estructura de costos,
+  y el sistema seguía andando con los valores de fábrica sin un solo aviso. Se
+  perdía la calibración del taller en silencio. Los arreglos sí se reemplazan
+  enteros, porque si no un acabado borrado resucita.
+
+- **El efecto de arranque del cotizador NO puede depender de `materiales`.**
+  Crea el presupuesto desde cero; si se recargan los materiales, el array cambia
+  de referencia y borra el presupuesto que estabas armando. Se guarda en un
+  `useRef` para qué presupuesto ya se inicializó.
+
+- **Las vistas del legado guardan por su cuenta y hay que avisarle a React.**
+  Viven en un iframe y la app tiene su propia copia de config/materiales/
+  máquinas —la carga una sola vez porque el cotizador la lee en cada tecla—.
+  Sin el `postMessage('kort-datos-cambiados')` de `web/js/api.js`, cambiabas un
+  precio y el cotizador seguía con el viejo: parecía que no se había guardado.
+
+- **Las rutas son con hash (`#/plegado`).** `HashRouter`, no `BrowserRouter`.
+  Navegar a `/plegado` cae en el catch-all y muestra el Panel.
+
+
 - **Cobrar por kilo: el recorte lo paga el taller.** El kilo que se entrega NO
   cuesta el kilo que se compró: cuesta el de compra dividido el aprovechamiento.
   Con chapa a $2.950 y 77 % de nesting, el kilo entregado sale $3.869 antes de

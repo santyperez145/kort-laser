@@ -10,11 +10,12 @@
  * el tonelaje, los avisos de fabricabilidad y la secuencia para el operario.
  */
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Plus, Trash2, ArrowUpDown, Download, Calculator, RotateCcw, ArrowRight,
+  Save, FolderOpen,
 } from 'lucide-react';
 
 import { Panel, PanelCab, PanelCuerpo, PanelTitulo } from '@/componentes/ui/panel';
@@ -25,6 +26,8 @@ import { Insignia } from '@/componentes/ui/insignia';
 import { Visor3D } from '@/componentes/visores/Visor3D';
 import { VisorSeccion } from '@/componentes/visores/VisorSeccion';
 import { usarEstado } from '@/lib/estado';
+import { api } from '@/lib/api';
+import { CLAVE_ITEM_PENDIENTE } from '@/vistas/Cotizador';
 import { num, descargar } from '@/lib/formato';
 
 import {
@@ -36,6 +39,14 @@ import { generarDXF } from '@core/dxf-write.js';
 import { construirMesh } from '@core/mesh3d.js';
 
 const LS_CLAVE = 'kort-perfil-plegado';
+
+/** Nombre por defecto, con la forma de la pieza: "U 40-100-40 · 2 mm". */
+function sugerirNombre(calc) {
+  const cotas = calc.tramos.map((t) => Math.round(t)).join('-');
+  const n = calc.pliegues.length;
+  const forma = n === 0 ? 'Chapa' : n === 1 ? 'L' : n === 2 ? 'U/Z' : n === 4 ? 'Omega' : `${n}P`;
+  return `${forma} ${cotas} · ${calc.espesor} mm`;
+}
 
 export function VistaPlegado() {
   const navegar = useNavigate();
@@ -51,6 +62,18 @@ export function VistaPlegado() {
     return perfilNuevo();
   });
   const [sel, setSel] = useState(0);
+  const [guardadas, setGuardadas] = useState([]);
+
+  const recargarGuardadas = useCallback(async () => {
+    try {
+      const todas = await api.get('piezas');
+      setGuardadas(todas.filter((p) => p.origen === 'plegado'));
+    } catch {
+      /* si el servidor no responde, el diseñador funciona igual sin la lista */
+    }
+  }, []);
+
+  useEffect(() => { recargarGuardadas(); }, [recargarGuardadas]);
 
   const material = materiales.find((m) => m.id === perfil.materialId) || materiales[0];
 
@@ -101,23 +124,82 @@ export function VistaPlegado() {
     toast.success('DXF generado con las líneas de plegado en su capa');
   };
 
+  /** El ítem tal como lo espera el cotizador, con todos sus campos. */
+  const comoItem = (nombre) => ({
+    nombre: nombre || perfil.nombre || `Perfil plegado ${calc.pliegues.length}P · ${calc.espesor} mm`,
+    // 'dxf' y no 'plegado': le dice al cotizador que la geometría viene dada y
+    // no se recalcula desde una pieza de la biblioteca paramétrica.
+    origen: 'dxf',
+    shape: calc.shape,
+    meta: { modelo3D: calc.modelo3D, perfil: { ...perfil } },
+    materialId: perfil.materialId,
+    espesor: calc.espesor,
+    gas: null,
+    cantidad: 1,
+    plegado: calc.plegado,
+    acabadoId: 'ninguno',
+    procesos: [],
+    ingenieriaHoras: 0,
+    urgencia: 'normal',
+  });
+
   const alCotizador = () => {
     if (!calc || calc.error) return;
     if (errores.length) {
       toast.error('Corregí los errores antes de cotizar: la pieza no se puede plegar así');
       return;
     }
-    // El cotizador lo levanta como un ítem de geometría propia
-    sessionStorage.setItem('kort-item-plegado', JSON.stringify({
-      nombre: `Perfil plegado ${calc.pliegues.length}P · ${calc.espesor} mm`,
-      origen: 'plegado',
-      shape: calc.shape,
-      materialId: perfil.materialId,
-      espesor: calc.espesor,
-      plegado: calc.plegado,
-      meta: { modelo3D: calc.modelo3D },
-    }));
-    navegar('/cotizador?desde=plegado');
+    sessionStorage.setItem(CLAVE_ITEM_PENDIENTE, JSON.stringify(comoItem()));
+    navegar('/cotizador');
+  };
+
+  /* ---------------- Guardar y recuperar perfiles ---------------- */
+
+  const guardarPieza = async () => {
+    if (!calc || calc.error) return;
+    const nombre = (prompt('¿Con qué nombre lo guardo?', perfil.nombre || sugerirNombre(calc)) || '').trim();
+    if (!nombre) return;
+    try {
+      const guardada = await api.post('piezas', {
+        nombre,
+        origen: 'plegado',
+        // Se guarda el PERFIL, no la geometría: así se puede volver a editar y
+        // se recalcula solo si cambian las tablas de plegado del material.
+        perfil: { ...perfil, nombre },
+        resumen: {
+          desarrollo: calc.desarrollo,
+          ancho: calc.ancho,
+          espesor: calc.espesor,
+          pliegues: calc.pliegues.length,
+          materialId: perfil.materialId,
+          matrizV: calc.matrizV,
+        },
+      });
+      actualizar({ ...perfil, nombre, id: guardada.id });
+      await recargarGuardadas();
+      toast.success(`"${nombre}" guardado. Lo vas a encontrar en Mis perfiles.`);
+    } catch (e) {
+      toast.error('No se pudo guardar: ' + e.message);
+    }
+  };
+
+  const abrirPieza = (p) => {
+    if (!p?.perfil) return;
+    actualizar({ ...perfilNuevo(), ...p.perfil, id: p.id, nombre: p.nombre });
+    setSel(0);
+    toast.success(`"${p.nombre}" abierto`);
+  };
+
+  const borrarPieza = async (p, ev) => {
+    ev.stopPropagation();
+    if (!confirm(`¿Borrar "${p.nombre}"?`)) return;
+    try {
+      await api.del('piezas/' + p.id);
+      await recargarGuardadas();
+      toast.success('Perfil borrado');
+    } catch (e) {
+      toast.error('No se pudo borrar: ' + e.message);
+    }
   };
 
   /* ---------------- Render ---------------- */
@@ -138,11 +220,54 @@ export function VistaPlegado() {
           <Boton tono="neutro" onClick={bajarDXF} disabled={!calc || calc.error}>
             <Download className="size-4" /> DXF del desarrollo
           </Boton>
+          <Boton tono="acero" onClick={guardarPieza} disabled={!calc || calc.error}>
+            <Save className="size-4" /> Guardar perfil
+          </Boton>
           <Boton onClick={alCotizador} disabled={!calc || calc.error}>
             <Calculator className="size-4" /> Cotizar esta pieza
           </Boton>
         </div>
       </div>
+
+      {/* Perfiles guardados */}
+      {guardadas.length > 0 && (
+        <Panel>
+          <PanelCab>
+            <PanelTitulo>Mis perfiles</PanelTitulo>
+            <span className="text-[11px] text-suave">{guardadas.length} guardado{guardadas.length > 1 ? 's' : ''}</span>
+          </PanelCab>
+          <PanelCuerpo className="flex flex-wrap gap-2">
+            {guardadas.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => abrirPieza(p)}
+                className={`group relative rounded-lg border px-3 py-2 pr-8 text-left transition hover:border-corte-500 hover:shadow-sm ${
+                  perfil.id === p.id ? 'border-corte-500 bg-corte-500/8' : 'border-borde'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-sm font-medium">
+                  <FolderOpen className="size-3.5 text-tenue" />
+                  {p.nombre}
+                </div>
+                <div className="mt-0.5 font-mono text-[11px] text-tenue">
+                  {p.resumen
+                    ? `${num(p.resumen.desarrollo, 0)} × ${num(p.resumen.ancho, 0)} mm · ${p.resumen.espesor} mm · ${p.resumen.pliegues}P`
+                    : 'perfil guardado'}
+                </div>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(ev) => borrarPieza(p, ev)}
+                  title="Borrar este perfil"
+                  className="absolute right-1.5 top-1.5 rounded p-1 text-tenue opacity-0 transition hover:bg-peligro-500/12 hover:text-peligro-500 group-hover:opacity-100"
+                >
+                  <Trash2 className="size-3.5" />
+                </span>
+              </button>
+            ))}
+          </PanelCuerpo>
+        </Panel>
+      )}
 
       {/* Plantillas */}
       <Panel>

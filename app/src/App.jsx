@@ -81,6 +81,26 @@ export function App() {
     cargar().catch((e) => toast.error('No se pudo conectar con el servidor: ' + e.message));
   }, [cargar, iniciarTema]);
 
+  /**
+   * Las vistas que todavía están en la interfaz anterior viven en un iframe y
+   * guardan por su cuenta. Esta app tiene su propia copia de config,
+   * materiales y máquinas —la carga una sola vez porque el cotizador la lee en
+   * cada tecla—, así que sin este puente cambiabas un precio en Materiales y
+   * el cotizador seguía calculando con el viejo hasta recargar la página.
+   * Parecía que el cambio no se había guardado, y en realidad sí se guardaba.
+   */
+  useEffect(() => {
+    const alMensaje = (ev) => {
+      if (ev.origin !== window.location.origin) return;
+      if (ev.data?.tipo !== 'kort-datos-cambiados') return;
+      cargar()
+        .then(() => toast.success(`${ev.data.que || 'Los datos'} actualizado, el cotizador ya usa el valor nuevo`))
+        .catch(() => {});
+    };
+    window.addEventListener('message', alMensaje);
+    return () => window.removeEventListener('message', alMensaje);
+  }, [cargar]);
+
   return (
     <QueryClientProvider client={cliente}>
       {error && !listo ? (

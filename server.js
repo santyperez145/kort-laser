@@ -22,7 +22,7 @@ import { z } from 'zod';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DB } from './src/server/db.js';
+import { DB, fusionarProfundo } from './src/server/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUERTO = Number(process.env.PORT) || 4321;
@@ -173,10 +173,51 @@ api.get('/:recurso', (req, res, siguiente) => {
   res.json(db.leer(recurso));
 });
 
+/**
+ * Guardado de los documentos de configuración.
+ *
+ * ⚠️ Acá había una bomba: el PUT reemplazaba el documento entero por lo que
+ * viniera en el cuerpo. Un cliente que mandara sólo `{comercial:{margen:50}}`
+ * **borraba la empresa, la producción y la estructura de costos**, y el
+ * sistema seguía andando con los valores de fábrica como si nada. Se pierde
+ * la calibración del taller sin un solo mensaje de error.
+ *
+ * Ahora se fusiona sobre lo que ya estaba y, en las listas, se valida que
+ * tengan forma de lista antes de pisar nada.
+ */
 api.put('/:recurso', (req, res, siguiente) => {
   const { recurso } = req.params;
   if (!DOCUMENTOS.includes(recurso)) return siguiente();
-  res.json(db.escribir(recurso, req.body));
+  const cuerpo = req.body;
+
+  if (recurso === 'materiales' || recurso === 'maquinas') {
+    if (!Array.isArray(cuerpo) || cuerpo.length === 0) {
+      return res.status(400).json({
+        error: `${recurso} tiene que ser una lista con al menos un elemento. No se guardó nada.`,
+      });
+    }
+    const sinId = cuerpo.filter((x) => !x || typeof x !== 'object' || !x.id);
+    if (sinId.length) {
+      return res.status(400).json({ error: `Hay ${sinId.length} ${recurso} sin id. No se guardó nada.` });
+    }
+    if (recurso === 'materiales') {
+      const sinProcesos = cuerpo.filter((m) => !m.procesos || !Object.keys(m.procesos).length);
+      if (sinProcesos.length) {
+        return res.status(400).json({
+          error: `Estos materiales no tienen tablas de corte por gas: ${sinProcesos.map((m) => m.id).join(', ')}. `
+            + 'Guardarlos dejaría al cotizador sin poder calcular. No se guardó nada.',
+        });
+      }
+    }
+    return res.json(db.escribir(recurso, cuerpo));
+  }
+
+  // config: se fusiona sobre lo guardado, nunca se reemplaza a ciegas
+  if (!cuerpo || typeof cuerpo !== 'object' || Array.isArray(cuerpo)) {
+    return res.status(400).json({ error: 'La configuración tiene que ser un objeto. No se guardó nada.' });
+  }
+  const actual = db.leer('config') || {};
+  return res.json(db.escribir('config', fusionarProfundo(actual, cuerpo)));
 });
 
 // --- Colecciones

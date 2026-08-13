@@ -9,7 +9,7 @@
  * esperar una vuelta de red — y en un mostrador esa espera se nota.
  */
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { FilePlus2 } from 'lucide-react';
@@ -45,6 +45,25 @@ function geometria(item, materiales) {
   return { shape: item.shape, meta: item.meta || { modelo3D: { tipo: 'plano' } }, avisos: [] };
 }
 
+/** Clave donde el diseñador de plegado deja la pieza para cotizar. */
+export const CLAVE_ITEM_PENDIENTE = 'kort-item-pendiente';
+
+/**
+ * Levanta la pieza que dejó otra vista y la borra: es un pase de mano, no un
+ * guardado. Si quedara, volver al cotizador la volvería a agregar sola.
+ */
+function tomarItemPendiente() {
+  try {
+    const crudo = sessionStorage.getItem(CLAVE_ITEM_PENDIENTE);
+    if (!crudo) return null;
+    sessionStorage.removeItem(CLAVE_ITEM_PENDIENTE);
+    const item = JSON.parse(crudo);
+    return item?.shape ? item : null;
+  } catch {
+    return null;
+  }
+}
+
 export function VistaCotizador() {
   const [params, setParams] = useSearchParams();
   const materiales = usarEstado((s) => s.materiales);
@@ -59,7 +78,26 @@ export function VistaCotizador() {
   /* ---------------- Carga inicial ---------------- */
   const id = params.get('id');
 
+  /**
+   * ⚠️ Este efecto CREA el presupuesto desde cero, así que sólo puede correr
+   * cuando cambia el presupuesto que se está mirando — nunca porque se
+   * recargaron los materiales.
+   *
+   * Tenía a `materiales` en las dependencias: al guardar un precio desde la
+   * vista de Materiales, el estado global se recargaba, el array cambiaba de
+   * referencia y esto borraba el presupuesto que estabas armando y lo dejaba
+   * con la pieza por defecto. Se perdía el trabajo sin ningún aviso.
+   *
+   * `arrancado` recuerda para qué presupuesto ya se inicializó.
+   */
+  const arrancado = useRef(null);
+
   useEffect(() => {
+    const clave = id || 'nuevo';
+    if (arrancado.current === clave) return undefined;
+    if (!materiales.length) return undefined;
+    arrancado.current = clave;
+
     let vivo = true;
     async function arrancar() {
       if (id) {
@@ -74,11 +112,16 @@ export function VistaCotizador() {
           if (vivo) setCargando(false);
         }
       } else {
-        setDoc({ ...docVacio(), items: [itemNuevo(materiales)] });
+        // El diseñador de plegado deja acá la pieza que se acaba de armar.
+        // Sin esto, "Cotizar esta pieza" abría el cotizador con la plantilla
+        // por defecto y el perfil diseñado se perdía.
+        const delPlegado = tomarItemPendiente();
+        setDoc({ ...docVacio(), items: [delPlegado || itemNuevo(materiales)] });
+        if (delPlegado) toast.success('Perfil plegado cargado en el presupuesto');
       }
       if (vivo) setSel(0);
     }
-    if (materiales.length) arrancar();
+    arrancar();
     return () => {
       vivo = false;
     };

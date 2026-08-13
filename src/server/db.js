@@ -693,6 +693,23 @@ export class DB {
   }
 }
 
+/**
+ * Fusión profunda para guardar configuración sin perder lo que no vino.
+ *
+ * Los arreglos se reemplazan enteros: una lista de acabados editada es la
+ * lista nueva, no una mezcla con la vieja.
+ */
+export function fusionarProfundo(base, encima) {
+  if (Array.isArray(encima)) return encima;
+  if (!encima || typeof encima !== 'object') return encima;
+  const out = { ...(base && typeof base === 'object' && !Array.isArray(base) ? base : {}) };
+  for (const [k, v] of Object.entries(encima)) {
+    if (v === undefined) continue;
+    out[k] = v && typeof v === 'object' && !Array.isArray(v) ? fusionarProfundo(out[k], v) : v;
+  }
+  return out;
+}
+
 export function nuevoId() {
   return Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
 }

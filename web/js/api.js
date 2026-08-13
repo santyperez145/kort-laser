@@ -71,16 +71,39 @@ export function simbolo() {
   return estado.config?.comercial?.simbolo || '$';
 }
 
+/**
+ * Le avisa a la interfaz nueva que algo cambió.
+ *
+ * Estas vistas viven adentro de un iframe y la aplicación React tiene su
+ * propia copia de config, materiales y máquinas: la carga una sola vez al
+ * arrancar porque el cotizador la lee en cada tecla. Sin este aviso, guardar
+ * un precio acá dejaba al cotizador calculando con el valor viejo hasta que
+ * alguien recargara la página — y parecía que el cambio no se había guardado.
+ */
+function avisarCambio(que) {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ tipo: 'kort-datos-cambiados', que }, window.location.origin);
+    }
+  } catch {
+    /* si el navegador bloquea el postMessage, se pierde el refresco
+       automático pero el dato ya quedó guardado en el servidor */
+  }
+}
+
 export async function guardarConfig(config) {
   estado.config = await api.put('config', config);
+  avisarCambio('config');
   return estado.config;
 }
 export async function guardarMateriales(m) {
   estado.materiales = await api.put('materiales', m);
+  avisarCambio('materiales');
   return estado.materiales;
 }
 export async function guardarMaquinas(m) {
   estado.maquinas = await api.put('maquinas', m);
+  avisarCambio('maquinas');
   return estado.maquinas;
 }
 export async function recargarClientes() {
