@@ -7,14 +7,14 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge } from 'lucide-react';
+import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge, MessageCircle, Mail } from 'lucide-react';
 import { cotizarItem } from '@core/pricing.js';
 import { explicarFactor } from '@core/calibracion.js';
 import { explicarItem } from '@core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '@core/compras.js';
 
 import { usarCotizador } from './contexto';
-import { descargarDXFItem, descargarDXFNesting, exportarPDF, exportarOT } from './acciones';
+import { descargarDXFItem, descargarDXFNesting, exportarPDF, exportarOT, enviarPresupuesto } from './acciones';
 import { ComoSeCalcula } from '@/componentes/PorQue';
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
@@ -373,6 +373,22 @@ export function Precio() {
             <FileText />
             Generar PDF del presupuesto
           </Boton>
+          {/* Generar el PDF y mandarlo eran dos momentos separados: se
+              generaba, se abría WhatsApp, se buscaba al cliente y se escribía
+              el mensaje. Son cinco minutos por presupuesto, varias veces al
+              día. Acá el PDF se descarga primero para que ya esté en Descargas
+              cuando aparece la ventana del chat. */}
+          <div className="grid grid-cols-2 gap-2">
+            <Boton onClick={() => enviarPresupuesto({ ...args, via: 'whatsapp' })}>
+              <MessageCircle />
+              WhatsApp
+            </Boton>
+            <Boton onClick={() => enviarPresupuesto({ ...args, via: 'mail' })}>
+              <Mail />
+              Mail
+            </Boton>
+          </div>
+
           <Boton ancho="completo" onClick={() => exportarOT(args)}>
             <ClipboardList />
             Orden de trabajo (taller)

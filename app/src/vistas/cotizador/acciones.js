@@ -14,6 +14,7 @@ import { miniatura } from '@/lib/miniatura';
 import { generarDXF, generarDXFNesting } from '@core/dxf-write.js';
 import { generarPresupuestoPDF, generarOrdenTrabajoPDF } from '@core/quote-pdf.js';
 import { listaDeCompra } from '@core/compras.js';
+import { mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '@core/envio.js';
 
 /** Un cálculo accesorio que falla no puede impedir que salga el papel. */
 const seguro = (fn) => { try { return fn(); } catch { return null; } };
@@ -90,6 +91,38 @@ export async function exportarPDF({ doc, coti, config, resueltos, actualizarDoc 
   } catch {
     toast.success('PDF descargado');
   }
+  return { numero, nombre };
+}
+
+/**
+ * Mandarle el presupuesto al cliente por WhatsApp o por mail.
+ *
+ * Genera el PDF primero y después abre la conversación con el mensaje escrito.
+ * El adjunto lo pone la persona: ni WhatsApp Web ni `mailto:` aceptan archivos
+ * por URL, y la alternativa sería exponer la máquina del taller a internet.
+ *
+ * Por eso el PDF se descarga ANTES de abrir el chat: cuando aparece la ventana
+ * de WhatsApp el archivo ya está en Descargas, listo para arrastrar.
+ */
+export async function enviarPresupuesto({ doc, coti, config, resueltos, actualizarDoc, via = 'whatsapp' }) {
+  if (!coti?.items.length) return toast.error('No hay ítems para cotizar');
+
+  const salida = await exportarPDF({ doc, coti, config, resueltos, actualizarDoc });
+  const presupuesto = { ...doc, numero: salida?.numero || doc.numero };
+  const mensaje = mensajePresupuesto({ presupuesto, cotizacion: coti, config, tipo: via });
+
+  const destino =
+    via === 'whatsapp'
+      ? enlaceWhatsApp({ telefono: doc.cliente?.telefono, mensaje })
+      : enlaceMail({ email: doc.cliente?.email, mensaje, presupuesto, config });
+
+  if (destino.aviso) toast.warning(destino.aviso, { duration: 7000 });
+
+  /* `noopener` es obligatorio: sin él la pestaña que se abre puede tocar
+     `window.opener` y redirigir el sistema. */
+  window.open(destino.url, '_blank', 'noopener,noreferrer');
+
+  toast.info(`Adjuntá "${salida?.nombre || 'el PDF'}" — está en tus descargas`, { duration: 8000 });
 }
 
 export async function exportarOT({ doc, coti, config, resueltos, actualizarDoc, ctx }) {

@@ -28,7 +28,7 @@ export const RUTAS = [
   { a: '/presupuestos', txt: 'Presupuestos', Icono: FileText },
   { a: '/ordenes', txt: 'Producción', Icono: Factory },
   { a: '/clientes', txt: 'Clientes', Icono: Users },
-  { a: '/materiales', txt: 'Materiales', Icono: Layers },
+  { a: '/materiales', txt: 'Materiales', Icono: Layers, nuevo: true },
   { a: '/maquinas', txt: 'Máquinas', Icono: Cpu },
   { a: '/costos', txt: 'Costos', Icono: Wallet },
   { a: '/config', txt: 'Configuración', Icono: Settings },

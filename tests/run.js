@@ -40,6 +40,7 @@ import { costoConsumiblesHora, revisarConsumiblesHora, CONSUMIBLES_LASER } from 
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
+import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
 import { construirMesh } from '../src/core/mesh3d.js';
 import { PDF, anchoTexto } from '../src/core/pdf.js';
 import { generarPresupuestoPDF } from '../src/core/quote-pdf.js';
@@ -2014,6 +2015,78 @@ test('el tonelaje sale de la fórmula de plegado al aire', () => {
   const kNporMetro = (1.33 * acero.Rm * 2 * 2) / 16;
   cerca(p.toneladasPorMetro, kNporMetro / 9.80665, 0.01);
   cerca(p.toneladas, (p.toneladasPorMetro * 1000) / 1000, 0.01);
+});
+
+/* ================================================================== */
+grupo('Envío del presupuesto');
+
+test('el teléfono argentino se normaliza al formato de WhatsApp', () => {
+  /* Es la parte que parece trivial y no lo es. Con el 15 puesto, el enlace
+     abre un chat con un número que no existe y el mensaje se pierde SIN QUE
+     NADIE SE ENTERE — peor que fallar, porque uno cree que lo mandó. */
+  const casos = [
+    ['0380 15 4123456', '5493804123456', 'La Rioja, como se escribe en una agenda'],
+    ['380 15 4123456', '5493804123456', 'sin el 0 de larga distancia'],
+    ['3804123456', '5493804123456', 'ya sin 15 ni 0'],
+    ['+54 9 380 412-3456', '5493804123456', 'internacional completo'],
+    ['54 9 380 4123456', '5493804123456', 'sin el +'],
+    ['011 15 5555-4444', '5491155554444', 'área de 2 dígitos'],
+    ['11 5555 4444', '5491155554444', 'CABA directo'],
+    ['02954 15 456789', '5492954456789', 'área de 4 dígitos'],
+    ['+55 11 91234-5678', '5511912345678', 'brasileño: no se toca'],
+  ];
+  for (const [entrada, esperado, nota] of casos) {
+    assert.equal(telefonoWhatsApp(entrada), esperado, `${nota}: "${entrada}"`);
+  }
+  // Lo que no es un teléfono no puede devolver algo que parezca uno
+  for (const basura of ['', null, undefined, 'hola', '123', '  ']) {
+    assert.equal(telefonoWhatsApp(basura), null, `"${basura}" no es un teléfono`);
+  }
+});
+
+test('el mensaje que se manda no revela nada nuestro', () => {
+  /* Misma regla que el PDF: el mensaje sale hacia el cliente, así que no
+     puede llevar costo, margen, tiempo de máquina ni chapas. */
+  const coti = cotizarPresupuesto({
+    items: [
+      { nombre: 'Base', shape: makeShape(rect(0, 0, 300, 200)), materialId: 'acero-sae1010', espesor: 3, cantidad: 40 },
+      { nombre: 'Tapa', shape: makeShape(rect(0, 0, 310, 210)), materialId: 'acero-sae1010', espesor: 3, cantidad: 20 },
+    ],
+  }, CTX);
+  const msg = mensajePresupuesto({
+    presupuesto: { numero: '2026-0007', cliente: { nombre: 'Metalúrgica del Sur SRL' } },
+    cotizacion: coti, config: DEFAULT_CONFIG,
+  });
+  for (const palabra of ['margen', 'utilidad', 'costo', 'chapa', 'máquina', 'aprovecha']) {
+    assert.ok(!msg.toLowerCase().includes(palabra), `el mensaje no puede decir "${palabra}"`);
+  }
+  const costoFmt = Math.round(coti.items[0].costos.total).toLocaleString('es-AR');
+  assert.ok(!msg.includes(costoFmt), 'el costo no puede aparecer en el mensaje');
+
+  // Y sí tiene que llevar lo que el cliente necesita para decidir
+  assert.ok(msg.includes('2026-0007'), 'el número del presupuesto');
+  assert.ok(msg.includes(Math.round(coti.resumen.total).toLocaleString('es-AR')), 'el total');
+  assert.ok(/Metalúrgica/.test(msg), 'el saludo con el nombre del cliente');
+});
+
+test('el enlace de WhatsApp avisa cuando no pudo interpretar el teléfono', () => {
+  /* Si no se puede armar el número, abrir WhatsApp igual sirve (se elige el
+     contacto a mano) pero HAY que decirlo: si no, parece que el sistema eligió
+     el contacto solo y el mensaje se manda a cualquiera. */
+  const bueno = enlaceWhatsApp({ telefono: '0380 15 4123456', mensaje: 'hola' });
+  assert.equal(bueno.telefono, '5493804123456');
+  assert.equal(bueno.aviso, null);
+  assert.ok(bueno.url.startsWith('https://wa.me/5493804123456?text='));
+
+  const malo = enlaceWhatsApp({ telefono: 'no es un tel', mensaje: 'hola' });
+  assert.equal(malo.telefono, null);
+  assert.ok(malo.aviso, 'un teléfono ilegible tiene que avisar');
+  assert.ok(malo.url.startsWith('https://wa.me/?text='), 'y aun así abrir WhatsApp con el mensaje');
+
+  // El mensaje viaja escapado: un & o un # crudo cortarían la URL
+  const raro = enlaceWhatsApp({ telefono: '3804123456', mensaje: 'Chapa #4 & plegado 90°' });
+  assert.ok(!raro.url.includes('#') && !raro.url.includes(' '), 'el mensaje tiene que ir escapado');
+  assert.equal(decodeURIComponent(raro.url.split('text=')[1]), 'Chapa #4 & plegado 90°');
 });
 
 /* ================================================================== */

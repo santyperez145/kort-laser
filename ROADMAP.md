@@ -257,16 +257,25 @@ presupuesto, se podría cortar ahí adentro.
 
 ## Fase 2 — Que el sistema aprenda de la producción
 
-### 🔜 2.1 Tiempo real vs estimado
+### ✅ 2.1 Tiempo real vs estimado
 
-Cargar en la orden de trabajo cuánto tardó de verdad y compararlo con lo
-estimado. Con 20 o 30 trabajos cargados, el sistema puede sugerir el ajuste de
-eficiencia y de velocidades **con tus datos**, en vez de que lo calibres a mano.
+`src/core/calibracion.js`. Al marcar una orden como terminada, el taller carga
+cuánto tardó de verdad. Con eso sale un factor de corrección que el cotizador
+aplica, y que se puede ver en el desglose del precio.
 
-Es el paso que convierte al sistema en algo que mejora solo. La base ya guarda
-todo lo necesario; falta el campo, la pantalla y el análisis.
+Cuatro decisiones que hacen que sirva en un taller y no sólo en teoría:
 
-**Esfuerzo:** medio. **Alto valor a mediano plazo.**
+- **Mediana, no promedio.** Un trabajo donde el operario paró a almorzar con el
+  cronómetro corriendo arrastra el promedio y no mueve la mediana.
+- **No corrige nada hasta tener 5 trabajos.** Con tres mediciones no hay un
+  factor, hay ruido, y corregir con ruido da confianza falsa.
+- **Lo imposible se descarta y se cuenta.** Un ratio de 200 es alguien que
+  escribió minutos donde iban horas. Se saca, pero se informa: si se descarta
+  la mitad de lo cargado, el problema es cómo se está midiendo.
+- **Nunca corrige en silencio.** El resultado dice de dónde salió el factor y
+  con cuántos trabajos.
+
+Es el paso que convierte al sistema en algo que mejora solo.
 
 ### ✅ 2.0 Lista de compra de material
 
@@ -314,14 +323,26 @@ lista de compra que ya sale de cada presupuesto, puede sugerir la orden.
 
 ## Fase 3 — Lo comercial
 
-### 🔜 3.1 Enviar el presupuesto sin salir del sistema
+### ✅ 3.1 Enviar el presupuesto sin salir del sistema
 
-Hoy generás el PDF y lo mandás a mano. Falta el botón que abra WhatsApp Web con
-el mensaje y el PDF, o que mande el mail.
+`src/core/envio.js` + los botones **WhatsApp** y **Mail** en el cotizador.
+Generan el PDF, arman el mensaje con el total y las condiciones, y abren la
+conversación con el texto escrito.
 
-Es de lo más barato de hacer y de lo que más tiempo ahorra por día.
+El adjunto lo pone la persona: ni WhatsApp Web ni `mailto:` aceptan archivos
+por URL, y la alternativa sería exponer la máquina del taller a internet. Por
+eso el PDF se descarga ANTES de abrir el chat — cuando aparece la ventana, el
+archivo ya está en Descargas listo para arrastrar.
 
-**Esfuerzo:** bajo.
+La parte que parecía trivial y no lo era: **normalizar el teléfono argentino.**
+Un celular se marca `0380 15 4123456` pero WhatsApp lo quiere como
+`5493804123456` — sin el 0, sin el 15 y con un 9 después del 54. Con el 15
+puesto, el enlace abre un chat con un número que no existe y el mensaje se
+pierde sin que nadie se entere, que es peor que fallar. Hay nueve casos de
+prueba, incluido el área de 4 dígitos y un número brasileño que no se toca.
+
+El mensaje sigue la misma regla que el PDF: ni costo, ni margen, ni tiempo de
+máquina, ni chapas. Un test lo verifica.
 
 ### 📋 3.2 Actualización de precios desde lista del proveedor
 
@@ -411,7 +432,7 @@ faltan siguen funcionando embebidas desde `/legacy` (ver CLAUDE.md).
 |---|---|---|
 | ✅ | Panel | — |
 | ✅ | Cotizador | — |
-| 🔜 | Materiales | La más grande (361 líneas) y la que más se toca |
+| ✅ | Materiales | Tabla, tablas de corte por gas, historial y actualización masiva |
 | 📋 | Costos | Tiene gráficos propios: pasarlos a Recharts |
 | 📋 | Presupuestos · Producción · Clientes | Listados; salen rápido y parecidos entre sí |
 | 📋 | Máquinas · Configuración | Formularios largos, poco riesgo |
@@ -428,7 +449,7 @@ el prefijo `--k-` de las variables CSS, que existe sólo para convivir.
 | ✅ | ~~`cotizador.js` tiene 1.100 líneas y hace demasiado~~ | Partido en `app/src/vistas/cotizador/` |
 | 📋 | No hay tests de la interfaz, sólo del núcleo | Medio: una vista puede romperse sin que nadie se entere. Ahora que hay React conviene Vitest + Testing Library |
 | 📋 | El bundle son ~2,3 MB (620 kB gzip) en 4 trozos | Bajo: se sirve desde localhost, no por red |
-| 🔜 | **Node 21.7 no es LTS y ahora BLOQUEA el build** | **Alto**: Vite 8 usa rolldown, que necesita Node ≥ 22.12. En esta máquina `npm run build` no corre. Ya había bloqueado `better-sqlite3`. Instalar Node 22 LTS lo resuelve todo junto |
+| ✅ | ~~Node 21.7 no es LTS y BLOQUEA el build~~ | Resuelto: la máquina está en **Node 24 LTS**. El build exige ≥ 22.12 porque Vite 8 va sobre rolldown; el núcleo y los tests corren en cualquier Node |
 | 💭 | El nesting por skyline no mete piezas en "cuevas" | Bajo: da del lado seguro, nunca promete un encastre falso |
 
 ---

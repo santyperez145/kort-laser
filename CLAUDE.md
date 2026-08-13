@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 206 verificaciones del núcleo
+npm test           # 240 verificaciones del núcleo
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -52,7 +52,7 @@ código.
   deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
   react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
   **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
-  Node y en el navegador, y lo que permite que los 172 tests lo verifiquen sin
+  Node y en el navegador, y lo que permite que los 240 tests lo verifiquen sin
   levantar un navegador.
 - **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
   sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde
@@ -71,8 +71,9 @@ app/          Interfaz nueva: React + Vite + Tailwind + Radix.
               app/src/componentes/ui/   kit propio estilo shadcn
               app/src/componentes/visores/  2D (Konva), 3D (r3f), nesting,
                                             sección de perfil plegado
-              app/src/vistas/           Panel, Cotizador y Plegado
-web/          Interfaz anterior: vanilla JS. Siguen vivas 7 vistas.
+              app/src/vistas/           Panel, Cotizador, Plegado,
+                                        Tarifario y Materiales
+web/          Interfaz anterior: vanilla JS. Siguen vivas 6 vistas.
 web-dist/     Salida de `npm run build`. No se commitea.
 server.js     Express + Helmet + Zod.
 tests/run.js  Suite completa. Un solo archivo, sin runner externo.
@@ -85,6 +86,8 @@ Dos módulos del núcleo **no calculan nada nuevo, leen lo ya calculado**:
   o de una tarifa (`explicarTarifa`) para mostrarla al lado del número.
 - `compras.js` — de un presupuesto cotizado saca qué chapa hay que comprar
   (`listaDeCompra`) y el pedido para el proveedor (`pedidoEnTexto`).
+- `envio.js` — arma el mensaje y el enlace para mandarle el presupuesto al
+  cliente por WhatsApp o por mail.
 
 Si alguno de los dos hiciera su propia cuenta, tarde o temprano diría algo
 distinto de lo que se cobra. Esa es toda la regla.
@@ -95,8 +98,8 @@ escribe. En un mostrador, esperar una vuelta de red por cada tecla se nota.
 
 ### Las dos interfaces conviven, y el iframe no es pereza
 
-Panel y Cotizador están rehechos en React. Las otras siete vistas
-(Presupuestos, Producción, Clientes, Materiales, Máquinas, Costos,
+Panel, Cotizador, Plegado, Tarifario y Materiales están rehechos en React. Las
+otras seis vistas (Presupuestos, Producción, Clientes, Máquinas, Costos,
 Configuración) siguen siendo las de antes y se muestran **dentro de un
 iframe** apuntando a `/legacy`.
 
@@ -212,6 +215,21 @@ exactamente como estaba. Hay un test que lo fija.
   y el sistema seguía andando con los valores de fábrica sin un solo aviso. Se
   perdía la calibración del taller en silencio. Los arreglos sí se reemplazan
   enteros, porque si no un acabado borrado resucita.
+
+- **Una vista que edita sobre una copia se siembra CUANDO llegan los datos, no
+  al montar.** Al montar, el store todavía está vacío: sembrar la copia en el
+  `useState` inicial deja la tabla en "Sin materiales" para siempre. Pero
+  tampoco puede depender del array del store, porque entonces una recarga pisa
+  las ediciones a medio hacer. El patrón es `useEffect` + un `useRef` que
+  marque que ya se sembró — igual que el `arrancado` del cotizador.
+
+- **El teléfono argentino NO se manda como está cargado.** WhatsApp quiere
+  `5493804123456` y en la agenda está `0380 15 4123456`: hay que sacar el 0 de
+  larga distancia, sacar el 15 y poner un 9 después del 54. Con el 15 puesto el
+  enlace abre un chat con un número inexistente y el mensaje se pierde **sin
+  error**, que es peor que fallar. Vive en `envio.js` → `telefonoWhatsApp()`,
+  con nueve casos de prueba porque el código de área tiene 2, 3 o 4 dígitos y
+  eso cambia dónde está el 15.
 
 - **El efecto de arranque del cotizador NO puede depender de `materiales`.**
   Crea el presupuesto desde cero; si se recargan los materiales, el array cambia

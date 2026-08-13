@@ -74,6 +74,21 @@ export const usarEstado = create((set, get) => ({
     return guardadas;
   },
 
+  /**
+   * Guarda la lista completa de materiales.
+   *
+   * Misma regla que las máquinas: va la lista entera porque el endpoint es un
+   * documento único. Y hay una razón extra para tocarlos por acá y no contra
+   * la API a mano — el servidor registra en el historial cada cambio de
+   * precio comparando contra lo que había, así que mandar una lista parcial
+   * ensucia el historial además de borrar materiales.
+   */
+  async guardarMateriales(materiales) {
+    const guardados = await api.put('materiales', materiales);
+    set({ materiales: Array.isArray(guardados) ? guardados : materiales });
+    return guardados;
+  },
+
   /** Contexto que espera `cotizarPresupuesto()` del motor de cálculo. */
   ctx() {
     const { materiales, maquinas, config, calibracion } = get();
