@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 172 verificaciones del núcleo
+npm test           # 206 verificaciones del núcleo
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -78,6 +78,16 @@ server.js     Express + Helmet + Zod.
 tests/run.js  Suite completa. Un solo archivo, sin runner externo.
 docs/PRECIOS.md  De dónde sale cada número, con nivel de confianza.
 ```
+
+Dos módulos del núcleo **no calculan nada nuevo, leen lo ya calculado**:
+
+- `explicacion.js` — arma la derivación paso a paso de un precio (`explicarItem`)
+  o de una tarifa (`explicarTarifa`) para mostrarla al lado del número.
+- `compras.js` — de un presupuesto cotizado saca qué chapa hay que comprar
+  (`listaDeCompra`) y el pedido para el proveedor (`pedidoEnTexto`).
+
+Si alguno de los dos hiciera su propia cuenta, tarde o temprano diría algo
+distinto de lo que se cobra. Esa es toda la regla.
 
 El servidor sólo persiste, sirve y valida la forma de lo que entra: **todo el
 cálculo pasa en el navegador**, para que el cotizador responda mientras se
@@ -157,6 +167,17 @@ Son la razón de ser de varios tests.
    las fracciones da lo mismo salvo por el error de coma flotante, y ese número
    se usa para comprar material.
 
+7. **El presupuesto del cliente no muestra nada nuestro.** Ni margen, ni
+   utilidad, ni costo, ni el porcentaje. Tampoco **el tiempo de máquina ni las
+   chapas consumidas**: mostrar "18m 2s" al lado de un precio de seis cifras
+   convierte la conversación en el precio por minuto de máquina en vez del
+   trabajo entregado, y de paso le revela al cliente el rendimiento de nuestro
+   anidado. Todo eso va en la **orden de trabajo**, que es interna.
+
+   Hay un test que extrae el TEXTO REAL del PDF y falla si aparece alguna de
+   esas palabras o el número del costo. Se verifica sobre el texto y no sobre
+   el código a propósito: es lo único que ataja una línea agregada después.
+
 ## Trampas conocidas
 
 - **`PUT /api/config` FUSIONA, no reemplaza.** Reemplazaba: mandar sólo
@@ -180,6 +201,16 @@ Son la razón de ser de varios tests.
   Navegar a `/plegado` cae en el catch-all y muestra el Panel.
 
 
+- **"Qué material comprar" y "qué material consume el trabajo" son números
+  distintos.** El proveedor no vende media chapa, así que la lista de compra
+  pide enteras. Pero una pieza suelta que usa el 1 % de una chapa **no obliga
+  a comprarla**: sale del retazero, y por eso el cotizador la cobra por área
+  consumida. Medir la relación material/venta contra la chapa entera daba
+  2.685 % — un número que nadie mira dos veces y que dejaba de servir para lo
+  único que sirve: saber si el anticipo alcanza. `compras.js` informa las dos
+  cosas y calcula la relación sobre `costos.material`, que es lo que el
+  cotizador ya decidió.
+
 - **Cobrar por kilo: el recorte lo paga el taller.** El kilo que se entrega NO
   cuesta el kilo que se compró: cuesta el de compra dividido el aprovechamiento.
   Con chapa a $2.950 y 77 % de nesting, el kilo entregado sale $3.869 antes de
@@ -202,7 +233,18 @@ Son la razón de ser de varios tests.
 - **Las plantillas de plegado tienen que ser plegables de verdad.** Un ala de
   12 mm no entra en el ala mínima de una V16 (12,4 mm). Hay un test que corre
   todas las plantillas en 1,5 y 2 mm y falla si alguna da error: si se agrega
-  una plantilla nueva con cotas de fantasía, salta ahí.
+  una plantilla nueva con cotas de fantasía, salta ahí. Lo mismo para las
+  piezas de estantería, que se construyen en 1,5 / 2 / 3 mm y no pueden
+  devolver ningún aviso de nivel `error`.
+
+- **En un sistema de estantería el PASO de las ranuras es un parámetro, no un
+  número escondido.** Si el parante y la ménsula no comparten paso, no
+  encastran — y eso se descubre en el armado, con la chapa ya cortada.
+
+- **Los `avisos` de una pieza se filtran con `.filter(Boolean)`.** El patrón
+  de la biblioteca es armar el arreglo con condicionales que devuelven `null`;
+  olvidarse el filtro deja un `null` adentro y cualquier `.some(a => a.nivel)`
+  explota.
 
 - **Los componentes de `app/src/componentes/ui/` NO usan los nombres de shadcn.**
   Es `Boton tono/tam` (no `variant/size`), `Selector valor/alCambiar` (no

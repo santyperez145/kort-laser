@@ -6,12 +6,15 @@
  * evidente cuando un costo se disparó por un parámetro mal cargado.
  */
 
-import { useMemo } from 'react';
-import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart } from 'lucide-react';
 import { cotizarItem } from '@core/pricing.js';
+import { explicarItem } from '@core/explicacion.js';
+import { listaDeCompra, pedidoEnTexto } from '@core/compras.js';
 
 import { usarCotizador } from './contexto';
 import { descargarDXFItem, descargarDXFNesting, exportarPDF, exportarOT } from './acciones';
+import { ComoSeCalcula } from '@/componentes/PorQue';
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
 import { Campo, Entrada, AreaTexto } from '@/componentes/ui/campos';
@@ -70,7 +73,13 @@ export function Precio() {
     }
   }, [r, resuelto, item?.cantidad, ctx]);
 
-  const args = { doc, coti, config, resueltos, actualizarDoc };
+  /* La derivación completa del precio. Se arma sola a partir del resultado ya
+     cotizado — no recalcula nada — así que no cuesta tenerla lista aunque el
+     panel esté cerrado. */
+  const [verCuenta, setVerCuenta] = useState(false);
+  const explicacion = useMemo(() => (r ? explicarItem(r, { config }) : null), [r, config]);
+
+  const args = { doc, coti, config, resueltos, actualizarDoc, ctx };
 
   return (
     <>
@@ -169,6 +178,23 @@ export function Precio() {
                   ) : null}
                 </Aviso>
               )}
+
+              {/* La cuenta abierta. Es lo que permite defender el número en el
+                  mostrador y, sobre todo, encontrar el dato mal cargado
+                  cuando el precio sale raro. */}
+              <Boton
+                tono="fantasma"
+                tam="sm"
+                className="mt-3 w-full"
+                onClick={() => setVerCuenta((v) => !v)}
+                aria-expanded={verCuenta}
+              >
+                <Calculator className="size-3.5" />
+                {verCuenta ? 'Ocultar la cuenta' : '¿De dónde sale este precio?'}
+              </Boton>
+              {verCuenta && explicacion ? (
+                <ComoSeCalcula explicacion={explicacion} className="mt-2.5" />
+              ) : null}
             </div>
           ) : (
             <Vacio titulo="Sin cálculo" />
@@ -293,6 +319,9 @@ export function Precio() {
         </Panel>
       ) : null}
 
+      {/* ---------------- Qué hay que comprar ---------------- */}
+      <ListaDeCompra coti={coti} ctx={ctx} sim={sim} />
+
       {/* ---------------- Acciones ---------------- */}
       <Panel>
         <PanelCab>
@@ -331,5 +360,107 @@ export function Precio() {
         </PanelCuerpo>
       </Panel>
     </>
+  );
+}
+
+/**
+ * Qué chapa hay que comprar para hacer este presupuesto.
+ *
+ * El salto de "el cliente aprobó" a "voy a comprar" se hacía a mano con una
+ * calculadora. Comprar de menos para la máquina a mitad de trabajo; comprar de
+ * más deja el capital en el depósito. Los dos números salen de lo que el
+ * sistema ya calculó.
+ */
+function ListaDeCompra({ coti, ctx, sim }) {
+  const [copiado, setCopiado] = useState(false);
+  const lista = useMemo(() => {
+    if (!coti?.items?.length) return null;
+    try {
+      return listaDeCompra(coti, ctx());
+    } catch {
+      return null;
+    }
+  }, [coti, ctx]);
+
+  if (!lista || !lista.lineas.length) return null;
+
+  const copiarPedido = async () => {
+    try {
+      await navigator.clipboard.writeText(pedidoEnTexto(lista));
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      /* sin portapapeles (http sin TLS): el texto igual se ve en pantalla */
+    }
+  };
+
+  return (
+    <Panel>
+      <PanelCab
+        acciones={
+          <span className="font-mono text-[11px] text-suave tabular">{num(lista.pesoTotal, 0)} kg</span>
+        }
+      >
+        <PanelTitulo>Material a comprar</PanelTitulo>
+      </PanelCab>
+      <PanelCuerpo>
+        <div className="text-[12.5px]">
+          {lista.lineas.map((l) => (
+            <div key={l.clave} className="border-b border-dashed border-borde py-1.5 last:border-0">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0">
+                  <strong className="tabular">{l.chapas}</strong> × {l.chapa.w}×{l.chapa.h} ·{' '}
+                  {num(l.espesor, 1)} mm
+                </span>
+                <span className="tabular font-mono whitespace-nowrap">{money(l.costoTotal, sim, 0)}</span>
+              </div>
+              <div className="text-[11px] text-suave">
+                {l.material} · {num(l.pesoTotal, 1)} kg
+                {l.desdeRetazo
+                  ? ' · alcanza con un retazo'
+                  : ` · se entrega el ${pct(l.aprovechamiento * 100, 0)}` +
+                    (l.retazoM2 > 0.2 ? ` · queda retazo de ${num(l.retazoM2, 2)} m²` : '')}
+              </div>
+            </div>
+          ))}
+          <div className="mt-2 flex items-baseline justify-between gap-3 border-t-2 border-tinta pt-2 font-bold">
+            <span>Chapa entera</span>
+            <span className="tabular font-mono">{money(lista.total, sim, 0)}</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-3 text-[11.5px] text-suave">
+            <span>De eso, lo que consume este trabajo</span>
+            <span className="tabular font-mono">{money(lista.consumido, sim, 0)}</span>
+          </div>
+        </div>
+
+        {/* Este es el número que decide si el anticipo alcanza para comprar la
+            chapa. Se mide contra lo CONSUMIDO: una pieza suelta que sale de un
+            retazo no obliga a comprar la chapa entera, y medirlo contra ella
+            daría un porcentaje absurdo que nadie miraría dos veces. */}
+        {lista.sobreVenta != null ? (
+          <p className="mt-2 text-[11.5px] text-suave">
+            El material es el{' '}
+            <strong className={lista.sobreVenta > 0.5 ? 'text-corte-600 dark:text-corte-300' : ''}>
+              {pct(lista.sobreVenta * 100, 0)}
+            </strong>{' '}
+            de lo que se factura.
+            {lista.sobreVenta > 0.5
+              ? ' Con un anticipo del 50 % no alcanza para comprar el material: pedí más anticipo o comprá contra entrega.'
+              : null}
+          </p>
+        ) : null}
+
+        {lista.avisos.map((a, i) => (
+          <Aviso key={i} nivel={a.nivel} className="mt-2">
+            {a.msg}
+          </Aviso>
+        ))}
+
+        <Boton tono="fantasma" tam="sm" className="mt-3 w-full" onClick={copiarPedido}>
+          <ShoppingCart className="size-3.5" />
+          {copiado ? 'Copiado' : 'Copiar el pedido para el proveedor'}
+        </Boton>
+      </PanelCuerpo>
+    </Panel>
   );
 }

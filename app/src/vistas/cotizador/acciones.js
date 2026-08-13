@@ -13,6 +13,10 @@ import { descargar } from '@/lib/formato';
 import { miniatura } from '@/lib/miniatura';
 import { generarDXF, generarDXFNesting } from '@core/dxf-write.js';
 import { generarPresupuestoPDF, generarOrdenTrabajoPDF } from '@core/quote-pdf.js';
+import { listaDeCompra } from '@core/compras.js';
+
+/** Un cálculo accesorio que falla no puede impedir que salga el papel. */
+const seguro = (fn) => { try { return fn(); } catch { return null; } };
 
 const limpio = (s) => String(s || 'pieza').replace(/[^\w-]/g, '_');
 
@@ -88,7 +92,7 @@ export async function exportarPDF({ doc, coti, config, resueltos, actualizarDoc 
   }
 }
 
-export async function exportarOT({ doc, coti, config, resueltos, actualizarDoc }) {
+export async function exportarOT({ doc, coti, config, resueltos, actualizarDoc, ctx }) {
   if (!coti?.items.length) return toast.error('No hay ítems');
 
   const numero = doc.numeroOT || (await api.get('numero?tipo=OT')).numero;
@@ -99,6 +103,9 @@ export async function exportarOT({ doc, coti, config, resueltos, actualizarDoc }
     cotizacion: coti,
     config,
     miniaturas: miniaturasDeItems(resueltos),
+    // El que va a la casa de chapas se lleva este papel: la lista de compra
+    // va en la orden de trabajo y nunca en el presupuesto del cliente.
+    compra: ctx ? seguro(() => listaDeCompra(coti, ctx())) : null,
   });
   const nombre = `orden-trabajo-${numero}.pdf`;
   descargar(nombre, bytes, 'application/pdf');

@@ -50,6 +50,11 @@ export function agujerosEsquinas(w, h, margen, dia) {
   ];
 }
 
+/* Largo útil de la plegadora del taller (100 t × 3200). `construir()` sólo
+   recibe { espesor, material }, así que las piezas largas lo chequean contra
+   esta constante: es preferible avisar con el número del taller a no avisar. */
+const LARGO_PLEGADORA = 3200;
+
 const P = (key, label, def, extra = {}) => ({ key, label, def, tipo: 'num', ...extra });
 const S = (key, label, def, opciones) => ({ key, label, def, tipo: 'sel', opciones });
 const B = (key, label, def) => ({ key, label, def, tipo: 'bool' });
@@ -1434,6 +1439,491 @@ export const PIEZAS = [
       } else path = regularPolygon(R, R, R, p.lados, rad(p.giro));
       const holes = p.diaCentral > 0 ? [circle(R, R, p.diaCentral / 2)] : [];
       return { shape: makeShape(path, holes), modelo3D: { tipo: 'plano' } };
+    },
+  },
+
+  /* ================================================================== */
+  /* Estanterías y racks                                                 */
+  /*                                                                     */
+  /* Es el trabajo que más se repite en un taller de La Rioja: depósitos,*/
+  /* despensas, talleres mecánicos. Todo el sistema va sobre un PASO de  */
+  /* ranuras: si el parante y la ménsula no comparten paso, no encastran.*/
+  /* Por eso el paso es un parámetro y no un número escondido adentro.   */
+  /* ================================================================== */
+
+  {
+    id: 'parante-rack',
+    nombre: 'Parante de estantería ranurado',
+    categoria: 'Estanterías y racks',
+    descripcion:
+      'Ángulo o perfil C ranurado para armar estanterías regulables. Las ranuras van cada paso fijo para que el estante se pueda subir o bajar.',
+    params: [
+      P('altura', 'Altura del parante', 2000, { min: 200, unidad: 'mm' }),
+      S('perfil', 'Perfil', 'L', [
+        { v: 'L', t: 'Ángulo (2 alas)' },
+        { v: 'C', t: 'Perfil C (3 alas)' },
+      ]),
+      P('ala', 'Ancho de cada ala', 40, { min: 15, unidad: 'mm' }),
+      P('alma', 'Alma (sólo perfil C)', 40, { min: 15, unidad: 'mm' }),
+      P('paso', 'Paso entre ranuras', 50, { min: 15, unidad: 'mm' }),
+      P('ranuraLargo', 'Largo de la ranura', 18, { min: 4, unidad: 'mm' }),
+      P('ranuraAncho', 'Ancho de la ranura', 9, { min: 2, unidad: 'mm' }),
+      P('extremos', 'Zona lisa en los extremos', 60, { min: 0, unidad: 'mm' }),
+      P('diaBase', 'Ø agujeros de anclaje al piso', 12, { min: 0, unidad: 'mm' }),
+    ],
+    build(p, ctx) {
+      const t = ctx.espesor;
+      const esC = p.perfil === 'C';
+      const cotas = esC ? [p.ala, p.alma, p.ala] : [p.ala, p.ala];
+      const angulos = esC ? [90, 90] : [90];
+      const dev = calcularDesarrollo(cotas, angulos, t, ctx.material, null, p.altura);
+      const W = dev.desarrollo;
+
+      /* Posición de cada línea de plegado sobre el desarrollo. Se acumulan
+         las cotas y se descuenta la mitad del BD de cada pliegue, que es la
+         convención del resto de la biblioteca. */
+      const xPliegues = [];
+      let acum = 0;
+      for (let i = 0; i < angulos.length; i++) {
+        acum += cotas[i] - dev.pliegues[i].BD / 2;
+        xPliegues.push(acum);
+        acum -= dev.pliegues[i].BD / 2;
+      }
+
+      /* Centro de cada ala en el desarrollo: ahí van las ranuras. */
+      const bordes = [0, ...xPliegues, W];
+      const centros = [];
+      for (let i = 0; i < bordes.length - 1; i++) centros.push((bordes[i] + bordes[i + 1]) / 2);
+
+      const holes = [];
+      const y0 = p.extremos;
+      const y1 = p.altura - p.extremos;
+      let nRanuras = 0;
+      for (const cx of centros) {
+        for (let y = y0; y <= y1 + 0.01; y += p.paso) {
+          holes.push(slot(cx, y, p.ranuraLargo, p.ranuraAncho, 90));
+          nRanuras++;
+        }
+      }
+      if (p.diaBase > 0) {
+        // Anclaje al piso y al techo, en las dos alas exteriores
+        for (const cx of [centros[0], centros[centros.length - 1]]) {
+          holes.push(circle(cx, p.extremos / 2, p.diaBase / 2));
+          holes.push(circle(cx, p.altura - p.extremos / 2, p.diaBase / 2));
+        }
+      }
+
+      return {
+        shape: makeShape(rect(0, 0, W, p.altura, 0), holes),
+        pliegues: xPliegues.map((x, i) => ({ x1: x, y1: 0, x2: x, y2: p.altura, label: `P${i + 1} 90°` })),
+        plegado: { pliegues: angulos.length, largoPliegue: p.altura, angulo: 90, herramentales: 1 },
+        desarrollo: dev,
+        modelo3D: { tipo: 'perfil', tramos: cotas, angulos: angulos.map((a) => -a), ancho: p.altura },
+        alas: cotas,
+        info: { ranuras: nRanuras, desarrollo: W, ranurasPorAla: nRanuras / centros.length },
+        avisos: [
+          {
+            nivel: 'info',
+            msg:
+              `${nRanuras} ranuras cada ${p.paso} mm. El estante y la ménsula tienen que usar el MISMO paso ` +
+              `de ${p.paso} mm o no encastran: es el error más común al mezclar tandas de distinta fecha.`,
+          },
+          p.altura > (LARGO_PLEGADORA)
+            ? { nivel: 'error', msg: `El parante mide ${p.altura} mm y no entra en la plegadora. Partilo en tramos empalmables.` }
+            : null,
+          nRanuras > 250
+            ? { nivel: 'aviso', msg: `${nRanuras} ranuras son muchas perforaciones: mirá el tiempo de máquina antes de cerrar el precio.` }
+            : null,
+        ].filter(Boolean),
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'estante-rack',
+    nombre: 'Estante de estantería',
+    categoria: 'Estanterías y racks',
+    descripcion:
+      'Bandeja de estante con las cuatro alas plegadas hacia abajo. Las alas son el refuerzo: sin ellas la chapa panda con la carga.',
+    params: [
+      P('ancho', 'Ancho del estante', 900, { min: 100, unidad: 'mm' }),
+      P('fondo', 'Fondo del estante', 400, { min: 80, unidad: 'mm' }),
+      P('ala', 'Altura del ala', 30, { min: 8, unidad: 'mm' }),
+      B('pestana', 'Pestaña de retorno en el ala', true),
+      P('pestanaAlto', 'Alto de la pestaña', 12, { min: 5, unidad: 'mm' }),
+      B('perforado', 'Fondo perforado', false),
+      P('diaVent', 'Ø de las perforaciones', 25, { min: 3, unidad: 'mm' }),
+      P('pasoVent', 'Paso entre perforaciones', 70, { min: 8, unidad: 'mm' }),
+      P('diaUnion', 'Ø agujeros de fijación al parante', 9, { min: 0, unidad: 'mm' }),
+    ],
+    build(p, ctx) {
+      const t = ctx.espesor;
+      const alaTotal = p.ala + (p.pestana ? p.pestanaAlto : 0);
+      /* Un ala con retorno son dos pliegues seguidos, pero el desarrollo se
+         calcula por dirección: acá interesa cuánto crece el plano por lado. */
+      const devAncho = calcularDesarrollo(
+        p.pestana ? [alaTotal, p.ancho, alaTotal] : [p.ala, p.ancho, p.ala],
+        p.pestana ? [90, 90] : [90, 90],
+        t, ctx.material, null, p.fondo
+      );
+      const W = devAncho.desarrollo;
+      const bdW = devAncho.pliegues[0].BD;
+      const devFondo = calcularDesarrollo(
+        p.pestana ? [alaTotal, p.fondo, alaTotal] : [p.ala, p.fondo, p.ala],
+        [90, 90], t, ctx.material, null, p.ancho
+      );
+      const H = devFondo.desarrollo;
+      const bdH = devFondo.pliegues[0].BD;
+
+      const ox = alaTotal - bdW / 2; // cuánto sobresale el ala en X
+      const oy = alaTotal - bdH / 2;
+      const outer = cruzConAlivios(W, H, ox, oy, Math.max(t, 2));
+
+      const holes = [];
+      if (p.perforado) {
+        const m = 30;
+        for (let x = ox + m; x <= W - ox - m; x += p.pasoVent)
+          for (let y = oy + m; y <= H - oy - m; y += p.pasoVent) holes.push(circle(x, y, p.diaVent / 2));
+      }
+      if (p.diaUnion > 0) {
+        // Dos por ala corta: es donde se atornilla contra el parante
+        for (const y of [oy + 25, H - oy - 25]) {
+          holes.push(circle(ox / 2, y, p.diaUnion / 2));
+          holes.push(circle(W - ox / 2, y, p.diaUnion / 2));
+        }
+      }
+
+      /* Carga admisible aproximada por flexión de las dos alas trabajando
+         como vigas. Es una cota de orden de magnitud para no prometer un
+         estante que se dobla, no un cálculo estructural.
+
+         La tensión admisible se toma como Rm/3: los materiales de la base
+         traen resistencia a la tracción (Rm), no límite elástico, y un
+         tercio de Rm es el coeficiente conservador de uso corriente en
+         estanterías. */
+      const admisible = (ctx.material?.Rm ?? 370) / 3; // MPa = N/mm²
+      const Wsec = 2 * ((t * p.ala * p.ala) / 6); // módulo resistente, mm³
+      // Viga simplemente apoyada con carga repartida: M = qL²/8 → q = 8·σ·W/L²
+      const qNmm = (8 * admisible * Wsec) / (p.ancho * p.ancho);
+      const cargaKg = (qNmm * p.ancho) / 9.81;
+
+      return {
+        shape: makeShape(outer, holes),
+        pliegues: [
+          { x1: ox, y1: 0, x2: ox, y2: H, label: 'P1 90°' },
+          { x1: W - ox, y1: 0, x2: W - ox, y2: H, label: 'P2 90°' },
+          { x1: 0, y1: oy, x2: W, y2: oy, label: 'P3 90°' },
+          { x1: 0, y1: H - oy, x2: W, y2: H - oy, label: 'P4 90°' },
+        ],
+        plegado: {
+          pliegues: p.pestana ? 8 : 4,
+          largoPliegue: Math.max(p.ancho, p.fondo),
+          angulo: 90,
+          herramentales: 1,
+        },
+        desarrollo: devAncho,
+        modelo3D: { tipo: 'caja', w: p.ancho, d: p.fondo, h: alaTotal, t },
+        info: { desarrollo: [W, H], cargaAdmisibleKg: cargaKg },
+        avisos: [
+          {
+            nivel: 'info',
+            msg:
+              `Carga repartida orientativa: ~${cargaKg.toFixed(0)} kg con las alas hacia abajo. ` +
+              'Es una cota de cálculo, no un ensayo: si el estante lleva carga puntual o gente encima, verificalo aparte.',
+          },
+          p.ancho > 1000 && p.ala < 30
+            ? { nivel: 'aviso', msg: `Con ${p.ancho} mm de luz y sólo ${p.ala} mm de ala el estante va a pandear. Subí el ala o agregá un travesaño al medio.` }
+            : null,
+          p.pestana
+            ? { nivel: 'info', msg: 'La pestaña de retorno duplica los pliegues (8 en total) pero saca el filo del canto: en un estante que se manipula, vale la pena.' }
+            : null,
+        ].filter(Boolean),
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'mensula-pared',
+    nombre: 'Ménsula de pared',
+    categoria: 'Estanterías y racks',
+    descripcion:
+      'Soporte triangular para estante. Sale de una sola pieza plana: el corte diagonal es lo que la hace barata frente a la soldada.',
+    params: [
+      P('brazo', 'Largo del brazo', 300, { min: 50, unidad: 'mm' }),
+      P('altura', 'Altura contra la pared', 300, { min: 50, unidad: 'mm' }),
+      P('lomo', 'Ancho del lomo', 45, { min: 15, unidad: 'mm' }),
+      P('diaPared', 'Ø agujeros a la pared', 10, { min: 0, unidad: 'mm' }),
+      P('nPared', 'Cantidad de agujeros a la pared', 2, { min: 1, max: 6, entero: true }),
+      P('diaEstante', 'Ø agujeros al estante', 7, { min: 0, unidad: 'mm' }),
+      P('nEstante', 'Cantidad de agujeros al estante', 2, { min: 1, max: 6, entero: true }),
+      B('aligerada', 'Calar el triángulo interior', true),
+    ],
+    build(p) {
+      const L = p.brazo;
+      const Hh = p.altura;
+      const a = p.lomo;
+
+      /* Contorno: escuadra con la hipotenusa cortada. El vértice exterior se
+         redondea implícitamente por el propio corte; no hace falta radio. */
+      const outer = polyline(
+        [
+          [0, 0],
+          [L, 0],
+          [L, a],   // la diagonal arranca acá y sube hasta el lomo
+          [a, Hh],
+          [0, Hh],
+        ],
+        true
+      );
+
+      const holes = [];
+      if (p.diaPared > 0) {
+        const paso = (Hh - 2 * a) / Math.max(1, p.nPared - 1);
+        for (let i = 0; i < p.nPared; i++) holes.push(circle(a / 2, a + i * (p.nPared > 1 ? paso : 0), p.diaPared / 2));
+      }
+      if (p.diaEstante > 0) {
+        const paso = (L - 2 * a) / Math.max(1, p.nEstante - 1);
+        for (let i = 0; i < p.nEstante; i++) holes.push(circle(a + i * (p.nEstante > 1 ? paso : 0), a / 2, p.diaEstante / 2));
+      }
+      /* El calado interior saca peso sin tocar el camino de la carga, que va
+         por el borde: la ménsula trabaja como un triángulo articulado. */
+      if (p.aligerada && L > 150 && Hh > 150) {
+        const m = a + 18;
+        const tri = polyline(
+          [
+            [m, m],
+            [L - a - 25, m],
+            [m, Hh - a - 25],
+          ],
+          true
+        );
+        holes.push(tri);
+      }
+
+      return {
+        shape: makeShape(outer, holes),
+        modelo3D: { tipo: 'plano' },
+        info: { diagonal: Math.hypot(L - a, Hh - a) },
+        avisos: [
+          {
+            nivel: 'info',
+            msg:
+              'La ménsula trabaja a compresión sobre la diagonal. Va de canto, no de plano: ' +
+              'apoyada de plano no sostiene nada.',
+          },
+          p.brazo > p.altura * 1.3
+            ? { nivel: 'aviso', msg: `Con el brazo (${p.brazo} mm) mucho más largo que la altura (${p.altura} mm), el tornillo de arriba trabaja a arrancamiento. Subí la altura o poné bulón pasante.` }
+            : null,
+        ].filter(Boolean),
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'larguero-rack',
+    nombre: 'Larguero de rack (perfil C)',
+    categoria: 'Estanterías y racks',
+    descripcion:
+      'Travesaño en perfil C con retornos. Los retornos son los que le dan rigidez torsional: sin ellos el larguero se retuerce con la carga descentrada.',
+    params: [
+      P('largo', 'Largo del larguero', 1800, { min: 200, unidad: 'mm' }),
+      P('alma', 'Altura del alma', 80, { min: 25, unidad: 'mm' }),
+      P('ala', 'Ancho del ala', 45, { min: 15, unidad: 'mm' }),
+      P('retorno', 'Retorno del ala', 15, { min: 0, unidad: 'mm' }),
+      P('diaUnion', 'Ø agujeros de unión en las puntas', 11, { min: 0, unidad: 'mm' }),
+      P('nUnion', 'Agujeros por punta', 2, { min: 1, max: 4, entero: true }),
+    ],
+    build(p, ctx) {
+      const t = ctx.espesor;
+      const conRet = p.retorno > 0;
+      const cotas = conRet
+        ? [p.retorno, p.ala, p.alma, p.ala, p.retorno]
+        : [p.ala, p.alma, p.ala];
+      const angulos = cotas.map(() => 90).slice(1);
+      const dev = calcularDesarrollo(cotas, angulos, t, ctx.material, null, p.largo);
+      const W = dev.desarrollo;
+
+      const xPliegues = [];
+      let acum = 0;
+      for (let i = 0; i < angulos.length; i++) {
+        acum += cotas[i] - dev.pliegues[i].BD / 2;
+        xPliegues.push(acum);
+        acum -= dev.pliegues[i].BD / 2;
+      }
+
+      // El alma es el tramo del medio: ahí van los agujeros de unión
+      const iAlma = conRet ? 2 : 1;
+      const bordes = [0, ...xPliegues, W];
+      const cxAlma = (bordes[iAlma] + bordes[iAlma + 1]) / 2;
+      const holes = [];
+      if (p.diaUnion > 0) {
+        const sep = p.alma / (p.nUnion + 1);
+        for (const yBase of [25, p.largo - 25]) {
+          for (let i = 0; i < p.nUnion; i++) {
+            holes.push(circle(cxAlma - p.alma / 2 + sep * (i + 1), yBase, p.diaUnion / 2));
+          }
+        }
+      }
+
+      const flecha = (5 / 384) * ((p.largo / 1000) ** 3);
+      return {
+        shape: makeShape(rect(0, 0, W, p.largo, 0), holes),
+        pliegues: xPliegues.map((x, i) => ({ x1: x, y1: 0, x2: x, y2: p.largo, label: `P${i + 1} 90°` })),
+        plegado: { pliegues: angulos.length, largoPliegue: p.largo, angulo: 90, herramentales: 1 },
+        desarrollo: dev,
+        modelo3D: { tipo: 'perfil', tramos: cotas, angulos: angulos.map(() => -90), ancho: p.largo },
+        alas: cotas,
+        info: { desarrollo: W, tramos: cotas.length },
+        avisos: [
+          conRet
+            ? null
+            : { nivel: 'aviso', msg: 'Sin retorno el perfil C se retuerce con la carga descentrada. Poné al menos 12 mm.' },
+          angulos.length >= 4
+            ? { nivel: 'info', msg: `${angulos.length} pliegues por pieza: en una serie larga el plegado pesa más que el corte. Verificá el tiempo antes de cerrar el precio.` }
+            : null,
+          p.largo > (LARGO_PLEGADORA)
+            ? { nivel: 'error', msg: `${p.largo} mm no entra en la plegadora de 3200.` }
+            : null,
+          flecha > 0.5
+            ? { nivel: 'aviso', msg: `Con ${p.largo} mm de luz conviene apoyo intermedio: la flecha crece con el cubo del largo.` }
+            : null,
+        ].filter(Boolean),
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'peldano-escalera',
+    nombre: 'Peldaño de escalera antideslizante',
+    categoria: 'Plegado',
+    descripcion:
+      'Escalón plegado en U invertida con perforación antideslizante. Escaleras de servicio, plataformas, entrepisos.',
+    params: [
+      P('largo', 'Largo del peldaño', 800, { min: 150, unidad: 'mm' }),
+      P('huella', 'Huella (profundidad)', 240, { min: 80, unidad: 'mm' }),
+      P('ala', 'Altura del ala', 45, { min: 15, unidad: 'mm' }),
+      P('diaAntid', 'Ø de la perforación antideslizante', 12, { min: 0, unidad: 'mm' }),
+      P('pasoAntid', 'Paso de la perforación', 35, { min: 8, unidad: 'mm' }),
+      P('diaUnion', 'Ø agujeros de fijación', 9, { min: 0, unidad: 'mm' }),
+    ],
+    build(p, ctx) {
+      const t = ctx.espesor;
+      const dev = calcularDesarrollo([p.ala, p.huella, p.ala], [90, 90], t, ctx.material, null, p.largo);
+      const W = dev.desarrollo;
+      const bd = dev.pliegues[0].BD;
+      const x1 = p.ala - bd / 2;
+      const x2 = x1 + p.huella - bd;
+
+      const holes = [];
+      if (p.diaAntid > 0) {
+        /* Tresbolillo: el agujero al tresbolillo agarra el pie en cualquier
+           posición. En grilla recta quedan corredores lisos entre columnas. */
+        const m = 25;
+        let fila = 0;
+        for (let y = m; y <= p.largo - m; y += p.pasoAntid * 0.87) {
+          const off = fila % 2 ? p.pasoAntid / 2 : 0;
+          for (let x = x1 + m + off; x <= x2 - m; x += p.pasoAntid) {
+            holes.push(circle(x, y, p.diaAntid / 2));
+          }
+          fila++;
+        }
+      }
+      if (p.diaUnion > 0) {
+        for (const y of [30, p.largo - 30]) {
+          holes.push(circle(x1 / 2, y, p.diaUnion / 2));
+          holes.push(circle((x2 + W) / 2, y, p.diaUnion / 2));
+        }
+      }
+
+      return {
+        shape: makeShape(rect(0, 0, W, p.largo, 0), holes),
+        pliegues: [
+          { x1, y1: 0, x2: x1, y2: p.largo, label: 'P1 90°' },
+          { x1: x2, y1: 0, x2, y2: p.largo, label: 'P2 90°' },
+        ],
+        plegado: { pliegues: 2, largoPliegue: p.largo, angulo: 90, herramentales: 1 },
+        desarrollo: dev,
+        modelo3D: { tipo: 'perfil', tramos: [p.ala, p.huella, p.ala], angulos: [-90, -90], ancho: p.largo },
+        alas: [p.ala, p.ala],
+        info: { perforaciones: holes.length, desarrollo: W },
+        avisos: [
+          {
+            nivel: 'info',
+            msg:
+              `${holes.length} perforaciones al tresbolillo. Es lo que más tiempo de máquina consume de esta pieza: ` +
+              'si el peldaño va pintado y no a la intemperie, evaluá estampado antideslizante en vez de calado.',
+          },
+          p.huella < 200
+            ? { nivel: 'aviso', msg: `Huella de ${p.huella} mm: por debajo de 200 mm no se pisa cómodo en una escalera de uso frecuente.` }
+            : null,
+        ].filter(Boolean),
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'abrazadera-cano',
+    nombre: 'Abrazadera para caño',
+    categoria: 'Plegado',
+    descripcion:
+      'Grampa tipo omega para sujetar caño o conducto. Sale de a pares y es de los trabajos más repetidos que entran al taller.',
+    params: [
+      P('diaCano', 'Ø exterior del caño', 60, { min: 6, unidad: 'mm' }),
+      P('ancho', 'Ancho de la abrazadera', 30, { min: 8, unidad: 'mm' }),
+      P('pata', 'Largo de la pata', 35, { min: 10, unidad: 'mm' }),
+      P('diaBulon', 'Ø agujero del bulón', 9, { min: 0, unidad: 'mm' }),
+      S('vuelta', 'Abrazadera', 'media', [
+        { v: 'media', t: 'Media caña (de a pares)' },
+        { v: 'entera', t: 'Vuelta entera con pata doble' },
+      ]),
+    ],
+    build(p, ctx) {
+      const t = ctx.espesor;
+      /* El desarrollo del arco va por la FIBRA NEUTRA, no por el diámetro
+         exterior: si se toma el exterior la abrazadera queda larga y no
+         aprieta. Con radio de curvado igual al del caño, el K vale ~0,44 y
+         acá se usa el mismo del material. */
+      const k = kFactorEfectivo(p.diaCano / 2, t, ctx.material?.kFactor ?? 0.42);
+      const rNeutro = p.diaCano / 2 + k * t;
+      const barrido = p.vuelta === 'entera' ? Math.PI * 2 * 0.75 : Math.PI;
+      const arcoDes = rNeutro * barrido;
+      const nPatas = p.vuelta === 'entera' ? 2 : 2;
+      const W = arcoDes + nPatas * p.pata;
+
+      const holes = [];
+      if (p.diaBulon > 0) {
+        holes.push(circle(p.pata / 2, p.ancho / 2, p.diaBulon / 2));
+        holes.push(circle(W - p.pata / 2, p.ancho / 2, p.diaBulon / 2));
+      }
+
+      return {
+        shape: makeShape(rect(0, 0, W, p.ancho, 0), holes),
+        // El arco se rola o se pliega en varios golpes; las dos líneas que
+        // marca el DXF son donde arranca y termina la curva.
+        pliegues: [
+          { x1: p.pata, y1: 0, x2: p.pata, y2: p.ancho, label: 'inicio del arco' },
+          { x1: W - p.pata, y1: 0, x2: W - p.pata, y2: p.ancho, label: 'fin del arco' },
+        ],
+        plegado: { pliegues: 2, largoPliegue: p.ancho, angulo: 90, herramentales: 1 },
+        modelo3D: { tipo: 'revolucion', d1: p.diaCano, d2: p.diaCano, h: p.ancho },
+        info: { desarrollo: W, arcoDesarrollado: arcoDes, radioNeutro: rNeutro, kFactor: k },
+        avisos: [
+          {
+            nivel: 'info',
+            msg:
+              `Desarrollo ${W.toFixed(1)} mm: ${arcoDes.toFixed(1)} mm de arco (fibra neutra a R ${rNeutro.toFixed(1)} mm, ` +
+              `K=${k.toFixed(2)}) más ${nPatas} patas de ${p.pata} mm. Tomar el diámetro exterior deja la abrazadera larga y no aprieta.`,
+          },
+          p.diaCano < t * 6
+            ? { nivel: 'aviso', msg: `Caño de ${p.diaCano} mm con chapa de ${t} mm: el radio es muy cerrado para este espesor, la fibra exterior puede fisurar. Usá chapa más fina.` }
+            : null,
+        ].filter(Boolean),
+      };
     },
   },
 ];

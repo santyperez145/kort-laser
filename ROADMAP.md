@@ -83,6 +83,26 @@ antes de decidir.**
 
 ## Fase 1 — Precisión de lo que ya existe
 
+### ✅ 1.0 Cada precio muestra de dónde sale
+
+`src/core/explicacion.js`. El cotizador y el tarifario abren la cuenta completa
+al lado del número: la geometría medida, el kilo de chapa, la velocidad de
+tabla contra la velocidad media real, el desglose de la hora de máquina, el
+gas con sus alternativas, y después la cadena costo → margen → descuento →
+IIBB → precio.
+
+Dos razones, y la segunda es la que importa:
+
+1. Un precio sin explicación no se puede defender en el mostrador.
+2. **Un precio sin explicación no se puede corregir.** Cuando un dato mal
+   cargado multiplica todo —ya pasó, con consumibles a $150.000/h— la única
+   forma de encontrarlo es ver de dónde salió el número.
+
+El módulo **no calcula nada**: lee el resultado ya cotizado y lo narra. Si
+tuviera cuentas propias, tarde o temprano diría algo distinto de lo que se
+cobra, que es justo lo que tiene que evitar. Un test verifica que los bloques
+sumen exactamente el costo total.
+
 ### ✅ 1.1 Nesting por presupuesto, no por ítem
 
 **Era la limitación más importante que tenía el sistema. Ya está hecho.**
@@ -248,11 +268,33 @@ todo lo necesario; falta el campo, la pantalla y el análisis.
 
 **Esfuerzo:** medio. **Alto valor a mediano plazo.**
 
+### ✅ 2.0 Lista de compra de material
+
+`src/core/compras.js`. Del presupuesto salen las chapas a comprar: cuántas de
+cada material y espesor, cuánto pesan, cuánto salen y qué retazo queda. Se ve
+en el cotizador, va al pie de la orden de trabajo (nunca al presupuesto del
+cliente) y se copia como pedido para mandarle al proveedor.
+
+El paso de "el cliente aprobó" a "voy a comprar" se hacía a mano con
+calculadora. Comprar de menos para la máquina a mitad de trabajo; comprar de
+más deja el capital en el depósito.
+
+Dos decisiones que importan:
+
+- **Las chapas se cuentan una vez por grupo**, igual que en el nesting por
+  presupuesto. Sumar las fracciones de cada ítem daría casi lo mismo, pero
+  este número se usa para comprar.
+- **La relación material/venta se mide contra lo CONSUMIDO**, no contra las
+  chapas enteras. Una pieza suelta que sale de un retazo daba 2.685 % y el
+  número dejaba de servir para lo único que sirve: saber si el anticipo
+  alcanza para comprar la chapa. Cuando el trabajo usa menos del 35 % de una
+  chapa, en vez de mandar a comprar manda al retazero.
+
 ### 📋 2.2 Stock de retazos
 
-El nesting ya calcula cuánto retazo útil queda en cada chapa. Falta darlo de
-alta como stock y poder anidar sobre un retazo existente en vez de sobre chapa
-nueva.
+Ya está la mitad: `listaDeCompra()` informa el retazo que queda en cada
+programa, en m², en kilos y en pesos. Falta darlo de alta como stock y poder
+anidar sobre un retazo existente en vez de sobre chapa nueva.
 
 En un taller chico esto es plata directa: los retazos hoy se apilan y se
 oxidan. Requiere ABM de retazos y que el cotizador los ofrezca cuando la pieza
@@ -263,8 +305,8 @@ entra.
 ### 📋 2.3 Stock de chapa y punto de reposición
 
 Saber cuánta chapa hay de cada material y espesor, descontar al producir y
-avisar cuándo reponer. Con el historial de consumo que ya guarda la base, puede
-sugerir la compra.
+avisar cuándo reponer. Con el historial de consumo que ya guarda la base y la
+lista de compra que ya sale de cada presupuesto, puede sugerir la orden.
 
 **Esfuerzo:** medio.
 
@@ -325,9 +367,13 @@ más valioso. DWG necesita una librería de terceros.
 
 ### 📋 4.2 Más piezas paramétricas
 
-Las 17 actuales cubren lo habitual. Faltan, por orden de pedido probable:
-transición cuadrado-redondo, tolva piramidal, bandeja portacables, escalera de
-cable, tapa de tanque con boca de hombre, pie de columna con cartelas.
+**31 piezas.** Las últimas seis son la familia de estantería y racks —parante
+ranurado, estante, ménsula de pared, larguero perfil C— más el peldaño
+antideslizante y la abrazadera para caño, que son de los trabajos que más se
+repiten.
+
+Faltan, por orden de pedido probable: escalera de cable, tapa de tanque con
+boca de hombre, pie de columna con cartelas, guardacadena, puerta de tablero.
 
 Cada una es un objeto en `library.js`: el formulario, el 2D, el 3D, el DXF y la
 cotización salen solos.

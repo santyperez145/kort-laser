@@ -17,14 +17,17 @@ import { Boton } from '@/componentes/ui/boton';
 import { Campo, Entrada, Selector, Opcion } from '@/componentes/ui/campos';
 import { Aviso } from '@/componentes/ui/varios';
 import { Insignia } from '@/componentes/ui/insignia';
+import { BloqueExplicacion } from '@/componentes/PorQue';
 import { usarEstado } from '@/lib/estado';
 import { money, num } from '@/lib/formato';
+import { cn } from '@/lib/utils';
 
 import {
   generarTarifario, evaluarTarifaPlana, techoDeTarifa, rangoRecomendado,
   sensibilidadChapa, sensibilidadAprovechamiento, BANDAS, BASES,
 } from '@core/tarifario.js';
 import { cotizarItem } from '@core/pricing.js';
+import { explicarTarifa } from '@core/explicacion.js';
 
 /** Tarifa que se está cobrando hoy, por base. Arranca con lo que cobra KORT. */
 const TARIFA_INICIAL = { m2: 90000, kg: 3800, metro: 0 };
@@ -421,6 +424,22 @@ function TablaSensibilidad({ filas, sim, dec, etiqueta, titulo }) {
 function TablaPrecios({ tarifario, sim, base, dec }) {
   const campoPrecio = CAMPO_PRECIO[base];
   const campoMinimo = CAMPO_MINIMO[base];
+  /* Cualquier celda se puede abrir para ver la cuenta que la produjo. Sin
+     esto la tabla es un oráculo: da números que no se pueden discutir ni
+     corregir. */
+  const [detalle, setDetalle] = useState(null);
+  const exp = useMemo(() => {
+    if (!detalle) return null;
+    const f = tarifario.filas.find((x) => x.espesor === detalle.espesor);
+    if (!f || f.error) return null;
+    return explicarTarifa(f.bandas[detalle.banda], {
+      base,
+      espesor: f.espesor,
+      banda: BANDAS.find((b) => b.id === detalle.banda)?.nombre || detalle.banda,
+      margen: tarifario.margen,
+    });
+  }, [detalle, tarifario, base]);
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-[13px]">
@@ -449,19 +468,44 @@ function TablaPrecios({ tarifario, sim, base, dec }) {
                   No se corta con calidad a esta potencia
                 </td>
               ) : (
-                BANDAS.map((b) => (
-                  <td key={b.id} className="px-3 py-2 text-right tabular-nums">
-                    <div className="font-mono font-semibold">{money(f.bandas[b.id][campoPrecio], sim, dec)}</div>
-                    <div className="font-mono text-[10.5px] text-tenue">
-                      piso {money(f.bandas[b.id][campoMinimo], sim, dec)}
-                    </div>
-                  </td>
-                ))
+                BANDAS.map((b) => {
+                  const activa = detalle?.espesor === f.espesor && detalle?.banda === b.id;
+                  return (
+                    <td key={b.id} className="px-1 py-1 text-right tabular-nums">
+                      <button
+                        type="button"
+                        title="Ver cómo se llegó a este número"
+                        onClick={() =>
+                          setDetalle(activa ? null : { espesor: f.espesor, banda: b.id })
+                        }
+                        className={cn(
+                          'w-full rounded px-2 py-1 text-right hover:bg-corte-500/8',
+                          activa && 'bg-corte-500/12 ring-1 ring-corte-500/40'
+                        )}
+                      >
+                        <div className="font-mono font-semibold">{money(f.bandas[b.id][campoPrecio], sim, dec)}</div>
+                        <div className="font-mono text-[10.5px] text-tenue">
+                          piso {money(f.bandas[b.id][campoMinimo], sim, dec)}
+                        </div>
+                      </button>
+                    </td>
+                  );
+                })
               )}
             </tr>
           ))}
         </tbody>
       </table>
+
+      {exp ? (
+        <div className="mt-3 px-3 pb-3">
+          <BloqueExplicacion bloque={exp} abiertoInicial />
+        </div>
+      ) : (
+        <p className="px-3 pb-3 text-[11.5px] text-tenue">
+          Tocá cualquier precio de la tabla para ver la cuenta que lo produjo.
+        </p>
+      )}
     </div>
   );
 }

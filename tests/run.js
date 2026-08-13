@@ -36,6 +36,8 @@ import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
+import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
+import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { construirMesh } from '../src/core/mesh3d.js';
 import { PDF, anchoTexto } from '../src/core/pdf.js';
 import { generarPresupuestoPDF } from '../src/core/quote-pdf.js';
@@ -65,6 +67,22 @@ function grupo(t) {
 
 const cerca = (a, b, tol = 1e-6, msg = '') =>
   assert.ok(Math.abs(a - b) <= tol, `${msg} esperado ${b}, obtenido ${a} (tolerancia ${tol})`);
+
+/**
+ * Texto visible de un PDF nuestro.
+ *
+ * Los flujos van sin comprimir, así que alcanza con juntar los strings de los
+ * operadores `Tj` y deshacer los escapes octales de los acentos. Verificar
+ * sobre el texto y no sobre el código es lo que permite atajar una línea
+ * agregada más adelante que filtre lo que no debe.
+ */
+function textoDelPDF(bytes) {
+  const crudo = Buffer.from(bytes).toString('latin1');
+  const partes = crudo.match(/\(([^)]*)\)\s*Tj/g) || [];
+  return partes
+    .map((s) => s.slice(1, s.lastIndexOf(')')).replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8))))
+    .join('\n');
+}
 
 const acero = findMaterial(DEFAULT_MATERIALS, 'acero-sae1010');
 const inox = findMaterial(DEFAULT_MATERIALS, 'inox-304');
@@ -432,6 +450,71 @@ test('la transición cuadrado-redondo conserva las longitudes verdaderas', () =>
     cerca(superior, r.info.perimetroRedondo, r.info.perimetroRedondo * 0.02,
       'el borde de la boca redonda tiene que medir su perímetro');
   }
+});
+
+test('el desarrollo de la abrazadera va por la fibra neutra, no por el diámetro', () => {
+  /* Error clásico: desarrollar el arco con el diámetro exterior del caño. La
+     abrazadera sale larga y no aprieta. El arco tiene que medir entre el
+     semiperímetro del caño y el de la cara exterior de la chapa. */
+  for (const [dia, t] of [[60, 2], [110, 2], [32, 1.5]]) {
+    const r = construir('abrazadera-cano', { diaCano: dia, pata: 35 }, { espesor: t, material: acero });
+    const interior = (Math.PI * dia) / 2;
+    const exterior = (Math.PI * (dia + 2 * t)) / 2;
+    assert.ok(
+      r.info.arcoDesarrollado > interior && r.info.arcoDesarrollado < exterior,
+      `Ø${dia} en ${t} mm: el arco dio ${r.info.arcoDesarrollado.toFixed(1)} y tiene que caer entre ${interior.toFixed(1)} y ${exterior.toFixed(1)}`
+    );
+    cerca(r.info.desarrollo, r.info.arcoDesarrollado + 2 * 35, 0.01, 'el desarrollo es el arco más las dos patas');
+  }
+});
+
+test('el parante de rack y el estante comparten el paso de ranuras', () => {
+  // Si el paso no se respeta, el estante no encastra: es el fallo que aparece
+  // recién en el armado, con la chapa ya cortada.
+  const paso = 50;
+  const r = construir('parante-rack', { altura: 2000, paso, extremos: 60, perfil: 'L' },
+    { espesor: 2, material: acero });
+  // (2000 − 2×60) / 50 + 1 = 38,6 → 38 ranuras por ala, dos alas
+  assert.equal(r.info.ranurasPorAla, 38, `dio ${r.info.ranurasPorAla} ranuras por ala`);
+  assert.equal(r.info.ranuras, 76);
+
+  // Y el perfil C tiene tres alas ranuradas, no dos
+  const c = construir('parante-rack', { altura: 2000, paso, extremos: 60, perfil: 'C' },
+    { espesor: 2, material: acero });
+  assert.equal(c.info.ranuras, 38 * 3, 'el perfil C ranura las tres caras');
+});
+
+test('las piezas de estantería y racks se construyen en todos los espesores usables', () => {
+  /* Mismo criterio que las plantillas de plegado: una pieza con cotas de
+     fantasía compila igual y falla en la plegadora. Acá se verifica que el
+     desarrollo exista, tenga área y que ninguna ala quede por debajo del ala
+     mínima de su matriz. */
+  const nuevas = ['parante-rack', 'estante-rack', 'mensula-pared', 'larguero-rack', 'peldano-escalera', 'abrazadera-cano'];
+  for (const id of nuevas) {
+    for (const t of [1.5, 2, 3]) {
+      const r = construir(id, {}, { espesor: t, material: acero });
+      const b = shapeBBox(r.shape);
+      assert.ok(shapeArea(r.shape) > 0, `${id} en ${t} mm no tiene área`);
+      assert.ok(b.w > 0 && b.h > 0, `${id} en ${t} mm no tiene desarrollo`);
+      assert.ok(!(r.avisos || []).some((a) => a.nivel === 'error'),
+        `${id} en ${t} mm da error: ${(r.avisos || []).find((a) => a.nivel === 'error')?.msg}`);
+      // Nada puede quedar fuera de la chapa más grande que compra el taller
+      assert.ok(Math.min(b.w, b.h) <= 1500, `${id} en ${t} mm no entra en ninguna chapa: ${b.w}×${b.h}`);
+    }
+  }
+});
+
+test('el estante avisa cuando la luz es demasiada para el ala', () => {
+  const flojo = construir('estante-rack', { ancho: 1200, fondo: 400, ala: 20 }, { espesor: 1.5, material: acero });
+  assert.ok(flojo.avisos.some((a) => a.nivel === 'aviso' && /pandear/.test(a.msg)),
+    'un estante de 1200 mm con ala de 20 tiene que avisar');
+  const firme = construir('estante-rack', { ancho: 600, fondo: 400, ala: 40 }, { espesor: 2, material: acero });
+  assert.ok(!firme.avisos.some((a) => /pandear/.test(a.msg)), 'uno de 600 con ala de 40 no debe avisar');
+  // Y la carga admisible tiene que crecer con el espesor y caer con la luz
+  const grueso = construir('estante-rack', { ancho: 600, fondo: 400, ala: 40 }, { espesor: 3, material: acero });
+  assert.ok(grueso.info.cargaAdmisibleKg > firme.info.cargaAdmisibleKg, 'más espesor tiene que aguantar más');
+  const largo = construir('estante-rack', { ancho: 1200, fondo: 400, ala: 40 }, { espesor: 2, material: acero });
+  assert.ok(largo.info.cargaAdmisibleKg < firme.info.cargaAdmisibleKg, 'más luz tiene que aguantar menos');
 });
 
 test('la tolva piramidal usa la altura inclinada, no la vertical', () => {
@@ -1637,12 +1720,151 @@ test('el tonelaje sale de la fórmula de plegado al aire', () => {
 });
 
 /* ================================================================== */
+grupo('Lista de compra de material');
+
+test('las chapas a comprar coinciden con las que se van a cortar', () => {
+  /* Si la lista de compra dice un número y el nesting otro, se para la
+     máquina a mitad del trabajo. Los grupos compartidos se cuentan una sola
+     vez, igual que en `cotizarPresupuesto()`. */
+  const coti = cotizarPresupuesto({
+    items: [
+      { nombre: 'Base', shape: makeShape(rect(0, 0, 300, 200), [circle(30, 30, 6)]), materialId: 'acero-sae1010', espesor: 3, cantidad: 40 },
+      { nombre: 'Tapa', shape: makeShape(rect(0, 0, 310, 210)), materialId: 'acero-sae1010', espesor: 3, cantidad: 20 },
+      { nombre: 'Frente', shape: makeShape(rect(0, 0, 500, 400)), materialId: 'inox-304', espesor: 1.5, cantidad: 12 },
+    ],
+  }, CTX);
+  const lista = listaDeCompra(coti, CTX);
+
+  const suma = lista.lineas.reduce((a, l) => a + l.chapas, 0);
+  assert.equal(suma, coti.resumen.chapasTotal,
+    `la lista pide ${suma} chapas y el presupuesto cotiza ${coti.resumen.chapasTotal}`);
+
+  // Base y Tapa comparten material, espesor y chapa: van en una sola línea
+  assert.equal(lista.lineas.length, 2, 'dos materiales distintos, dos líneas de compra');
+  const linea = lista.lineas.find((l) => l.espesor === 3);
+  assert.equal(linea.items.length, 2, 'los dos ítems de 3 mm van en la misma compra');
+});
+
+test('la lista sólo pide chapas enteras y el costo cierra', () => {
+  const coti = cotizarPresupuesto({
+    items: [{ nombre: 'Chica', shape: makeShape(rect(0, 0, 100, 80)), materialId: 'acero-sae1010', espesor: 2, cantidad: 3 }],
+  }, CTX);
+  const lista = listaDeCompra(coti, CTX);
+  const l = lista.lineas[0];
+  assert.equal(l.chapas, Math.round(l.chapas), 'el proveedor no vende media chapa');
+  assert.ok(l.chapas >= 1, 'aunque el trabajo sea chico hay que comprar una chapa');
+  cerca(l.costoTotal, l.pesoChapa * l.precioKg * l.chapas, 0.01, 'el costo es peso × precio × chapas');
+  cerca(lista.total, lista.lineas.reduce((a, x) => a + x.costoTotal, 0), 0.01);
+
+  // Tres piezas chicas en una chapa entera: el retazo tiene que ser enorme
+  assert.ok(l.retazoM2 > 2, `un trabajo chico deja retazo grande, dio ${l.retazoM2.toFixed(2)} m²`);
+  /* Y para un trabajo así el consejo NO puede ser "comprá una chapa nueva":
+     sale del retazero, que es exactamente por lo que el cotizador lo cobra
+     por área consumida y no por chapa entera. */
+  assert.ok(l.desdeRetazo, 'tres piezas chicas salen de un retazo');
+  assert.ok(lista.avisos.some((a) => /retazero/.test(a.msg)), 'y el aviso tiene que mandarlo al retazero');
+  assert.ok(l.costoConsumido < l.costoTotal / 10, 'consume una fracción mínima de la chapa');
+});
+
+test('la relación material/venta se mide contra lo consumido, no contra la chapa entera', () => {
+  /* Medirlo contra la chapa entera daba 2.685 % en una pieza suelta. Un
+     número así no lo mira nadie dos veces, y el dato que tiene que dar es si
+     el anticipo alcanza para comprar el material. */
+  const coti = cotizarPresupuesto({
+    items: [{ nombre: 'Suelta', shape: makeShape(rect(0, 0, 200, 150)), materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }],
+  }, CTX);
+  const lista = listaDeCompra(coti, CTX);
+  assert.ok(lista.sobreVenta < 1.5, `dio ${(lista.sobreVenta * 100).toFixed(0)} %, sigue midiendo la chapa entera`);
+  assert.ok(lista.consumido < lista.total, 'lo consumido tiene que ser menos que la chapa entera');
+});
+
+test('avisa cuando comprar el material se come la venta', () => {
+  /* Es el dato que decide si el anticipo alcanza para comprar: con la compra
+     al 80 % de la venta, un anticipo del 50 % no cubre la chapa. */
+  const coti = cotizarPresupuesto({
+    items: [{ nombre: 'Placa gruesa', shape: makeShape(rect(0, 0, 200, 150)), materialId: 'acero-sae1010', espesor: 12, cantidad: 2 }],
+  }, CTX);
+  const lista = listaDeCompra(coti, CTX);
+  assert.ok(lista.sobreVenta > 0, 'tiene que informar la relación compra/venta');
+  assert.ok(Number.isFinite(lista.pesoTotal) && lista.pesoTotal > 0);
+});
+
+/* ================================================================== */
+grupo('Trazabilidad del precio');
+
+test('la explicación cubre todos los costos que se cobran', () => {
+  /* Si un costo se cobra pero no aparece en la explicación, el precio tiene
+     una parte que no se puede defender ni auditar. La suma de los bloques
+     tiene que dar exactamente el costo total. */
+  const item = {
+    nombre: 'Ménsula',
+    shape: makeShape(rect(0, 0, 300, 200, 8), [circle(40, 40, 6), circle(260, 160, 6)]),
+    materialId: 'inox-304', espesor: 2, cantidad: 25,
+    plegado: { pliegues: 2, largoPliegue: 200, angulo: 90 },
+    acabadoId: 'pulido',
+    ingenieriaHoras: 1.5,
+  };
+  const r = cotizarItem(item, CTX);
+  const exp = explicarItem(r, CTX);
+  const suma = exp.bloques.filter((b) => b.importe > 0).reduce((a, b) => a + b.importe, 0);
+  cerca(suma, r.costos.total, r.costos.total * 1e-9, 'los bloques tienen que sumar el costo total');
+
+  // Y la cadena tiene que terminar en el precio que efectivamente se cobra
+  const final = exp.cadena[exp.cadena.length - 1];
+  cerca(final.valor, r.precio.neto, 0.01, 'la cadena tiene que cerrar en el neto');
+  assert.ok(exp.resumen.participacion[0].pct >= exp.resumen.participacion.at(-1).pct,
+    'la participación tiene que venir ordenada de mayor a menor');
+});
+
+test('la explicación no inventa números: sale toda del resultado ya cotizado', () => {
+  // Se cotiza dos veces con parámetros distintos y la explicación tiene que
+  // seguir a la cotización, no a un cálculo propio que se desincronice.
+  for (const margen of [20, 45, 80]) {
+    const r = cotizarItem({
+      nombre: 'Placa', shape: makeShape(rect(0, 0, 200, 150)),
+      materialId: 'acero-sae1010', espesor: 2, cantidad: 10, margen,
+    }, CTX);
+    const exp = explicarItem(r, CTX);
+    const linea = exp.cadena.find((c) => c.etiqueta.startsWith('Margen'));
+    assert.ok(linea.etiqueta.includes(String(margen)), `el margen ${margen} tiene que figurar tal cual`);
+    cerca(linea.valor, r.precio.lista, 0.01);
+  }
+});
+
+test('el texto exportable esconde el margen salvo que se lo pida explícitamente', () => {
+  /* Es el mismo criterio que el PDF: la cuenta abierta es una herramienta de
+     mostrador, no algo que salga hacia el cliente con la ganancia adentro. */
+  const r = cotizarItem({
+    nombre: 'Placa', shape: makeShape(rect(0, 0, 200, 150)),
+    materialId: 'acero-sae1010', espesor: 2, cantidad: 10,
+  }, CTX);
+  const exp = explicarItem(r, CTX);
+  const publico = explicacionEnTexto(exp, { incluirInterno: false });
+  const interno = explicacionEnTexto(exp, { incluirInterno: true });
+  assert.ok(!/Margen/i.test(publico), 'el texto público no puede nombrar el margen');
+  assert.ok(/Margen/i.test(interno), 'el interno sí');
+  assert.ok(publico.includes('Precio final'), 'el público igual muestra el precio');
+});
+
+/* ================================================================== */
 grupo("Tarifario");
 
 const {
   generarTarifario, evaluarTarifaPlana, techoDeTarifa, rangoRecomendado,
   sensibilidadChapa, sensibilidadAprovechamiento, BANDAS, BASES,
 } = await import('../src/core/tarifario.js');
+
+test('la explicación de la tarifa usa la base pedida', () => {
+  const tar = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
+  const fila = tar.filas.find((f) => !f.error);
+  for (const [base, unidad, campo] of [['m2', 'm²', 'precioM2'], ['kg', 'kg', 'precioKg'], ['metro', 'm de corte', 'precioMetro']]) {
+    const e = explicarTarifa(fila.bandas.simple, { base, espesor: fila.espesor, banda: 'simple', margen: tar.margen });
+    assert.ok(e.titulo.includes(unidad), `${base}: el título tiene que decir "${unidad}"`);
+    cerca(e.importe, fila.bandas.simple[campo], 0.01, `${base}: el importe tiene que ser el de esa base`);
+    assert.ok(e.pasos.length >= 3, `${base}: la explicación quedó demasiado corta`);
+  }
+});
+
 
 test('genera una fila por espesor y una columna por banda', () => {
   const t = generarTarifario(CTX, { materialId: 'acero-sae1010', cotizarItem });
@@ -1888,6 +2110,37 @@ test('el presupuesto completo se genera y tiene tamaño razonable', () => {
   const salida = path.join(__dirname, 'salida-presupuesto.pdf');
   fs.writeFileSync(salida, bytes);
   console.log(`      → muestra guardada en tests/salida-presupuesto.pdf (${(bytes.length / 1024).toFixed(1)} kB)`);
+});
+
+test('el presupuesto del cliente no revela costo, margen ni tiempo de máquina', () => {
+  /* Es una regla de negocio, no cosmética. Si el PDF muestra "18m 2s de
+     máquina" al lado de un precio de seis cifras, la conversación pasa a ser
+     el precio por minuto de máquina en vez del trabajo entregado — y de paso
+     le revela al cliente el rendimiento de nuestro anidado.
+
+     Este test corre sobre el TEXTO REAL del PDF, no sobre el código: es la
+     única forma de que no se filtre por una línea agregada más adelante. */
+  const coti = cotizarPresupuesto({
+    items: [{ nombre: 'Placa', shape: makeShape(rect(0, 0, 300, 200), [circle(30, 30, 6)]),
+      materialId: 'acero-sae1010', espesor: 3, cantidad: 40 }],
+  }, CTX);
+  const bytes = generarPresupuestoPDF({
+    presupuesto: { numero: '2026-0002', cliente: { nombre: 'Cliente' } },
+    cotizacion: coti,
+    config: DEFAULT_CONFIG,
+  });
+  const txt = textoDelPDF(bytes);
+
+  for (const palabra of ['margen', 'utilidad', 'ganancia', 'costo total', 'chapas a consumir', 'tiempo de m']) {
+    assert.ok(!txt.toLowerCase().includes(palabra), `el presupuesto del cliente no puede decir "${palabra}"`);
+  }
+  // Y el número del costo tampoco puede aparecer escrito en ningún lado
+  const costoFmt = Math.round(coti.items[0].costos.total).toLocaleString('es-AR');
+  assert.ok(!txt.includes(costoFmt), `el costo (${costoFmt}) aparece impreso en el presupuesto`);
+
+  // Lo que SÍ tiene que estar: qué recibe y cuánto paga
+  assert.ok(txt.includes('TOTAL'), 'el presupuesto tiene que mostrar el total');
+  assert.ok(/Peso total/i.test(txt), 'el peso sirve para el flete y sí va');
 });
 
 test('el DXF de una pieza de biblioteca se guarda como muestra', () => {

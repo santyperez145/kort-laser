@@ -227,15 +227,21 @@ export function generarPresupuestoPDF(datos) {
     yf += 20;
   });
 
-  /* Resumen técnico a la izquierda */
+  /* Resumen del trabajo, a la izquierda.
+     Va SÓLO lo que le sirve al cliente: cuántas piezas recibe y cuánto pesan
+     (que es lo que necesita para el flete). Las chapas consumidas y el tiempo
+     de máquina son datos NUESTROS y quedan en la orden de trabajo: mostrar
+     "18m 2s" al lado de un precio de seis cifras invita a discutir el precio
+     por minuto de máquina en vez de por el trabajo entregado, y además le
+     revela al cliente el rendimiento del anidado. */
   const xTec = M;
   const anchoTec = W - anchoCaja - 16;
-  doc.texto(xTec, doc.y + 2, 'RESUMEN DE PRODUCCIÓN', { size: 7.5, bold: true, color: COL.acento });
+  doc.texto(xTec, doc.y + 2, 'RESUMEN DEL TRABAJO', { size: 7.5, bold: true, color: COL.acento });
   const tec = [
+    ['Ítems', `${cotizacion.items.length}`],
     ['Piezas totales', `${r.piezasTotales} u`],
     ['Peso total', `${fmtNum(r.pesoTotal, 2)} kg`],
-    ['Chapas a consumir', `${r.chapasTotal}`],
-    ['Tiempo de máquina', fmtTiempo(r.tiempoProduccion)],
+    ['Plazo estimado', `${presupuesto.entregaDias ?? 7} días hábiles`],
   ];
   let yt = doc.y + 16;
   for (const [k, v] of tec) {
@@ -319,7 +325,14 @@ export function generarPresupuestoPDF(datos) {
  * Va con la pieza por el taller: qué material, qué espesor, qué pliegues,
  * en qué orden y con qué matriz.
  */
-export function generarOrdenTrabajoPDF({ orden, cotizacion, config, miniaturas = {} }) {
+/**
+ * Orden de trabajo: el papel que baja al taller. A diferencia del
+ * presupuesto, acá SÍ va todo lo nuestro — tiempos, chapas, material a
+ * comprar. Nunca sale de la empresa.
+ *
+ * @param {Object} [compra] resultado de `listaDeCompra()`, opcional
+ */
+export function generarOrdenTrabajoPDF({ orden, cotizacion, config, miniaturas = {}, compra = null }) {
   const doc = new PDF(A4);
   const M = doc.margen;
   const W = doc.anchoUtil;
@@ -390,6 +403,29 @@ export function generarOrdenTrabajoPDF({ orden, cotizacion, config, miniaturas =
 
     doc.y += alto + 10;
   });
+
+  /* Material a comprar. Va acá y NO en el presupuesto: es información
+     nuestra. Al pie de la orden de trabajo sirve para que el que va a la
+     casa de chapas lleve el papel con lo que hay que pedir. */
+  if (compra?.lineas?.length) {
+    doc.y += 6;
+    doc.texto(M, doc.y, 'MATERIAL A COMPRAR', { size: 8, bold: true, color: '#e4572e' });
+    doc.y += 14;
+    for (const l of compra.lineas) {
+      doc.hex('#5b6672', true);
+      doc.rect(M, doc.y, 9, 9, 'S');
+      doc.texto(M + 15, doc.y + 1, l.pedido, { size: 8.5, color: '#12161c', maxWidth: W - 130 });
+      doc.texto(M + W, doc.y + 1, fmtMoneda(l.costoTotal, '$', 0), {
+        size: 8.5, bold: true, color: '#12161c', align: 'right',
+      });
+      doc.y += 15;
+    }
+    doc.texto(M + 15, doc.y + 1, `Total ${fmtNum(compra.pesoTotal, 1)} kg`, { size: 8, color: '#5b6672' });
+    doc.texto(M + W, doc.y + 1, fmtMoneda(compra.total, '$', 0), {
+      size: 9, bold: true, color: '#12161c', align: 'right',
+    });
+    doc.y += 20;
+  }
 
   doc.y += 6;
   doc.texto(M, doc.y, 'CONTROL DE CALIDAD', { size: 8, bold: true, color: '#e4572e' });
