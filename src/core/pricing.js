@@ -83,6 +83,23 @@ export const DEFAULT_CONFIG = {
     ingenieriaHora: 18000,
     recargoUrgente: 35,
     recargoExpress: 70,
+    /**
+     * Recargo sobre el tiempo de máquina cuando la chapa la pone el cliente.
+     *
+     * 30 % es el orden de lo que cobra un taller, y sale de dos cosas
+     * concretas, no de un capricho:
+     *
+     * - Se pierde el margen del material. En chapa fina el material es el
+     *   grueso del trabajo; cortando a la misma tarifa, el trabajo queda con
+     *   casi nada de ganancia.
+     * - El riesgo cambia de manos. Chapa alabeada, con óxido o con un espesor
+     *   que no es el que dice: el corte sale mal y la repone el taller, que no
+     *   la compró ni la eligió.
+     *
+     * Se puede poner en 0 si se prefiere cobrarlo con el margen del ítem. Lo
+     * importante es que sea una decisión y no un olvido.
+     */
+    recargoMaterialCliente: 30,
     descuentos: [
       { desde: 10, pct: 5 },
       { desde: 25, pct: 8 },
@@ -345,9 +362,31 @@ export function cotizarItem(item, ctx, planItem = null) {
     costoChapa *
     (1 + nz(com.scrapMinimo) / 100);
 
+  /* --- ¿Quién pone la chapa? -------------------------------------------
+   *
+   * Con material del cliente NO se cobra el material, pero el trabajo no vale
+   * lo mismo que cortando material propio, y por dos razones concretas:
+   *
+   * 1. Se pierde el margen del material, que en chapa fina es el grueso del
+   *    trabajo. Cobrar la misma hora deja el trabajo casi sin ganancia.
+   * 2. El riesgo cambia de manos. Si la chapa viene alabeada, con óxido o con
+   *    un espesor que no es el que dice, el corte sale mal — y la repone el
+   *    taller, que no la compró ni la eligió.
+   *
+   * Por eso hay un recargo sobre el tiempo de máquina. Es un porcentaje
+   * configurable y explícito, no un número escondido: el cliente que trae la
+   * chapa lo pregunta siempre.
+   *
+   * Tampoco se anida con otros trabajos: la chapa es de él y vuelve con su
+   * recorte. Eso ya lo resuelve `item.chapa`, que pisa la chapa estándar. */
+  const materialDelCliente = item.materialCliente === true;
+
   let costoMaterial;
   let modoMaterialUsado;
-  if (com.modoMaterial === 'nesting') {
+  if (materialDelCliente) {
+    costoMaterial = 0;
+    modoMaterialUsado = 'Lo pone el cliente';
+  } else if (com.modoMaterial === 'nesting') {
     costoMaterial = costoPorChapasEnteras;
     modoMaterialUsado = 'Chapas completas';
   } else if (com.modoMaterial === 'prorrateado') {
@@ -409,8 +448,16 @@ export function cotizarItem(item, ctx, planItem = null) {
      4m 42s de corte, que es un número que no existe: el 96 % de eso es
      preparación. La suma no cambia — cambia que ahora se puede explicar. */
   const tPreparacion = (corte.tSetup || 0) + (corte.tChapas || 0);
-  const costoCorte = (corte.tProduccion / 3600) * costoHoraLaser.total;
-  const costoPreparacion = (tPreparacion / 3600) * costoHoraLaser.total;
+  const costoCorteBase = (corte.tProduccion / 3600) * costoHoraLaser.total;
+  const costoPreparacionBase = (tPreparacion / 3600) * costoHoraLaser.total;
+
+  /* Recargo por material del cliente: se aplica al tiempo de máquina, que es
+     lo único que queda para cobrar cuando la chapa no la pone el taller. */
+  const pctMaterialCliente = materialDelCliente ? nz(com.recargoMaterialCliente, 0) : 0;
+  const factorMC = 1 + pctMaterialCliente / 100;
+  const costoCorte = costoCorteBase * factorMC;
+  const costoPreparacion = costoPreparacionBase * factorMC;
+  const recargoMaterialCliente = costoCorte + costoPreparacion - costoCorteBase - costoPreparacionBase;
   const precioGas = nz(prod.gases?.[corte.gasTipo], GASES[corte.gasTipo]?.costoM3 ?? 800);
   const costoGas = corte.gasM3Total * precioGas;
 
@@ -548,6 +595,17 @@ export function cotizarItem(item, ctx, planItem = null) {
     costos: {
       material: costoMaterial,
       modoMaterial: modoMaterialUsado,
+      materialDelCliente,
+      recargoMaterialClientePct: pctMaterialCliente,
+      recargoMaterialCliente,
+      // Lo que habría costado el material si lo pusiera el taller. Sirve para
+      // mostrarle al cliente cuánto se ahorra trayendo la chapa, que es
+      // exactamente lo que pregunta.
+      materialSiLoPusieraElTaller: materialDelCliente
+        ? (aprovechamiento >= com.aprovechamientoObjetivo
+            ? costoPorChapasEnteras
+            : Math.min(costoProrrateado, costoPorChapasEnteras))
+        : null,
       costoChapa,
       pesoChapa,
       // `corte` es SÓLO producción (cortar las piezas del lote). La puesta a

@@ -102,6 +102,12 @@ export function Precio() {
           {r ? (
             <div className="text-[12.5px]">
               <Fila etiqueta={`Material · ${r.costos.modoMaterial}`} valor={money(r.costos.material, sim, 0)} />
+              {r.costos.recargoMaterialCliente > 0 && (
+                <Fila
+                  etiqueta={`Recargo por material del cliente ${num(r.costos.recargoMaterialClientePct, 0)} %`}
+                  valor={money(r.costos.recargoMaterialCliente, sim, 0)}
+                />
+              )}
               <Fila
                 etiqueta={`Corte láser · ${fmtTiempo(r.corte.tProduccion)}`}
                 valor={money(r.costos.corte, sim, 0)}
@@ -154,6 +160,19 @@ export function Precio() {
                 <Fila etiqueta={`Ingresos brutos ${num(r.precio.iibbPct, 1)} %`} valor={money(r.precio.iibb, sim, 0)} />
               )}
               {r.precio.aplicoMinimo && <Fila etiqueta="Mínimo por ítem aplicado" valor="" />}
+
+              {/* Lo primero que pregunta el que trae la chapa: "¿cuánto me
+                  ahorro?". Tenerlo a mano cierra la conversación. */}
+              {r.costos.materialSiLoPusieraElTaller > 0 && (
+                <p className="mt-2 rounded-lg bg-acero-500/8 px-2.5 py-2 text-[11.5px] leading-relaxed text-acero-700 dark:text-acero-300">
+                  Trayendo el material se ahorra{' '}
+                  <strong>{money(r.costos.materialSiLoPusieraElTaller, sim, 0)}</strong> de chapa y
+                  paga <strong>{money(r.costos.recargoMaterialCliente, sim, 0)}</strong> de recargo.
+                  {r.costos.materialSiLoPusieraElTaller > r.costos.recargoMaterialCliente
+                    ? ' Le conviene traerla.'
+                    : ' Le sale más barato que la ponga el taller.'}
+                </p>
+              )}
 
               <div className="mt-2 flex items-baseline justify-between gap-3 border-t-2 border-tinta pt-2.5 text-[15px] font-bold">
                 <span>Subtotal del ítem</span>

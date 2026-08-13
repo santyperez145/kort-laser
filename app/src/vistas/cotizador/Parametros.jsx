@@ -191,6 +191,25 @@ export function Parametros() {
           </Campo>
         </div>
 
+        {/* Quién pone la chapa cambia el precio de dos maneras y conviene que
+            se decida acá, mirando el material, y no al final. */}
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-borde bg-panel-alto px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={!!item.materialCliente}
+            onChange={(e) => actualizarItem(sel, { materialCliente: e.target.checked })}
+            className="mt-0.5 size-4 accent-corte-500 cursor-pointer"
+          />
+          <span className="min-w-0">
+            <span className="text-[13px] font-medium">El material lo pone el cliente</span>
+            <span className="mt-0.5 block text-[11.5px] leading-snug text-suave">
+              No se cobra la chapa. Se aplica un recargo del{' '}
+              {num(config.comercial.recargoMaterialCliente ?? 0, 0)} % sobre el tiempo de máquina:
+              se pierde el margen del material y el riesgo de una chapa fea pasa al taller.
+            </span>
+          </span>
+        </label>
+
         <Campo etiqueta="Gas de asistencia">
           <Selector
             valor={item.gas || '__reco__'}

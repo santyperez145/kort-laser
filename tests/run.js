@@ -799,6 +799,81 @@ test('un espesor por encima del máximo devuelve error explicativo', () => {
 /* ================================================================== */
 /* ================================================================== */
 
+grupo('Material puesto por el cliente');
+
+const PLACA_MC = makeShape(rect(0, 0, 300, 200), [circle(150, 100, 15)]);
+const ITEM_MC = { shape: PLACA_MC, materialId: 'acero-sae1010', espesor: 2, cantidad: 5 };
+
+test('no se cobra la chapa', () => {
+  const r = cotizarItem({ ...ITEM_MC, materialCliente: true }, CTX);
+  assert.equal(r.costos.material, 0);
+  assert.ok(/cliente/i.test(r.costos.modoMaterial));
+  assert.ok(r.costos.materialDelCliente);
+});
+
+test('el tiempo de máquina se recarga, y el recargo es explícito', () => {
+  const propio = cotizarItem(ITEM_MC, CTX);
+  const cliente = cotizarItem({ ...ITEM_MC, materialCliente: true }, CTX);
+  const pct = DEFAULT_CONFIG.comercial.recargoMaterialCliente;
+
+  cerca(
+    cliente.costos.corte + cliente.costos.preparacion,
+    (propio.costos.corte + propio.costos.preparacion) * (1 + pct / 100),
+    1e-6,
+    'el recargo va sobre el tiempo de máquina'
+  );
+  cerca(
+    cliente.costos.recargoMaterialCliente,
+    (propio.costos.corte + propio.costos.preparacion) * (pct / 100),
+    1e-6,
+    'y se informa por separado para poder explicarlo'
+  );
+});
+
+test('sale más barato que poniendo el material, pero no gratis', () => {
+  const propio = cotizarItem(ITEM_MC, CTX);
+  const cliente = cotizarItem({ ...ITEM_MC, materialCliente: true }, CTX);
+  assert.ok(cliente.costos.total < propio.costos.total, 'sin chapa tiene que salir menos');
+  assert.ok(cliente.costos.total > 0);
+  // Y se puede decir cuánto se ahorra el cliente
+  assert.ok(cliente.costos.materialSiLoPusieraElTaller > 0);
+});
+
+test('el peso y la geometría se siguen calculando', () => {
+  // Hacen falta igual: para el acabado, para el plegado y para decirle al
+  // cliente cuánta chapa tiene que traer.
+  const r = cotizarItem({ ...ITEM_MC, materialCliente: true }, CTX);
+  assert.ok(r.geometria.pesoTotal > 0);
+  assert.ok(r.geometria.pesoPieza > 0);
+  assert.ok(r.nesting.chapas >= 1, 'sigue diciendo cuántas chapas hacen falta');
+});
+
+test('con recargo en cero queda sólo el tiempo de máquina', () => {
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, recargoMaterialCliente: 0 } };
+  const ctx = { ...CTX, config: cfg };
+  const propio = cotizarItem(ITEM_MC, ctx);
+  const cliente = cotizarItem({ ...ITEM_MC, materialCliente: true }, ctx);
+  cerca(cliente.costos.corte, propio.costos.corte, 1e-9);
+  assert.equal(cliente.costos.recargoMaterialCliente, 0);
+});
+
+test('sin la marca, nada cambia', () => {
+  const a = cotizarItem(ITEM_MC, CTX);
+  const b = cotizarItem({ ...ITEM_MC, materialCliente: false }, CTX);
+  cerca(b.costos.total, a.costos.total, 1e-9);
+  assert.equal(b.costos.recargoMaterialCliente, 0);
+});
+
+test('respeta la chapa que trae el cliente', () => {
+  // La chapa es de él y vuelve con su recorte: no se anida en la estándar
+  const chica = cotizarItem({ ...ITEM_MC, materialCliente: true, chapa: { w: 1000, h: 500 } }, CTX);
+  const estandar = cotizarItem({ ...ITEM_MC, materialCliente: true }, CTX);
+  assert.equal(chica.nesting.chapa.w, 1000);
+  assert.ok(chica.nesting.chapas >= estandar.nesting.chapas, 'en una chapa más chica entran menos');
+});
+
+/* ================================================================== */
+
 grupo('Calibración contra lo que tardó de verdad');
 
 /** Órdenes de mentira: n trabajos con un ratio real/estimado dado. */
@@ -1042,6 +1117,42 @@ test('NO se queja del operario dominante en la plegadora', () => {
   // de operario es correcto, no un error de carga.
   const r = revisarDatos({ ...DATOS_OK, maquinas: [DEFAULT_PLEGADORA] });
   assert.ok(!r.hallazgos.some((h) => /operario/i.test(h.msg)));
+});
+
+test('detecta un aprovechamiento objetivo inalcanzable', () => {
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, aprovechamientoObjetivo: 0.9 } };
+  const r = revisarDatos({ ...DATOS_OK, config: cfg });
+  assert.ok(r.hallazgos.some((h) => /aprovechamiento objetivo está en 90/.test(h.msg)),
+    'con 90 % el sistema cobra siempre por área y el retazo no lo paga nadie');
+});
+
+test('detecta la puesta a punto en cero, que regala todos los trabajos chicos', () => {
+  const sinSetup = { ...DEFAULT_MACHINE, tiempoSetupPrograma: 0, tiempoCargaChapa: 0 };
+  const r = revisarDatos({ ...DATOS_OK, maquinas: [sinSetup, DEFAULT_PLEGADORA] });
+  const h = r.hallazgos.find((x) => /en cero/.test(x.msg));
+  assert.ok(h, 'nadie prepara un programa en cero segundos');
+  assert.equal(h.nivel, 'error');
+  assert.ok(/180 s/.test(h.msg), 'tiene que decir con qué valores arrancar');
+});
+
+test('detecta un mínimo por ítem que no cubre la puesta a punto', () => {
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, minimoPorItem: 2000 } };
+  const r = revisarDatos({ ...DATOS_OK, config: cfg });
+  assert.ok(r.hallazgos.some((h) => /no cubre ni la puesta a punto/.test(h.msg)));
+});
+
+test('detecta el galvanizado más barato que el acero al carbono', () => {
+  const mats = DEFAULT_MATERIALS.map((m) => (m.id === 'galvanizado' ? { ...m, precioKg: 3400 } : m));
+  const r = revisarDatos({ ...DATOS_OK, materiales: mats });
+  assert.ok(r.hallazgos.some((h) => /zincado/.test(h.msg)), 'es la misma chapa más el zincado');
+});
+
+test('NO se queja del F-24 al mismo precio que el laminado en frío', () => {
+  // En teoría el caliente sale menos, pero comprando poco volumen pueden
+  // salir iguales. Avisar de algo que puede ser correcto enseña a ignorar.
+  const mats = DEFAULT_MATERIALS.map((m) => (m.id === 'acero-f24' ? { ...m, precioKg: 3800 } : m));
+  const r = revisarDatos({ ...DATOS_OK, materiales: mats });
+  assert.ok(!r.hallazgos.some((h) => /F-24|f24/i.test(h.msg)));
 });
 
 test('detecta el margen en cero, que sería vender al costo', () => {

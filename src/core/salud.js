@@ -64,8 +64,72 @@ function revisarComercial(cfg) {
   if (aprov != null && (aprov <= 0 || aprov > 1)) {
     out.push(hallazgo('aviso', 'comercial', 'Configuración → Comercial',
       `El aprovechamiento objetivo se expresa entre 0 y 1 (0,78 = 78 %). Está en ${aprov}.`));
+  } else if (aprov != null && aprov > 0.85) {
+    /* Este número decide cuándo se cobra chapa entera y cuándo sólo el área
+       consumida. Un nesting real de piezas variadas da 60-75 %; pedirle 85 %
+       o más es un umbral que casi nunca se alcanza, así que el sistema cobra
+       siempre por área y el retazo que queda en el piso no lo paga nadie. En
+       chapa fina el material es el grueso del costo: subfacturarlo ahí es de
+       lo más caro que puede pasar. */
+    out.push(hallazgo('aviso', 'comercial', 'Configuración → Comercial',
+      `El aprovechamiento objetivo está en ${Math.round(aprov * 100)} %. Un nesting real de ` +
+      'piezas variadas da 60-75 %, así que ese umbral casi nunca se alcanza y el sistema ' +
+      'termina cobrando siempre por área consumida: el retazo que queda no lo paga nadie. ' +
+      'Con 0,75-0,80 se cobra chapa entera cuando de verdad se llenó.'));
   }
 
+  return out;
+}
+
+/**
+ * El mínimo por ítem tiene que cubrir, como piso, lo que cuesta poner la
+ * máquina en marcha una vez.
+ *
+ * No es una opinión comercial: es aritmética. Un trabajo de una sola pieza son
+ * minutos de programa y carga de chapa que se pagan igual, aunque el corte
+ * dure diez segundos. Si el mínimo queda por debajo de eso, cada trabajo chico
+ * que entra sale a pérdida — y los trabajos chicos son la mayoría.
+ */
+function revisarMinimos(cfg, maquinas, estructura) {
+  const out = [];
+  const c = cfg.comercial || {};
+  const laser = (maquinas || []).find((m) => m.tipo === 'laser');
+  const minItem = n(c.minimoPorItem);
+  if (!laser || minItem == null) return out;
+
+  const ch = calcularCostoHoraMaquina(laser, estructura);
+  const setup = n(laser.tiempoSetupPrograma) ?? 0;
+  const carga = n(laser.tiempoCargaChapa) ?? 0;
+  const seg = setup + carga;
+
+  /* Puesta a punto en cero no existe: alguien tiene que armar el programa y
+     alguien tiene que subir la chapa a la mesa. Con estos campos vacíos el
+     sistema cobra los segundos de corte y nada más, así que TODO trabajo de
+     pocas piezas sale por debajo del costo. Es el error más caro que se puede
+     tener cargado, porque no se nota: los precios simplemente salen baratos y
+     el taller cree que es competitivo. */
+  if (setup <= 0 || carga <= 0) {
+    const cuales = [
+      setup <= 0 ? 'el setup del programa' : null,
+      carga <= 0 ? 'la carga de chapa' : null,
+    ].filter(Boolean).join(' y ');
+    out.push(hallazgo('error', 'maquinas', `Máquinas → ${laser.nombre || laser.id}`,
+      `Está en cero ${cuales}. Nadie prepara un programa ni sube una chapa en cero segundos: ` +
+      'así, cada trabajo de pocas piezas se cotiza por debajo del costo y no se nota, porque ' +
+      'los precios simplemente salen baratos. Valores de referencia: 180 s de setup y 90 s de ' +
+      'carga por chapa sin cambiador de palet.'));
+    return out;
+  }
+
+  if (!(ch.total > 0)) return out;
+
+  const costoArranque = (seg / 3600) * ch.total;
+  if (minItem < costoArranque) {
+    out.push(hallazgo('aviso', 'comercial', 'Configuración → Comercial',
+      `El mínimo por ítem (${Math.round(minItem)}) no cubre ni la puesta a punto, que sola ` +
+      `cuesta ${Math.round(costoArranque)} de máquina. Cada trabajo de pocas piezas que ` +
+      'entre sale a pérdida.'));
+  }
   return out;
 }
 
@@ -170,15 +234,34 @@ function revisarMateriales(materiales) {
     }
   }
 
-  // Coherencia entre materiales: el inoxidable siempre sale más que el acero
-  // al carbono. Si está al revés, alguien confundió dos filas.
-  const acero = activos.find((m) => /acero|sae|f24/i.test(m.id + m.nombre) && !/inox/i.test(m.id + m.nombre));
-  const inox = activos.find((m) => /inox/i.test(m.id + m.nombre));
-  if (acero && inox && n(acero.precioKg) > 0 && n(inox.precioKg) > 0 && inox.precioKg <= acero.precioKg) {
-    out.push(hallazgo('aviso', 'materiales', 'Materiales',
-      `El inoxidable (${inox.precioKg}/kg) no puede costar menos que el acero al carbono ` +
-      `(${acero.precioKg}/kg). Revisá si no se cruzaron los precios.`));
-  }
+  /* Coherencia entre materiales.
+   *
+   * Los valores absolutos se mueven todo el tiempo con la inflación, pero el
+   * ORDEN entre metales no: cada escalón agrega proceso o aleación y eso no se
+   * abarata. Un precio que rompe el orden es casi siempre una fila cargada en
+   * el renglón equivocado.
+   *
+   * Sólo se comparan pares donde la relación es física e indiscutible. El
+   * F-24 laminado en caliente contra el SAE 1010 en frío NO está acá: en
+   * teoría el caliente sale menos, pero comprando poco volumen pueden salir
+   * iguales, y avisar de algo que puede ser correcto enseña a ignorar avisos. */
+  const porId = (re) => activos.find((m) => re.test(m.id));
+  const acero = porId(/^acero-sae1010/) || porId(/^acero/);
+  const galva = porId(/galvaniz/);
+  const inox = porId(/^inox/);
+
+  const comparar = (menor, mayor, razon) => {
+    if (!menor || !mayor) return;
+    if (!(n(menor.precioKg) > 0) || !(n(mayor.precioKg) > 0)) return;
+    if (mayor.precioKg > menor.precioKg) return;
+    out.push(hallazgo('aviso', 'materiales', `Materiales → ${mayor.nombre}`,
+      `${mayor.nombre} (${mayor.precioKg}/kg) no puede salir menos que ${menor.nombre} ` +
+      `(${menor.precioKg}/kg): ${razon}. Revisá si no se cargó en el renglón equivocado.`));
+  };
+
+  comparar(acero, galva, 'es la misma chapa más el zincado');
+  comparar(galva, inox, 'el inoxidable lleva cromo y níquel');
+  comparar(acero, inox, 'el inoxidable lleva cromo y níquel');
 
   return out;
 }
@@ -222,6 +305,7 @@ export function revisarDatos({ config, maquinas, materiales } = {}) {
   const hallazgos = [
     ...revisarComercial(cfg),
     ...revisarEstructura(cfg),
+    ...revisarMinimos(cfg, maquinas, estructura),
     ...revisarMaquinas(maquinas, estructura),
     ...revisarMateriales(materiales),
     ...revisarProduccion(cfg),
