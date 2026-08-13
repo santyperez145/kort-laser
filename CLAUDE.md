@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 159 verificaciones del núcleo
+npm test           # 172 verificaciones del núcleo
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -28,15 +28,15 @@ la interfaz si falta y arranca.
 ⚠️ **`npm start` NO compila.** Si tocaste algo de `app/` y no ves el cambio,
 falta el `npm run build`. Para trabajar, `npm run dev` y listo.
 
-⛔ **El build exige Node ≥ 22.12 y la máquina de Santiago tiene 21.7.** Vite 8
-usa rolldown, que llama a `util.styleText` con un arreglo — una API que no
-existe antes de Node 22. No hay parche: instalar el binario nativo a mano deja
-pasar el primer error y falla en el siguiente. Node 21 tampoco es LTS y ya
-había bloqueado `better-sqlite3`.
+⛔ **El build exige Node ≥ 22.12.** Vite 8 usa rolldown, que llama a
+`util.styleText` con un arreglo: una API que no existe antes de Node 22. No hay
+parche — instalar el binario nativo a mano deja pasar el primer error y falla
+en el siguiente. La máquina de Santiago ya está en **Node 24 LTS**; si aparece
+otra con Node 21, actualizarla es el arreglo (esa versión tampoco es LTS y ya
+había bloqueado `better-sqlite3`).
 
 **El núcleo y los tests corren en cualquier Node.** Sólo el build de la
-interfaz necesita 22. Si hay que tocar `app/` en esa máquina, primero está
-pendiente actualizar Node (ver ROADMAP → Deuda técnica).
+interfaz necesita 22.
 
 **Corré los tests antes de dar por terminado cualquier cambio en `src/core/`.**
 Varios de ellos existen porque ya atraparon errores reales de datos, no sólo de
@@ -52,7 +52,7 @@ código.
   deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
   react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
   **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
-  Node y en el navegador, y lo que permite que los 159 tests lo verifiquen sin
+  Node y en el navegador, y lo que permite que los 172 tests lo verifiquen sin
   levantar un navegador.
 - **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
   sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde
