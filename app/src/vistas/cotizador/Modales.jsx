@@ -5,6 +5,7 @@ import { Upload, FileUp, Search, Scissors } from 'lucide-react';
 import { usarCotizador, itemNuevo } from './contexto';
 import { Dialogo, ContenidoDialogo, Aviso } from '@/componentes/ui/varios';
 import { Boton } from '@/componentes/ui/boton';
+import { Insignia } from '@/componentes/ui/insignia';
 import { Entrada } from '@/componentes/ui/campos';
 import { miniatura } from '@/lib/miniatura';
 import { usarEstado } from '@/lib/estado';
@@ -130,6 +131,8 @@ export function ImportarDXF({ abierto, alCerrar }) {
   const [lectura, setLectura] = useState(null);
   const [nombreArchivo, setNombreArchivo] = useState('');
   // Separar es una decisión explícita: por defecto se respeta el diseño.
+  // Arranca en lo que sugiere el análisis del dibujo, no siempre en "conjunto":
+  // un archivo con doce copias de la misma pieza es un lote, no un cartel.
   const [separar, setSeparar] = useState(false);
 
   const procesar = (file) => {
@@ -139,6 +142,9 @@ export function ImportarDXF({ abierto, alCerrar }) {
         const r = leerDXF(String(lector.result), { espesor: doc.items[sel]?.espesor || 2 });
         setLectura(r);
         setNombreArchivo(file.name);
+        // Se arranca en lo que el análisis del dibujo sugiere. Sigue siendo
+        // una propuesta: el selector queda a la vista para cambiarla.
+        setSeparar(r.agrupamiento?.sugerencia === 'sueltas');
       } catch (e) {
         setLectura({ error: e.message, avisos: [], piezas: [] });
       }
@@ -262,26 +268,59 @@ export function ImportarDXF({ abierto, alCerrar }) {
 
             {lectura.piezas.length > 1 && (
               <div className="mt-5 border-t border-borde pt-4">
-                {!separar ? (
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-[12.5px] text-suave">
-                      ¿En realidad son {lectura.piezas.length} piezas sueltas y no un solo diseño?
-                    </p>
-                    <Boton tam="sm" onClick={() => setSeparar(true)}>
-                      <Scissors />
-                      Separarlas
-                    </Boton>
+                {/* El sistema mira el dibujo y propone lo más probable, con el
+                    motivo a la vista. La decisión final la toma quien cotiza:
+                    sólo el cliente sabe si eso es un cartel o un lote. */}
+                <div className="mb-3 rounded-xl border border-borde bg-panel-alto p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-tenue">
+                      ¿Qué es este dibujo?
+                    </span>
+                    {lectura.agrupamiento && (
+                      <Insignia tono={lectura.agrupamiento.confianza >= 0.8 ? 'verde' : 'amarillo'}>
+                        {lectura.agrupamiento.confianza >= 0.8 ? 'Detectado' : 'No es seguro'}
+                      </Insignia>
+                    )}
                   </div>
-                ) : (
+
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <button
+                      onClick={() => setSeparar(false)}
+                      className={`rounded-lg border p-2.5 text-left transition ${
+                        !separar ? 'border-corte-500 bg-corte-500/8' : 'border-borde hover:border-borde-fuerte'
+                      }`}
+                    >
+                      <div className="text-[13px] font-semibold">Un solo diseño</div>
+                      <div className="mt-0.5 text-[11px] leading-snug text-suave">
+                        Cartel, juego que se entrega armado, o piezas cuya separación es parte del
+                        pedido. Se respetan las posiciones del archivo.
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setSeparar(true)}
+                      className={`rounded-lg border p-2.5 text-left transition ${
+                        separar ? 'border-corte-500 bg-corte-500/8' : 'border-borde hover:border-borde-fuerte'
+                      }`}
+                    >
+                      <div className="text-[13px] font-semibold">
+                        {lectura.piezas.length} piezas sueltas
+                      </div>
+                      <div className="mt-0.5 text-[11px] leading-snug text-suave">
+                        Cada contorno es un ítem propio y se anida por su cuenta. Se puede pedir
+                        distinta cantidad de cada una.
+                      </div>
+                    </button>
+                  </div>
+
+                  {lectura.agrupamiento && (
+                    <p className="mt-2 text-[11.5px] leading-snug text-tenue">
+                      {lectura.agrupamiento.motivo}
+                    </p>
+                  )}
+                </div>
+
+                {separar && (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-[12.5px] text-suave">
-                        Cada contorno pasa a ser un ítem propio, y se anida por su cuenta.
-                      </p>
-                      <Boton tam="sm" tono="fantasma" onClick={() => setSeparar(false)}>
-                        Volver
-                      </Boton>
-                    </div>
 
                     <div className="mt-3 grid gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
                       {lectura.piezas.map((p, i) => {

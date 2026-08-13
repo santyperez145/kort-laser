@@ -16,6 +16,8 @@ import {
   rect, circle, slot, polyline, makeShape, shapeArea, shapeCutLength,
   shapeBBox, shapePiercings, pathLength, pathArea, regularPolygon, TAU, rad,
   makeShapeMulti, partesDe, esMultiParte,
+  flattenPath,
+  pathBBox,
 } from '../src/core/geometry.js';
 import {
   DEFAULT_MATERIALS, interpTable, cuttingSpeed, pesoKg, findMaterial, GASES,
@@ -408,6 +410,83 @@ test('la capa PLEGADO no se cuenta como corte', () => {
 
 /* ================================================================== */
 grupo('Biblioteca paramétrica');
+
+test('la transición cuadrado-redondo conserva las longitudes verdaderas', () => {
+  // Es la prueba que importa en un desarrollo: si los bordes desarrollados no
+  // miden lo mismo que en el espacio, la pieza no cierra al rolarla y se tira
+  // la chapa. Se verifica contra el perímetro de cada boca.
+  for (const [lado, dia, h] of [[400, 250, 300], [600, 300, 400], [800, 200, 500]]) {
+    const r = construir('transicion', { lado, dia, h, divisiones: 10 }, { espesor: 2, material: acero });
+    const pts = flattenPath(r.shape.outer, 0.1);
+
+    let inferior = 0;
+    for (let i = 0; i < 4; i++) inferior += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    cerca(inferior, r.info.perimetroCuadrado, r.info.perimetroCuadrado * 0.01,
+      'el borde de la boca cuadrada tiene que medir su perímetro');
+
+    // El borde superior, descartando el segmento de la costura
+    const seg = [];
+    for (let i = 5; i < pts.length - 1; i++) seg.push(Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]));
+    seg.sort((a, b) => a - b);
+    const superior = seg.slice(0, seg.length - 1).reduce((a, b) => a + b, 0);
+    cerca(superior, r.info.perimetroRedondo, r.info.perimetroRedondo * 0.02,
+      'el borde de la boca redonda tiene que medir su perímetro');
+  }
+});
+
+test('la tolva piramidal usa la altura inclinada, no la vertical', () => {
+  // Error clásico: cortar el faldón con la altura de la tolva. Queda corto y
+  // no llega, porque el retiro lateral alarga el faldón.
+  const r = construir('tolva-piramidal',
+    { supA: 600, supB: 600, infA: 200, infB: 200, h: 400, pestana: 0 },
+    { espesor: 2, material: acero });
+  const retiro = (600 - 200) / 2;
+  const esperada = Math.sqrt(400 * 400 + retiro * retiro);
+  cerca(r.info.alturaInclinada, esperada, 0.5);
+  assert.ok(r.info.alturaInclinada > 400, 'la inclinada siempre supera a la vertical');
+  const b = shapeBBox(r.shape);
+  cerca(b.h, esperada, 1, 'el faldón cortado tiene que tener esa altura');
+});
+
+test('el piñón sale con el diámetro primitivo de norma', () => {
+  // Dp = paso / sen(180/z)
+  for (const [z, paso] of [[19, 12.7], [25, 15.875], [12, 9.525]]) {
+    const r = construir('pinon', { z, paso: String(paso) }, { espesor: 4, material: acero });
+    const esperado = paso / Math.sin(Math.PI / z);
+    cerca(r.info.primitivo, esperado, 0.01, `z=${z} paso=${paso}`);
+    assert.ok(r.info.exterior > r.info.primitivo, 'el exterior tiene que superar al primitivo');
+  }
+});
+
+test('la brida cuadrada pone los pernos que se le piden', () => {
+  const cuatro = construir('brida-cuadrada', { ochoPernos: false, diaInt: 80 }, { espesor: 3, material: acero });
+  const ocho = construir('brida-cuadrada', { ochoPernos: true, diaInt: 80 }, { espesor: 3, material: acero });
+  // agujero central + pernos
+  assert.equal(cuatro.shape.holes.length, 5);
+  assert.equal(ocho.shape.holes.length, 9);
+});
+
+test('el anillo partido es un solo contorno, sin agujero suelto', () => {
+  const entero = construir('anillo', { partido: false }, { espesor: 3, material: acero });
+  const partido = construir('anillo', { partido: true }, { espesor: 3, material: acero });
+  assert.equal(entero.shape.holes.length, 1, 'el entero tiene su agujero interior');
+  assert.equal(partido.shape.holes.length, 0,
+    'el partido es una C: si dejara el agujero, el interior se caería como pieza suelta');
+});
+
+test('la bandeja portacables no perfora las alas', () => {
+  const r = construir('bandeja-portacables',
+    { ancho: 200, altura: 60, largo: 1000, perforada: true, diaUnion: 0 },
+    { espesor: 1.5, material: acero });
+  const bd = r.desarrollo.pliegues[0].BD;
+  const x1 = 60 - bd / 2;
+  const x2 = x1 + 200 - bd;
+  for (const h of r.shape.holes) {
+    const b = pathBBox(h);
+    assert.ok(b.minX > x1 && b.maxX < x2,
+      'perforar el ala la debilita justo donde trabaja: los agujeros van sólo en el fondo');
+  }
+});
 
 test('todas las piezas se construyen sin error', () => {
   for (const def of PIEZAS) {
@@ -1383,6 +1462,178 @@ test('una pieza marcada como no rotable se respeta', () => {
 test('los pesos del criterio de colocación están calibrados, no en cero', () => {
   assert.ok(PESOS.hueco > 0, 'sin el término de hueco las piezas dejan huecos atrapados');
   assert.ok(PESOS.y > 0);
+});
+
+/* ================================================================== */
+/* ==================================================================
+   Auditoría: cada fórmula de docs/CALCULOS.md contra la cuenta a mano.
+   Si alguien cambia una fórmula sin querer, acá salta.
+   ================================================================== */
+grupo('Auditoría de los cálculos');
+
+test('peso: área × espesor × densidad', () => {
+  // Placa 400×300×2 mm en acero: 0,12 m² × 2 mm × 7,85 = 1,884 kg
+  const sh = makeShape(rect(0, 0, 400, 300));
+  const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }, CTX);
+  cerca(r.geometria.pesoPieza, 1.884, 0.001, 'el peso tiene que dar 1,884 kg');
+  cerca(r.geometria.pesoPieza, pesoKg(400 * 300, 2, acero.densidad), 1e-9);
+});
+
+test('longitud de corte: el perímetro, sin inventar nada', () => {
+  const sh = makeShape(rect(0, 0, 400, 300));
+  const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }, CTX);
+  cerca(r.geometria.largoCorteMM, 2 * (400 + 300), 0.001, 'perímetro = 2×(400+300) = 1400 mm');
+});
+
+test('un círculo mide πD, no el polígono inscripto', () => {
+  const sh = makeShape(circle(100, 100, 50));
+  const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }, CTX);
+  cerca(r.geometria.largoCorteMM, Math.PI * 100, 0.01, 'perímetro exacto del círculo');
+  const areaExacta = Math.PI * 50 * 50;
+  cerca(r.geometria.areaNetaMM2, areaExacta, areaExacta * 0.0005,
+    'el área del disco tiene que ser exacta, no aproximada');
+});
+
+test('estructura: gasto fijo dividido las horas productivas', () => {
+  const e = calcularEstructura(DEFAULT_ESTRUCTURA);
+  const abiertas = DEFAULT_ESTRUCTURA.diasHabilesMes * DEFAULT_ESTRUCTURA.horasPorDia;
+  cerca(e.horasAbiertas, abiertas, 1e-9);
+  cerca(e.horasProductivas, (abiertas * DEFAULT_ESTRUCTURA.ocupacionProductiva) / 100, 1e-9);
+  cerca(e.porHora, e.totalMes / e.horasProductivas, 1e-9);
+  const pot = e.items.find((i) => i.id === 'potencia');
+  cerca(pot.valor, DEFAULT_ESTRUCTURA.potenciaContratadaKW * DEFAULT_ESTRUCTURA.cargoPotenciaKWMes, 0.01);
+});
+
+test('costo horario: la suma de sus seis componentes', () => {
+  const e = calcularEstructura(DEFAULT_ESTRUCTURA);
+  const c = calcularCostoHoraMaquina(DEFAULT_MACHINE, e);
+  const k = DEFAULT_MACHINE.costo;
+  cerca(c.amortizacion, k.valorEquipo / k.vidaUtilHoras, 1e-9);
+  cerca(c.energia, k.consumoKW * k.costoKWh, 1e-9);
+  cerca(c.operario, (k.operarioHora * k.dedicacionOperario) / 100, 1e-9);
+  cerca(c.estructura, e.porHora * (DEFAULT_MACHINE.participacionEstructura / 100), 1e-9);
+  cerca(c.total, c.amortizacion + c.energia + c.mantenimiento + c.consumibles + c.operario + c.estructura, 1e-9);
+});
+
+test('el operario cuesta 1,86 veces el básico de convenio', () => {
+  const cnc = UOM_RAMA17.categorias.find((c) => c.id === 'operador-cnc');
+  const c = costoHoraOperario(cnc.basicoHora, CARGAS_LABORALES);
+  const conAd = cnc.basicoHora * 1.1;
+  const conCargas = conAd * (1 + (26.4 + 7 + 0.5) / 100);
+  const conSac = conCargas * 1.0833;
+  const final = conSac / 0.86;
+  cerca(c.total, final, 1, 'la cuenta a mano tiene que dar lo mismo');
+});
+
+test('el tiempo simulado nunca es menor que el teórico', () => {
+  for (const [w, h, esp] of [[400, 300, 2], [100, 80, 1.5], [800, 600, 3]]) {
+    const sh = makeShape(rect(0, 0, w, h));
+    const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: esp, cantidad: 1 }, CTX);
+    const v = cuttingSpeed(acero, esp, 3, r.corte.gasTipo);
+    const teorico = (r.geometria.largoCorteMM / v) * 60;
+    assert.ok(r.corte.tCorte >= teorico * 0.98,
+      w + 'x' + h + ' en ' + esp + ' mm: simulado ' + r.corte.tCorte.toFixed(1) + 's contra ' + teorico.toFixed(1) + 's teóricos');
+    assert.ok(r.corte.tCorte < teorico * 3, 'tampoco puede ser absurdamente más lento');
+  }
+});
+
+test('los agujeros chicos frenan la máquina; los grandes no', () => {
+  // La velocidad en un arco está limitada por la aceleración centrípeta:
+  //   v = sqrt(a * R)
+  // Con 1,2 G y 8.500 mm/min de material, el límite recién aparece cuando
+  // R < v²/a ≈ 1,7 mm. Un agujero de Ø6 NO frena; uno de Ø2,5 sí.
+  const lisa = makeShape(rect(0, 0, 300, 200));
+  const grandes = [];
+  for (let i = 0; i < 10; i++) for (let j = 0; j < 8; j++) grandes.push(circle(15 + i * 30, 12 + j * 24, 3));
+  const conGrandes = cotizarItem({ shape: makeShape(rect(0, 0, 300, 200), grandes), materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }, CTX);
+  const holes = [];
+  for (let i = 0; i < 10; i++) for (let j = 0; j < 8; j++) holes.push(circle(15 + i * 30, 12 + j * 24, 1.25));
+  const perforada = makeShape(rect(0, 0, 300, 200), holes);
+  const a = cotizarItem({ shape: lisa, materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }, CTX);
+  const b = cotizarItem({ shape: perforada, materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }, CTX);
+  const caidaChicos = 1 - b.corte.vMediaEfectiva / a.corte.vMediaEfectiva;
+  const caidaGrandes = 1 - conGrandes.corte.vMediaEfectiva / a.corte.vMediaEfectiva;
+  // Medido: Ø6 cae 5 %, Ø2,5 cae 12 %, Ø1 cae 19 %. La caída es gradual
+  // porque el promedio incluye los 1.400 mm de perímetro recto, que se
+  // recorren a velocidad plena.
+  assert.ok(caidaChicos > 0.09,
+    'con 80 agujeros de Ø2,5 la velocidad media tiene que caer al menos 9 %, cayó '
+      + (caidaChicos * 100).toFixed(0) + ' %');
+  assert.ok(caidaGrandes < 0.07,
+    'un agujero de Ø6 está por encima del umbral de curvatura: no debería penalizar más de 7 %, penalizó '
+      + (caidaGrandes * 100).toFixed(0) + ' %');
+  assert.ok(caidaChicos > caidaGrandes * 1.8,
+    'los agujeros chicos tienen que frenar bastante más que los grandes');
+  assert.ok(b.corte.penalizacion > a.corte.penalizacion);
+});
+
+test('el gas sale del caudal por el tiempo con el haz encendido', () => {
+  const sh = makeShape(rect(0, 0, 400, 300));
+  const r = cotizarItem({ shape: sh, materialId: 'inox-304', espesor: 3, cantidad: 10, gas: 'N2' }, CTX);
+  const horasHaz = (r.corte.tCorte + r.corte.tPierce + r.corte.tEntradas) / 3600;
+  cerca(r.corte.gasM3, r.corte.gasCaudal * horasHaz, r.corte.gasM3 * 0.02,
+    'm3 = caudal por horas de haz encendido');
+  cerca(r.costos.gas, r.costos.gasM3 * r.costos.precioGasM3, 0.01);
+});
+
+test('el kilo entregado es el comprado dividido el aprovechamiento', () => {
+  const sh = makeShape(rect(0, 0, 400, 300));
+  const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 30 }, CTX);
+  const porKgEntregado = r.costos.material / r.geometria.pesoTotal;
+  assert.ok(porKgEntregado > acero.precioKg,
+    'el kilo entregado siempre cuesta más que el comprado: el recorte lo paga el taller');
+  const esperado = acero.precioKg / (r.nesting.aprovechamiento || 1);
+  cerca(porKgEntregado, esperado, esperado * 0.5,
+    'entregado ' + porKgEntregado.toFixed(0) + '/kg con ' + (r.nesting.aprovechamiento * 100).toFixed(0) + ' % de aprovechamiento');
+});
+
+test('el precio se arma en el orden documentado', () => {
+  const sh = makeShape(rect(0, 0, 400, 300));
+  const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 30 }, CTX);
+  const c = r.costos;
+  cerca(c.total, c.material + c.corte + c.preparacion + c.gas + c.plegado + c.acabado + c.procesos + c.ingenieria, 0.01);
+  cerca(r.precio.lista, c.total * (1 + r.precio.margen / 100), 0.01);
+  const conDesc = r.precio.lista * (1 - r.precio.descuentoPct / 100);
+  const conIIBB = conDesc * (1 + r.precio.iibbPct / 100);
+  assert.ok(Math.abs(r.precio.neto - conIIBB) <= (DEFAULT_CONFIG.comercial.redondeo || 1) + 1,
+    'neto ' + r.precio.neto + ' debería salir de ' + conIIBB.toFixed(0) + ' más el redondeo');
+});
+
+test('en chapa fina el material domina el costo', () => {
+  const sh = makeShape(rect(0, 0, 400, 300));
+  const r = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 30 }, CTX);
+  const peso = r.costos.material / r.costos.total;
+  assert.ok(peso > 0.85, 'el material debería ser >85 % del costo en 2 mm, dio ' + (peso * 100).toFixed(0) + ' %');
+});
+
+test('cambiar el precio de la chapa mueve el precio casi en la misma proporción', () => {
+  const sh = makeShape(rect(0, 0, 400, 300));
+  const base = { shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 30 };
+  const caro = {
+    ...CTX,
+    materiales: CTX.materiales.map((m) => (m.id === 'acero-sae1010' ? { ...m, precioKg: m.precioKg * 1.1 } : m)),
+  };
+  const a = cotizarItem(base, CTX);
+  const b = cotizarItem(base, caro);
+  const subida = (b.precio.neto / a.precio.neto - 1) * 100;
+  assert.ok(subida > 7 && subida < 11,
+    'subir la chapa 10 % debería subir el precio entre 7 y 11 %, subió ' + subida.toFixed(1) + ' %');
+});
+
+test('el desarrollo plegado coincide con la cuenta a mano', () => {
+  const r = calcularDesarrollo([40, 100, 40], [90, 90], 2, acero, 16, 500);
+  cerca(r.sumaCotas, 180, 1e-9);
+  cerca(r.desarrollo, 180 - r.sumaBD, 1e-9);
+  cerca(r.desarrollo, 172.25, 0.5, 'el desarrollo documentado es 172,25 mm');
+  const p = r.pliegues[0];
+  cerca(p.BD, 2 * p.OSSB - p.BA, 1e-9);
+});
+
+test('el tonelaje sale de la fórmula de plegado al aire', () => {
+  const p = calcularPliegue(2, 90, acero, 16, 1000);
+  const kNporMetro = (1.33 * acero.Rm * 2 * 2) / 16;
+  cerca(p.toneladasPorMetro, kNporMetro / 9.80665, 0.01);
+  cerca(p.toneladas, (p.toneladasPorMetro * 1000) / 1000, 0.01);
 });
 
 /* ================================================================== */

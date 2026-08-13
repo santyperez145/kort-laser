@@ -97,7 +97,37 @@ presupuesto; los precios se cargan en pesos.
 
 ---
 
-## 🟡 Precios de material
+## 🟢 Precio de compra del acero al carbono
+
+**$3.800/kg** — confirmado por el taller en agosto de 2026. Es el **precio de
+compra de la chapa**, no lo que se cobra.
+
+Es el dato más confiable de todo el sistema: sale de la factura, no de una
+estimación. Todo lo demás se calibra a partir de él.
+
+⚠️ Y es el que más pesa: en chapa de 2 mm el material es el **97 % del costo**
+de una placa simple. Un error del 10 % acá es un 9 % en el precio final.
+
+### El resto de los metales, en relación al acero
+
+Las relaciones de precio entre metales son estables aunque el valor absoluto se
+mueva, así que se derivan del ancla verificada:
+
+| Material | $/kg | Relación |
+|---|---|---|
+| Acero SAE 1010 (frío) | **3.800** 🟢 | 1,00 × |
+| Acero F-24 (caliente) | 3.100 | 0,82 × |
+| Galvanizado | 4.400 | 1,16 × |
+| Inoxidable 430 | 6.500 | 1,71 × |
+| Inoxidable 304 | 8.900 | 2,34 × |
+| Aluminio 5052 | 9.900 | 2,61 × |
+| Aluminio 6061-T6 | 10.700 | 2,82 × |
+| Latón | 18.600 | 4,89 × |
+| Cobre | 22.000 | 5,79 × |
+
+---
+
+## 🟡 Precios de material (referencias anteriores)
 
 ### Acero al carbono
 

@@ -876,6 +876,538 @@ export const PIEZAS = [
 
   /* ---------------------------------------------------------------- */
   {
+    id: 'brida-cuadrada',
+    nombre: 'Brida cuadrada',
+    categoria: 'Chapa plana',
+    descripcion: 'Brida de caño con agujero central y cuatro pernos. La que más se pide en conductos y bombas.',
+    params: [
+      P('lado', 'Lado exterior', 150, { min: 20, unidad: 'mm' }),
+      P('diaInt', 'Ø del caño', 80, { min: 0, unidad: 'mm' }),
+      P('r', 'Radio de esquina', 12, { min: 0, unidad: 'mm' }),
+      P('diaAgujero', 'Ø de los pernos', 12, { min: 0.5, unidad: 'mm' }),
+      P('margen', 'Perno al borde', 20, { min: 1, unidad: 'mm' }),
+      B('ochoPernos', 'Ocho pernos en vez de cuatro', false),
+    ],
+    build(p) {
+      const outer = rect(0, 0, p.lado, p.lado, p.r);
+      const holes = [];
+      if (p.diaInt > 0) holes.push(circle(p.lado / 2, p.lado / 2, p.diaInt / 2));
+      const m = Math.min(p.margen, p.lado / 2 - p.diaAgujero);
+      holes.push(...agujerosEsquinas(p.lado, p.lado, m, p.diaAgujero));
+      if (p.ochoPernos) {
+        // Los cuatro del medio de cada lado
+        const c = p.lado / 2;
+        for (const [x, y] of [[c, m], [c, p.lado - m], [m, c], [p.lado - m, c]]) {
+          holes.push(circle(x, y, p.diaAgujero / 2));
+        }
+      }
+      return { shape: makeShape(outer, holes), modelo3D: { tipo: 'plano' } };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'cartela',
+    nombre: 'Cartela de refuerzo',
+    categoria: 'Chapa plana',
+    descripcion: 'Triángulo de refuerzo para soldar entre dos chapas a 90°. Se pide de a cientos en estructuras.',
+    params: [
+      P('a', 'Cateto A', 150, { min: 10, unidad: 'mm' }),
+      P('b', 'Cateto B', 150, { min: 10, unidad: 'mm' }),
+      P('recorteA', 'Recorte del vértice A', 15, { min: 0, unidad: 'mm' }),
+      P('recorteB', 'Recorte del vértice B', 15, { min: 0, unidad: 'mm' }),
+      P('rHipotenusa', 'Radio en la hipotenusa (0 = recta)', 0, { min: 0, unidad: 'mm' }),
+    ],
+    build(p) {
+      // El vértice recto se recorta para que la cartela no choque con el
+      // cordón de soldadura de las chapas que une: si no, no apoya.
+      const ra = Math.min(p.recorteA, p.a * 0.6);
+      const rb = Math.min(p.recorteB, p.b * 0.6);
+      let pts;
+      if (p.rHipotenusa > 0) {
+        // Hipotenusa cóncava: ahorra material y queda más prolija
+        const n = 20;
+        const arcoPts = [];
+        const cx = p.a + p.rHipotenusa * 0.7;
+        const cy = p.b + p.rHipotenusa * 0.7;
+        const R = Math.hypot(cx - ra, cy - 0) * 0.0 + Math.hypot(cx, cy);
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          // Interpolación circular simple entre los dos extremos
+          const x = p.a * (1 - t);
+          const y = p.b * t;
+          const f = Math.sin(Math.PI * t) * p.rHipotenusa;
+          arcoPts.push([Math.max(0, x - f * 0.7), Math.max(0, y - f * 0.7)]);
+        }
+        pts = [[ra, 0], [p.a, 0], ...arcoPts.slice(1, -1), [0, p.b], [0, rb]];
+      } else {
+        pts = [[ra, 0], [p.a, 0], [0, p.b], [0, rb]];
+      }
+      return { shape: makeShape(polyline(pts, true)), modelo3D: { tipo: 'plano' } };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'placa-base',
+    nombre: 'Placa base de columna',
+    categoria: 'Chapa plana',
+    descripcion: 'Placa de anclaje con agujeros para brocas químicas y recorte central opcional.',
+    params: [
+      P('w', 'Ancho', 300, { min: 20, unidad: 'mm' }),
+      P('h', 'Alto', 300, { min: 20, unidad: 'mm' }),
+      P('diaAnclaje', 'Ø de los anclajes', 18, { min: 1, unidad: 'mm' }),
+      P('margen', 'Anclaje al borde', 40, { min: 1, unidad: 'mm' }),
+      S('patronAnclaje', 'Anclajes', '4', [
+        { v: '4', t: '4, en las esquinas' },
+        { v: '6', t: '6, dos filas de tres' },
+        { v: '8', t: '8, perimetrales' },
+      ]),
+      B('oblongos', 'Oblongos para regular', true),
+      P('largoOblongo', 'Largo del oblongo', 30, { min: 1, unidad: 'mm' }),
+      P('recorteCentral', 'Ø del recorte central (0 = sin)', 0, { min: 0, unidad: 'mm' }),
+      P('r', 'Radio de esquina', 10, { min: 0, unidad: 'mm' }),
+    ],
+    build(p) {
+      const outer = rect(0, 0, p.w, p.h, p.r);
+      const holes = [];
+      if (p.recorteCentral > 0) holes.push(circle(p.w / 2, p.h / 2, p.recorteCentral / 2));
+
+      const m = p.margen;
+      const posiciones = [];
+      if (p.patronAnclaje === '4') {
+        posiciones.push([m, m], [p.w - m, m], [p.w - m, p.h - m], [m, p.h - m]);
+      } else if (p.patronAnclaje === '6') {
+        for (const y of [m, p.h - m]) for (const x of [m, p.w / 2, p.w - m]) posiciones.push([x, y]);
+      } else {
+        posiciones.push([m, m], [p.w / 2, m], [p.w - m, m], [p.w - m, p.h / 2],
+          [p.w - m, p.h - m], [p.w / 2, p.h - m], [m, p.h - m], [m, p.h / 2]);
+      }
+      for (const [x, y] of posiciones) {
+        if (!p.oblongos) {
+          holes.push(circle(x, y, p.diaAnclaje / 2));
+          continue;
+        }
+        // El oblongo apunta al centro: así se puede correr la columna para
+        // compensar el error de las brocas ya empotradas.
+        const ang = deg(Math.atan2(p.h / 2 - y, p.w / 2 - x));
+        holes.push(slot(x, y, p.largoOblongo, p.diaAnclaje, ang));
+      }
+      return { shape: makeShape(outer, holes), modelo3D: { tipo: 'plano' } };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'anillo',
+    nombre: 'Anillo / arandela grande',
+    categoria: 'Chapa plana',
+    descripcion: 'Aro plano. Refuerzos de agujero, separadores, arandelas que no existen en comercio.',
+    params: [
+      P('diaExt', 'Ø exterior', 200, { min: 5, unidad: 'mm' }),
+      P('diaInt', 'Ø interior', 120, { min: 1, unidad: 'mm' }),
+      P('nAgujeros', 'Agujeros de fijación', 0, { min: 0, entero: true }),
+      P('diaAgujero', 'Ø de fijación', 8, { min: 0.5, unidad: 'mm' }),
+      B('partido', 'Partido (para montar sin desarmar)', false),
+      P('luzCorte', 'Luz del corte', 3, { min: 0.5, unidad: 'mm' }),
+    ],
+    build(p) {
+      const R = p.diaExt / 2;
+      const ri = Math.min(p.diaInt / 2, R - 1);
+      if (!p.partido) {
+        const holes = [circle(R, R, ri)];
+        if (p.nAgujeros > 0) {
+          holes.push(...circuloAgujeros(R, R, (R + ri), p.nAgujeros, p.diaAgujero));
+        }
+        return { shape: makeShape(circle(R, R, R), holes), modelo3D: { tipo: 'plano' } };
+      }
+      // Anillo abierto: un solo contorno en C, sin agujero interior
+      const luz = Math.max(0.5, p.luzCorte);
+      const a0 = Math.asin(Math.min(0.99, luz / 2 / R));
+      const ai = Math.asin(Math.min(0.99, luz / 2 / ri));
+      const pts = [];
+      const n = 96;
+      for (let i = 0; i <= n; i++) {
+        const a = a0 + ((TAU - 2 * a0) * i) / n;
+        pts.push([R + R * Math.cos(a), R + R * Math.sin(a)]);
+      }
+      for (let i = n; i >= 0; i--) {
+        const a = ai + ((TAU - 2 * ai) * i) / n;
+        pts.push([R + ri * Math.cos(a), R + ri * Math.sin(a)]);
+      }
+      return { shape: makeShape(polyline(pts, true)), modelo3D: { tipo: 'plano' } };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'transicion',
+    nombre: 'Transición cuadrado-redondo',
+    categoria: 'Calderería',
+    descripcion:
+      'El desarrollo de una tolva de boca cuadrada a caño redondo. Dibujarlo a mano lleva media hora y sale mal; acá es exacto.',
+    params: [
+      P('lado', 'Lado del cuadrado', 400, { min: 20, unidad: 'mm' }),
+      P('ladoB', 'Lado B (0 = cuadrado)', 0, { min: 0, unidad: 'mm' }),
+      P('dia', 'Ø del redondo', 250, { min: 10, unidad: 'mm' }),
+      P('h', 'Altura', 300, { min: 10, unidad: 'mm' }),
+      P('costura', 'Pestaña de costura', 15, { min: 0, unidad: 'mm' }),
+      P('divisiones', 'Divisiones por cuadrante', 8, { min: 3, max: 24, entero: true }),
+      B('enDosPartes', 'Cortar en dos mitades', false),
+    ],
+    build(p, ctx) {
+      const t = ctx.espesor || 1;
+      const A = p.lado - t;               // por la fibra neutra
+      const Bl = (p.ladoB > 0 ? p.ladoB : p.lado) - t;
+      const R = (p.dia - t) / 2;
+      const H = p.h;
+      const n = Math.round(p.divisiones);
+
+      /* La superficie son 4 sectores cónicos (uno por esquina del cuadrado) y
+         4 triángulos planos (uno por lado). Se desarrolla por TRIANGULACIÓN,
+         que es como se traza en el taller con compás: cada triángulo se rebate
+         al plano conservando sus tres longitudes verdaderas, apoyado en el
+         anterior. */
+      const esq = [
+        [-A / 2, -Bl / 2, 0], [A / 2, -Bl / 2, 0], [A / 2, Bl / 2, 0], [-A / 2, Bl / 2, 0],
+      ];
+      const total = n * 4;
+      const arco = [];
+      for (let i = 0; i < total; i++) {
+        // Se arranca en la diagonal para que cada cuadrante del círculo caiga
+        // sobre una esquina del cuadrado.
+        const a = Math.PI / 4 + (i * TAU) / total;
+        arco.push([R * Math.cos(a), R * Math.sin(a), H]);
+      }
+      /* Los puntos de la COSTURA se repiten con clave propia: en el espacio
+         son el mismo punto, pero en el desarrollo son los dos bordes del
+         corte y van en lugares distintos. Sin esto la tira daba la vuelta
+         entera y se superponía sobre sí misma. */
+      const P3 = (k) =>
+        k === 'e0b' ? esq[0] : k[0] === 'e' ? esq[+k.slice(1)] : arco[+k.slice(1) % total];
+      const d3 = (u, v) => Math.hypot(u[0] - v[0], u[1] - v[1], u[2] - v[2]);
+
+      /* Cadena de triángulos alrededor de la pieza. Se corta por la mitad de
+         un triángulo plano, que es donde va la costura. */
+      const tri = [];
+      for (let q = 0; q < 4; q++) {
+        for (let i = 0; i < n; i++) {
+          tri.push(['e' + q, 'a' + (q * n + i), 'a' + (q * n + i + 1)]);
+        }
+        // La última esquina cierra contra la copia de costura, no contra e0
+        tri.push(['e' + q, 'a' + ((q + 1) * n), q === 3 ? 'e0b' : 'e' + (q + 1)]);
+      }
+
+      /* Desplegado. Dos triángulos consecutivos comparten exactamente una
+         arista. El vértice nuevo tiene que quedar del LADO OPUESTO de esa
+         arista respecto del vértice libre del triángulo anterior: es lo que
+         hace que la tira se abra en abanico en vez de plegarse sobre sí misma.
+         Elegir "el que quede más lejos" no alcanza y la tira se dobla. */
+      const plano = new Map();
+      const t0 = tri[0];
+      plano.set(t0[0], [0, 0]);
+      plano.set(t0[1], [d3(P3(t0[0]), P3(t0[1])), 0]);
+      let triAnterior = null;
+
+      const ladoDe = (p1, p2, q) =>
+        Math.sign((p2[0] - p1[0]) * (q[1] - p1[1]) - (p2[1] - p1[1]) * (q[0] - p1[0]));
+
+      for (const t of tri) {
+        const kNuevo = t.find((k) => !plano.has(k));
+        if (!kNuevo) {
+          triAnterior = t;
+          continue;
+        }
+        const [k1, k2] = t.filter((k) => k !== kNuevo);
+        // El vértice LIBRE del triángulo anterior: el que no está en la arista
+        // que ambos comparten. Es la referencia contra la que hay que ir.
+        const kLibre = triAnterior ? triAnterior.find((k) => k !== k1 && k !== k2) : null;
+        const libreAnterior = kLibre ? plano.get(kLibre) : null;
+        const p1 = plano.get(k1);
+        const p2 = plano.get(k2);
+        const l1 = d3(P3(k1), P3(kNuevo));
+        const l2 = d3(P3(k2), P3(kNuevo));
+
+        const dx = p2[0] - p1[0];
+        const dy = p2[1] - p1[1];
+        const d = Math.hypot(dx, dy) || 1e-9;
+        const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
+        const alt = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+        const mx = p1[0] + (a * dx) / d;
+        const my = p1[1] + (a * dy) / d;
+        const opcA = [mx + (alt * dy) / d, my - (alt * dx) / d];
+        const opcB = [mx - (alt * dy) / d, my + (alt * dx) / d];
+
+        let nuevo;
+        if (!libreAnterior) {
+          nuevo = opcA;
+        } else {
+          const ladoViejo = ladoDe(p1, p2, libreAnterior);
+          nuevo = ladoDe(p1, p2, opcA) !== ladoViejo ? opcA : opcB;
+        }
+        plano.set(kNuevo, nuevo);
+        triAnterior = t;
+      }
+
+      /* Contorno: el borde de abajo (las esquinas del cuadrado y los puntos
+         que las unen) y el de arriba (el arco), recorridos en orden. */
+      const bordeArriba = [];
+      const bordeAbajo = [];
+      for (let i = 0; i <= total; i++) {
+        const pt = plano.get('a' + i);
+        if (pt) bordeArriba.push(pt);
+      }
+      for (const k of ['e0', 'e1', 'e2', 'e3', 'e0b']) {
+        const pt = plano.get(k);
+        if (pt) bordeAbajo.push(pt);
+      }
+      const borde = [...bordeAbajo, ...bordeArriba.slice().reverse()];
+
+      let sh = normalizeShape(makeShape(polyline(borde, true)), 0);
+      const b = pathBBox(sh.outer);
+
+      const perimetroRedondo = Math.PI * (p.dia - t);
+      const perimetroCuadrado = 2 * (A + Bl);
+      // Control de sanidad: el desarrollo no puede ser más grande que el
+      // perímetro mayor estirado. Si lo es, el desplegado se dio vuelta.
+      const cotaAncho = Math.max(perimetroCuadrado, perimetroRedondo) * 1.15;
+      const generatriz = Math.sqrt(H * H + ((A - 2 * R) / 2) ** 2 + ((Bl - 2 * R) / 2) ** 2);
+
+      return {
+        shape: sh,
+        modelo3D: { tipo: 'revolucion', d1: Math.max(p.lado, p.ladoB || p.lado), d2: p.dia, h: p.h },
+        info: {
+          perimetroCuadrado,
+          perimetroRedondo,
+          generatriz,
+          triangulos: tri.length,
+          desarrolloAncho: b.w,
+          desarrolloAlto: b.h,
+        },
+        avisos: [
+          {
+            nivel: 'info',
+            msg:
+              `Desarrollo por triangulación: ${tri.length} triángulos (${n} divisiones por esquina). ` +
+              `Boca cuadrada ${perimetroCuadrado.toFixed(0)} mm de perímetro, boca redonda ${perimetroRedondo.toFixed(0)} mm. ` +
+              'Rolar las cuatro esquinas, quebrar los cuatro planos y soldar la costura.',
+          },
+          p.divisiones < 6
+            ? { nivel: 'aviso', msg: 'Con menos de 6 divisiones por esquina la curva queda facetada. Subilo si la pieza se ve.' }
+            : null,
+          b.w > cotaAncho
+            ? { nivel: 'error', msg: `El desarrollo dio ${b.w.toFixed(0)} mm de ancho, más de lo posible para estas bocas. No lo cortes: revisá las medidas.` }
+            : null,
+        ].filter(Boolean),
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'tolva-piramidal',
+    nombre: 'Tolva piramidal',
+    categoria: 'Calderería',
+    descripcion: 'Los cuatro faldones de una tolva de boca rectangular a boca rectangular. Se cortan planos y se pliegan.',
+    params: [
+      P('supA', 'Boca superior, lado A', 600, { min: 20, unidad: 'mm' }),
+      P('supB', 'Boca superior, lado B', 600, { min: 20, unidad: 'mm' }),
+      P('infA', 'Boca inferior, lado A', 200, { min: 10, unidad: 'mm' }),
+      P('infB', 'Boca inferior, lado B', 200, { min: 10, unidad: 'mm' }),
+      P('h', 'Altura', 400, { min: 10, unidad: 'mm' }),
+      P('pestana', 'Pestaña de soldadura', 20, { min: 0, unidad: 'mm' }),
+      S('cual', 'Qué faldón generar', 'A', [
+        { v: 'A', t: 'Faldón del lado A (van 2)' },
+        { v: 'B', t: 'Faldón del lado B (van 2)' },
+      ]),
+    ],
+    build(p) {
+      // Cada faldón es un trapecio isósceles. Su altura NO es la de la tolva:
+      // es la altura inclinada real, que sale del retiro lateral.
+      const esA = p.cual === 'A';
+      const anchoSup = esA ? p.supA : p.supB;
+      const anchoInf = esA ? p.infA : p.infB;
+      const retiro = esA ? (p.supB - p.infB) / 2 : (p.supA - p.infA) / 2;
+      const alturaInclinada = Math.sqrt(p.h * p.h + retiro * retiro);
+
+      const pes = p.pestana;
+      const x0 = (anchoSup - anchoInf) / 2;
+      const pts = [
+        [0, 0],
+        [anchoSup, 0],
+        [anchoSup - x0 + pes * 0, alturaInclinada],
+        [x0, alturaInclinada],
+      ];
+      // Con pestaña, se ensancha el trapecio a los costados
+      const conPestana = pes > 0
+        ? [[-pes, 0], [anchoSup + pes, 0], [anchoSup - x0 + pes, alturaInclinada], [x0 - pes, alturaInclinada]]
+        : pts;
+
+      const sh = normalizeShape(makeShape(polyline(conPestana, true)), 0);
+      return {
+        shape: sh,
+        modelo3D: { tipo: 'plano' },
+        info: { alturaInclinada, retiro, anchoSup, anchoInf },
+        avisos: [{
+          nivel: 'info',
+          msg:
+            `Altura inclinada ${alturaInclinada.toFixed(1)} mm (la vertical es ${p.h} mm; el retiro lateral de ` +
+            `${retiro.toFixed(1)} mm la alarga). Hacen falta 2 de este faldón y 2 del otro lado.`,
+        }],
+        cantidadPorPieza: 2,
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'bandeja-portacables',
+    nombre: 'Bandeja portacables',
+    categoria: 'Plegado',
+    descripcion: 'Tramo de bandeja perforada con alas plegadas. Obra eléctrica, se pide por metros.',
+    params: [
+      P('ancho', 'Ancho útil', 200, { min: 30, unidad: 'mm' }),
+      P('altura', 'Altura del ala', 60, { min: 10, unidad: 'mm' }),
+      P('largo', 'Largo del tramo', 2000, { min: 100, unidad: 'mm' }),
+      B('perforada', 'Fondo perforado', true),
+      P('diaVent', 'Ø de las perforaciones', 20, { min: 2, unidad: 'mm' }),
+      P('pasoVent', 'Paso entre perforaciones', 60, { min: 5, unidad: 'mm' }),
+      P('diaUnion', 'Ø agujeros de unión en las alas', 8, { min: 0, unidad: 'mm' }),
+    ],
+    build(p, ctx) {
+      const t = ctx.espesor;
+      const dev = calcularDesarrollo([p.altura, p.ancho, p.altura], [90, 90], t, ctx.material, null, p.largo);
+      const W = dev.desarrollo;
+      const bd = dev.pliegues[0].BD;
+      const x1 = p.altura - bd / 2;
+      const x2 = x1 + p.ancho - bd;
+
+      const holes = [];
+      if (p.perforada) {
+        // Sólo en el fondo: perforar el ala la debilita justo donde trabaja
+        const margen = 25;
+        for (let x = x1 + margen; x <= x2 - margen; x += p.pasoVent) {
+          for (let y = margen; y <= p.largo - margen; y += p.pasoVent) {
+            holes.push(slot(x, y, p.diaVent * 2.2, p.diaVent, 90));
+          }
+        }
+      }
+      if (p.diaUnion > 0) {
+        // Agujeros de empalme en los extremos de las dos alas
+        for (const xa of [x1 / 2, (x2 + W) / 2]) {
+          for (const y of [30, 60, p.largo - 60, p.largo - 30]) {
+            holes.push(circle(xa, y, p.diaUnion / 2));
+          }
+        }
+      }
+
+      return {
+        shape: makeShape(rect(0, 0, W, p.largo, 0), holes),
+        pliegues: [
+          { x1, y1: 0, x2: x1, y2: p.largo, label: 'P1 90°' },
+          { x1: x2, y1: 0, x2, y2: p.largo, label: 'P2 90°' },
+        ],
+        plegado: { pliegues: 2, largoPliegue: p.largo, angulo: 90, herramentales: 1 },
+        desarrollo: dev,
+        modelo3D: { tipo: 'perfil', tramos: [p.altura, p.ancho, p.altura], angulos: [-90, -90], ancho: p.largo },
+        alas: [p.altura, p.altura],
+        avisos: holes.length > 400
+          ? [{ nivel: 'aviso', msg: `${holes.length} perforaciones en el tramo: el tiempo de máquina va a ser alto. Evaluá bandeja comercial.` }]
+          : [],
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'pinon',
+    nombre: 'Piñón para cadena',
+    categoria: 'Mecánica',
+    descripcion: 'Rueda dentada para cadena de rodillos ASA/DIN. Transportadores y transmisiones lentas.',
+    params: [
+      P('z', 'Cantidad de dientes', 19, { min: 8, max: 120, entero: true }),
+      S('paso', 'Cadena', '12.7', [
+        { v: '6.35', t: '04B / #25 — paso 6,35' },
+        { v: '9.525', t: '06B / #35 — paso 9,525' },
+        { v: '12.7', t: '08B / #40 — paso 12,7' },
+        { v: '15.875', t: '10B / #50 — paso 15,875' },
+        { v: '19.05', t: '12B / #60 — paso 19,05' },
+        { v: '25.4', t: '16B / #80 — paso 25,4' },
+      ]),
+      P('diaRodillo', 'Ø del rodillo (0 = de tabla)', 0, { min: 0, unidad: 'mm' }),
+      P('diaEje', 'Ø del eje', 25, { min: 0, unidad: 'mm' }),
+      P('chaveta', 'Ancho de chavetero (0 = sin)', 8, { min: 0, unidad: 'mm' }),
+      P('nAligeramiento', 'Agujeros de aligeramiento', 4, { min: 0, entero: true }),
+      P('diaAligeramiento', 'Ø aligeramiento', 25, { min: 0, unidad: 'mm' }),
+    ],
+    build(p) {
+      const paso = Number(p.paso);
+      const z = Math.round(p.z);
+      // Rodillo estándar según norma: ≈ 0,6 del paso si no lo especifican
+      const dRod = p.diaRodillo > 0 ? p.diaRodillo : paso * 0.6;
+      // Diámetro primitivo: Dp = paso / sen(180/z)
+      const Dp = paso / Math.sin(Math.PI / z);
+      const Rp = Dp / 2;
+      // Exterior aproximado de norma
+      const Re = (Dp + 0.8 * (paso - dRod)) / 2 + paso * 0.15;
+
+      const pts = [];
+      const N = 14; // puntos por diente
+      for (let i = 0; i < z; i++) {
+        const base = (i * TAU) / z;
+        // Alojamiento del rodillo: un arco de radio dRod/2 centrado en el primitivo
+        const cx = Rp * Math.cos(base);
+        const cy = Rp * Math.sin(base);
+        const rRod = dRod / 2 * 1.05; // holgura de norma
+        for (let k = 0; k <= N; k++) {
+          // Se recorre el alojamiento del lado que mira hacia afuera
+          const a = base + Math.PI + (-Math.PI / 2 + (Math.PI * k) / N);
+          pts.push([cx + rRod * Math.cos(a), cy + rRod * Math.sin(a)]);
+        }
+        // Punta del diente, entre este alojamiento y el siguiente
+        const medio = base + Math.PI / z;
+        pts.push([Re * Math.cos(medio), Re * Math.sin(medio)]);
+      }
+
+      const outer = transformPath(polyline(pts, true), { dx: Re, dy: Re });
+      const holes = [];
+      if (p.diaEje > 0) {
+        if (p.chaveta > 0) {
+          const re = p.diaEje / 2;
+          const prof = re + p.chaveta * 0.45;
+          const cpts = [];
+          const a0 = Math.asin(Math.min(0.95, p.chaveta / 2 / re));
+          for (let k = 0; k <= 64; k++) {
+            const ang = a0 + ((TAU - 2 * a0) * k) / 64;
+            cpts.push([Re + re * Math.cos(ang), Re + re * Math.sin(ang)]);
+          }
+          cpts.push([Re + re * Math.cos(-a0), Re - p.chaveta / 2]);
+          cpts.push([Re + prof, Re - p.chaveta / 2]);
+          cpts.push([Re + prof, Re + p.chaveta / 2]);
+          holes.push(polyline(cpts, true));
+        } else holes.push(circle(Re, Re, p.diaEje / 2));
+      }
+      if (p.nAligeramiento > 0 && p.diaAligeramiento > 0) {
+        const bcd = (Rp - dRod) * 0.62 + Math.max(p.diaEje / 2, 12);
+        holes.push(...circuloAgujeros(Re, Re, bcd * 2 * 0.62, p.nAligeramiento, p.diaAligeramiento));
+      }
+
+      return {
+        shape: makeShape(outer, holes),
+        modelo3D: { tipo: 'plano' },
+        info: { primitivo: Dp, exterior: Re * 2, paso, rodillo: dRod },
+        avisos: [{
+          nivel: 'info',
+          msg:
+            `Ø primitivo ${Dp.toFixed(1)} mm · Ø exterior ${(Re * 2).toFixed(1)} mm · paso ${paso} mm. ` +
+            'El perfil sale para corte láser: si el piñón va a trabajar cargado, conviene templarlo o rectificar los alojamientos.',
+        }],
+      };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
     id: 'poligono',
     nombre: 'Polígono / estrella',
     categoria: 'Chapa plana',

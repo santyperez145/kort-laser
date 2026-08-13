@@ -73,10 +73,12 @@ export const DEFAULT_MATERIALS = [
     densidad: 7.85,
     Rm: 370,
     kFactor: 0.42,
-    // Referencia: chapa 1,22×2,44 laminada en frío ≈ $86.400 sin IVA (29,8 kg
-    // en 1,25 mm) en distribuidoras del Litoral, agosto 2026, más 10-20 % de
-    // flete al interior. Ver docs/PRECIOS.md.
-    precioKg: 2950,
+    // 🟢 PRECIO DE COMPRA REAL, confirmado por el taller (agosto 2026).
+    // Es el dato más confiable de todo el sistema: sale de la factura, no de
+    // una estimación. El resto de los materiales se calibra a partir de éste
+    // usando las relaciones de precio entre metales, que son estables aunque
+    // el valor absoluto se mueva. Ver docs/PRECIOS.md.
+    precioKg: 3800,
     chapaStd: { w: 2440, h: 1220 }, // la medida que realmente se consigue
     medidasDisponibles: [
       { w: 2440, h: 1220, nombre: '1,22 × 2,44 m (la más común)' },
@@ -127,7 +129,7 @@ export const DEFAULT_MATERIALS = [
     densidad: 7.85,
     Rm: 450,
     kFactor: 0.42,
-    precioKg: 2450, // el laminado en caliente es ~15 % más barato por kg
+    precioKg: 3100, // 0,82 × el laminado en frío: no lleva el paso de laminación fina
     chapaStd: { w: 6000, h: 1500 },
     medidasDisponibles: [
       { w: 6000, h: 1500, nombre: '1,50 × 6,00 m' },
@@ -157,9 +159,9 @@ export const DEFAULT_MATERIALS = [
     densidad: 8.0,
     Rm: 620,
     kFactor: 0.44,
-    // Referencia: chapa 430 fina en lista minorista con IVA ≈ $7.400-7.900/kg
-    // (acerosinoxidables.com.ar, ago-2026). El 304 va ~40 % arriba del 430.
-    // Este valor es SIN IVA para chapa de 1,5-3 mm.
+    // 2,35 × el acero al carbono. Contrastado con lista minorista de chapa 430
+    // fina (≈ $7.400-7.900/kg con IVA, ago-2026): el 304 va ~40 % arriba del
+    // 430. Este valor es SIN IVA, para chapa de 1,5-3 mm.
     precioKg: 8900,
     chapaStd: { w: 3000, h: 1500 },
     medidasDisponibles: [
@@ -202,7 +204,7 @@ export const DEFAULT_MATERIALS = [
     densidad: 7.7,
     Rm: 520,
     kFactor: 0.44,
-    precioKg: 6400,
+    precioKg: 6500, // 1,7 × el acero al carbono
     chapaStd: { w: 3000, h: 1500 },
     medidasDisponibles: [
       { w: 3000, h: 1500, nombre: '1,50 × 3,00 m' },
@@ -242,7 +244,7 @@ export const DEFAULT_MATERIALS = [
     densidad: 7.85,
     Rm: 340,
     kFactor: 0.42,
-    precioKg: 3400,
+    precioKg: 4400, // 1,15 × el laminado en frío: el zinc y el proceso de galvanizado
     chapaStd: { w: 2440, h: 1220 },
     medidasDisponibles: [
       { w: 2440, h: 1220, nombre: '1,22 × 2,44 m' },
@@ -281,7 +283,7 @@ export const DEFAULT_MATERIALS = [
     densidad: 2.68,
     Rm: 230,
     kFactor: 0.4,
-    precioKg: 9800, // ≈ USD 6,5/kg a $1.500
+    precioKg: 9900, // 2,6 × el acero al carbono (≈ USD 6,6/kg a $1.500)
     chapaStd: { w: 3000, h: 1500 },
     medidasDisponibles: [
       { w: 3000, h: 1500, nombre: '1,50 × 3,00 m' },
@@ -320,7 +322,7 @@ export const DEFAULT_MATERIALS = [
     densidad: 2.7,
     Rm: 310,
     kFactor: 0.4,
-    precioKg: 10600,
+    precioKg: 10700, // 2,8 × el acero al carbono
     chapaStd: { w: 3000, h: 1500 },
     medidasDisponibles: [{ w: 3000, h: 1500, nombre: '1,50 × 3,00 m' }],
     // A 3 kW el aluminio se corta con calidad hasta 10 mm. El 12 mm existe en
@@ -349,7 +351,7 @@ export const DEFAULT_MATERIALS = [
     densidad: 8.5,
     Rm: 350,
     kFactor: 0.42,
-    precioKg: 18500, // ≈ USD 12,3/kg
+    precioKg: 18600, // 4,9 × el acero al carbono (≈ USD 12,4/kg)
     chapaStd: { w: 2000, h: 1000 },
     medidasDisponibles: [{ w: 2000, h: 1000, nombre: '1,00 × 2,00 m' }],
     espesores: [0.8, 1, 1.5, 2, 3, 4],
@@ -376,7 +378,7 @@ export const DEFAULT_MATERIALS = [
     densidad: 8.96,
     Rm: 250,
     kFactor: 0.42,
-    precioKg: 22000,
+    precioKg: 22000, // 5,8 × el acero al carbono
     chapaStd: { w: 2000, h: 1000 },
     medidasDisponibles: [{ w: 2000, h: 1000, nombre: '1,00 × 2,00 m' }],
     espesores: [0.8, 1, 1.5, 2, 3],

@@ -600,6 +600,9 @@ export function leerDXF(texto, opts = {}) {
   return {
     piezas,
     conjunto,
+    // Qué parece el dibujo: un diseño de varias partes o un lote de piezas
+    // sueltas. Es una sugerencia con su motivo, no una decisión tomada.
+    agrupamiento: analizarAgrupamiento(piezas),
     abiertos,
     plegado: escalar(segsPlegado),
     grabado: escalar(segsGrabado),
@@ -612,6 +615,107 @@ export function leerDXF(texto, opts = {}) {
       contornosCerrados: cerrados.length,
       contornosAbiertos: abiertos.length,
     },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* ¿Cartel o piezas sueltas?                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Decide qué parece un dibujo con varios contornos exteriores.
+ *
+ * Es una de esas cosas que el sistema no puede saber con certeza —sólo el
+ * cliente sabe si eso es un cartel o veinte piezas— pero sí puede mirar el
+ * dibujo y proponer lo más probable, con el motivo a la vista para que el que
+ * cotiza confirme o cambie en un clic.
+ *
+ * Las señales, por orden de peso:
+ *
+ *  · **Partes todas iguales** → casi seguro son piezas sueltas. Nadie diseña
+ *    un cartel con veinte copias exactas de la misma forma; eso es un lote que
+ *    alguien ya acomodó en el archivo.
+ *  · **Partes muy juntas o encastradas** → es un diseño. Las letras de un
+ *    cartel, un juego que se entrega armado o piezas cuya separación es parte
+ *    del pedido están a milímetros unas de otras.
+ *  · **Partes distintas y separadas** → ambiguo. Se respeta el archivo, que es
+ *    lo seguro: separar de oficio rompe un diseño y además cotiza mal, porque
+ *    cada parte pasaría a anidarse por su cuenta en otra posición.
+ *
+ * @returns {{sugerencia:'conjunto'|'sueltas', motivo:string, confianza:number, señales:object}}
+ */
+export function analizarAgrupamiento(piezas) {
+  if (!piezas || piezas.length < 2) {
+    return { sugerencia: 'conjunto', motivo: 'El dibujo tiene una sola pieza.', confianza: 1, señales: {} };
+  }
+
+  const cajas = piezas.map((p) => pathBBox(p.outer));
+  const areas = piezas.map((p) => Math.abs(pathArea(p.outer)));
+
+  // ¿Son todas del mismo tamaño? Se comparan área y proporciones.
+  const areaMed = areas.reduce((a, b) => a + b, 0) / areas.length;
+  const dispersionArea = Math.max(...areas.map((a) => Math.abs(a - areaMed))) / Math.max(areaMed, 1);
+  const propor = cajas.map((b) => b.w / Math.max(b.h, 1e-6));
+  const propMed = propor.reduce((a, b) => a + b, 0) / propor.length;
+  const dispersionProp = Math.max(...propor.map((p) => Math.abs(p - propMed))) / Math.max(propMed, 1e-6);
+  const todasIguales = dispersionArea < 0.02 && dispersionProp < 0.02;
+
+  // ¿Qué tan juntas están? Se mide la separación mínima de cada parte con su
+  // vecina más cercana, relativa al tamaño típico de las partes.
+  const tamTipico = Math.sqrt(areaMed);
+  let sumaGaps = 0;
+  for (let i = 0; i < cajas.length; i++) {
+    let mejor = Infinity;
+    for (let j = 0; j < cajas.length; j++) {
+      if (i === j) continue;
+      const a = cajas[i];
+      const b = cajas[j];
+      const dx = Math.max(0, Math.max(a.minX - b.maxX, b.minX - a.maxX));
+      const dy = Math.max(0, Math.max(a.minY - b.maxY, b.minY - a.maxY));
+      const d = Math.hypot(dx, dy);
+      if (d < mejor) mejor = d;
+    }
+    sumaGaps += mejor;
+  }
+  const gapMedio = sumaGaps / cajas.length;
+  const gapRelativo = gapMedio / Math.max(tamTipico, 1e-6);
+  const muyJuntas = gapRelativo < 0.25;
+
+  const señales = {
+    partes: piezas.length,
+    todasIguales,
+    gapMedioMM: gapMedio,
+    gapRelativo,
+    dispersionArea,
+  };
+
+  if (todasIguales) {
+    return {
+      sugerencia: 'sueltas',
+      confianza: 0.85,
+      motivo:
+        `Las ${piezas.length} partes son idénticas entre sí. Eso suele ser un lote de la misma pieza ` +
+        'que alguien ya acomodó en el archivo, no un diseño de varias partes.',
+      señales,
+    };
+  }
+  if (muyJuntas) {
+    return {
+      sugerencia: 'conjunto',
+      confianza: 0.9,
+      motivo:
+        `Las partes están a ${gapMedio.toFixed(0)} mm entre sí, muy poco para su tamaño. ` +
+        'Parece un solo diseño: un cartel, un juego que se entrega armado, o piezas cuya separación es parte del pedido.',
+      señales,
+    };
+  }
+  return {
+    sugerencia: 'conjunto',
+    confianza: 0.5,
+    motivo:
+      `Hay ${piezas.length} partes distintas y separadas: no se puede saber si es un diseño o un lote. ` +
+      'Se respeta el archivo tal como vino, que es lo seguro. Si en realidad son piezas sueltas, cambialo acá.',
+    señales,
   };
 }
 
