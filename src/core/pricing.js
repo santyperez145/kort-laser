@@ -29,6 +29,7 @@ import { tiempoCorteLote, DEFAULT_MACHINE, DEFAULT_PLEGADORA } from './cutting.j
 import { calcularEstructura, calcularCostoHoraMaquina, DEFAULT_ESTRUCTURA } from './costos.js';
 import { tiempoPlegado, calcularPliegue } from './bending.js';
 import { nest } from './nesting.js';
+import { factorPara } from './calibracion.js';
 
 /** Catálogo de acabados. Precios de referencia de tercerizadores, ago-2026. */
 export const DEFAULT_ACABADOS = [
@@ -367,8 +368,37 @@ export function cotizarItem(item, ctx, planItem = null) {
   // El setup es UNO por programa. Si el ítem comparte chapa, le toca su parte
   // según el área que ocupa; si va solo, lo paga entero.
   const factorSetup = compartido ? compartido.fraccionSetup : item.incluirSetup !== false;
-  const corte = tiempoCorteLote(shape, material, t, laser, cantidad, chapas, factorSetup, gas);
-  if (corte.error) return { error: corte.error, nombre: item.nombre };
+  const corteBruto = tiempoCorteLote(shape, material, t, laser, cantidad, chapas, factorSetup, gas);
+  if (corteBruto.error) return { error: corteBruto.error, nombre: item.nombre };
+
+  /* Calibración contra lo que el taller tardó de verdad.
+   *
+   * `ctx.calibracion` es opcional: sin ella el factor es 1 y el cálculo queda
+   * exactamente como estaba. Sólo aparece cuando hay suficientes órdenes
+   * medidas — corregir con tres mediciones sería darle confianza falsa a un
+   * número que sigue siendo una estimación.
+   *
+   * El factor escala TODOS los componentes del tiempo, no sólo el corte: el
+   * taller mide el trabajo entero (desde que empieza a preparar hasta que
+   * termina), así que el ratio se sacó sobre el total y aplicarlo sólo a una
+   * parte corregiría de menos. Escalar todo mantiene además la suma cerrada:
+   * producción + carga + setup sigue dando el total. */
+  const cal = ctx.calibracion ? factorPara(ctx.calibracion, material.id, t) : null;
+  const fCal = cal && isFinite(cal.factor) && cal.factor > 0 ? cal.factor : 1;
+  const corte =
+    fCal === 1
+      ? { ...corteBruto, calibracion: cal }
+      : {
+          ...corteBruto,
+          tPieza: corteBruto.tPieza * fCal,
+          tProduccion: corteBruto.tProduccion * fCal,
+          tChapas: corteBruto.tChapas * fCal,
+          tSetup: corteBruto.tSetup * fCal,
+          tTotal: corteBruto.tTotal * fCal,
+          // El tiempo sin corregir se conserva para poder mostrar la diferencia
+          tTotalModelo: corteBruto.tTotal,
+          calibracion: cal,
+        };
 
   const costoHoraLaser = calcularCostoHoraMaquina(laser, estructura);
 

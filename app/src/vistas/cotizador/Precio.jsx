@@ -7,8 +7,9 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart } from 'lucide-react';
+import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge } from 'lucide-react';
 import { cotizarItem } from '@core/pricing.js';
+import { explicarFactor } from '@core/calibracion.js';
 import { explicarItem } from '@core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '@core/compras.js';
 
@@ -53,6 +54,7 @@ export function Precio() {
   const ctx = usarEstado((s) => s.ctx);
   const sim = usarEstado((s) => s.simbolo());
   const res = coti?.resumen;
+  const textoCalibracion = r?.corte?.calibracion ? explicarFactor(r.corte.calibracion) : null;
 
   /**
    * Cuando la puesta a punto se come el precio, el dato accionable no es el
@@ -227,6 +229,12 @@ export function Precio() {
               <Dato etiqueta="Producción del lote" valor={fmtTiempo(r.corte.tProduccion)} />
               <Dato etiqueta="Puesta a punto y carga" valor={fmtTiempo(r.costos.tPreparacion)} />
               <Dato etiqueta="Máquina ocupada (total)" valor={fmtTiempo(r.corte.tTotal)} />
+              {r.corte.tTotalModelo ? (
+                <Dato
+                  etiqueta="Estimación sin corregir"
+                  valor={fmtTiempo(r.corte.tTotalModelo)}
+                />
+              ) : null}
               <Dato
                 etiqueta="Chapas necesarias"
                 valor={
@@ -257,6 +265,16 @@ export function Precio() {
             <dl className="mt-2 border-t border-borde pt-1">
               <Dato etiqueta="Costo hora láser" valor={money(r.costos.costoHoraLaser, sim, 0) + '/h'} />
             </dl>
+
+            {/* El tiempo dejó de ser una estimación pura: decir de dónde salió
+                el ajuste es lo que separa "calibrado" de "un número que cambió
+                y no sé por qué". */}
+            {textoCalibracion ? (
+              <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-chapa-500/8 px-2.5 py-2 text-[11px] leading-relaxed text-chapa-500 dark:text-chapa-300">
+                <Gauge className="size-3.5 shrink-0 mt-px" />
+                {textoCalibracion}
+              </p>
+            ) : null}
           </PanelCuerpo>
         </Panel>
       ) : null}

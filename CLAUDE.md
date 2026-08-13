@@ -178,6 +178,33 @@ Son la razón de ser de varios tests.
    esas palabras o el número del costo. Se verifica sobre el texto y no sobre
    el código a propósito: es lo único que ataja una línea agregada después.
 
+## El sistema se calibra solo
+
+Todo el tiempo de máquina que cotiza es **simulado**. `src/core/calibracion.js`
+lo compara contra lo que el taller anotó al terminar cada orden
+(`orden.real.segundos`) y saca un factor de corrección.
+
+Cuatro reglas que **no se aflojan**, porque son la diferencia entre calibrar y
+adivinar con más pasos:
+
+1. **Mediana, no promedio.** Un trabajo donde el operario dejó el cronómetro
+   corriendo arrastra el promedio y no mueve la mediana.
+2. **Nada se corrige con menos de `MINIMO_TRABAJOS` (5).** Corregir con ruido
+   es peor que no corregir: da confianza falsa.
+3. **Lo imposible se descarta y se cuenta.** Un ratio fuera de `RANGO_CREIBLE`
+   es alguien que escribió minutos donde iban horas. Se informa, porque si se
+   descarta la mitad hay que revisar cómo se está midiendo.
+4. **Nunca corrige en silencio.** El resultado dice de dónde salió el factor y
+   con cuántos trabajos, y la ficha técnica muestra la estimación sin corregir
+   al lado.
+
+⚠️ Se agrupa por material **y banda de espesor**, y sólo con órdenes "puras":
+si una orden mezcla acero de 2 mm con inoxidable de 10, atribuirle el tiempo a
+uno de los dos sería inventar. Esas siguen contando para el factor global.
+
+`ctx.calibracion` es **opcional**: sin ella el factor es 1 y el cálculo queda
+exactamente como estaba. Hay un test que lo fija.
+
 ## Trampas conocidas
 
 - **`PUT /api/config` FUSIONA, no reemplaza.** Reemplazaba: mandar sólo

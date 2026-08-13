@@ -37,6 +37,7 @@ import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, red
 import { construir, PIEZAS, paramsPorDefecto } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
 import { costoConsumiblesHora, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
+import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { construirMesh } from '../src/core/mesh3d.js';
@@ -796,6 +797,125 @@ test('un espesor por encima del máximo devuelve error explicativo', () => {
 });
 
 /* ================================================================== */
+/* ================================================================== */
+
+grupo('Calibración contra lo que tardó de verdad');
+
+/** Órdenes de mentira: n trabajos con un ratio real/estimado dado. */
+const ordenesCon = (ratios, extra = {}) =>
+  ratios.map((r, i) => ({
+    id: 'o' + i,
+    numero: 'OT-' + i,
+    resumen: { tiempoProduccion: 1000 },
+    real: { segundos: 1000 * r, fecha: '2026-08-01' },
+    items: [{ materialId: 'acero-sae1010', espesor: 2, cantidad: 1 }],
+    ...extra,
+  }));
+
+test('con pocos trabajos no corrige nada', () => {
+  const c = calibrar(ordenesCon([1.3, 1.4, 1.35]));
+  assert.ok(!c.activa, 'con tres mediciones no hay factor, hay ruido');
+  assert.equal(factorPara(c, 'acero-sae1010', 2).factor, 1);
+});
+
+test('con suficientes trabajos saca el factor', () => {
+  const c = calibrar(ordenesCon([1.3, 1.4, 1.35, 1.25, 1.45, 1.3]));
+  assert.ok(c.activa);
+  const f = factorPara(c, 'acero-sae1010', 2);
+  assert.ok(f.factor > 1.25 && f.factor < 1.45, `factor ${f.factor}`);
+  assert.ok(f.n >= MINIMO_TRABAJOS);
+});
+
+test('un trabajo absurdo no mueve el factor (mediana, no promedio)', () => {
+  const sanos = [1.2, 1.25, 1.3, 1.2, 1.28, 1.22];
+  const base = calibrar(ordenesCon(sanos));
+  // Se agrega uno donde el operario dejó el cronómetro corriendo
+  const conRuido = calibrar(ordenesCon([...sanos, 4.9]));
+  const d = Math.abs(conRuido.global.factor - base.global.factor);
+  assert.ok(d < 0.05, `la mediana se movió ${d.toFixed(3)}: con promedio se iría mucho más`);
+});
+
+test('lo imposible se descarta pero se informa', () => {
+  const c = calibrar(ordenesCon([1.2, 1.3, 1.25, 1.28, 1.22, 90]));
+  assert.equal(c.descartadas.length, 1, 'un ratio de 90 es minutos escritos donde iban horas');
+  assert.equal(c.muestras.length, 5);
+  assert.ok(/rango/.test(c.descartadas[0].motivo));
+});
+
+test('separa por material y banda de espesor cuando hay datos', () => {
+  const finas = ordenesCon([1.1, 1.15, 1.12, 1.08, 1.1, 1.13]);
+  const gruesas = ordenesCon([2.1, 2.0, 2.2, 2.05, 2.15, 2.1]).map((o) => ({
+    ...o,
+    id: o.id + 'g',
+    items: [{ materialId: 'acero-sae1010', espesor: 12, cantidad: 1 }],
+  }));
+  const c = calibrar([...finas, ...gruesas]);
+  const fFina = factorPara(c, 'acero-sae1010', 2);
+  const fGruesa = factorPara(c, 'acero-sae1010', 12);
+  assert.equal(fFina.origen, 'grupo');
+  assert.equal(fGruesa.origen, 'grupo');
+  assert.ok(fGruesa.factor > fFina.factor * 1.5, 'la chapa gruesa tarda bastante más de lo estimado');
+});
+
+test('una orden que mezcla materiales sólo cuenta para el factor global', () => {
+  const mezcladas = ordenesCon([1.5, 1.5, 1.5, 1.5, 1.5, 1.5]).map((o) => ({
+    ...o,
+    items: [
+      { materialId: 'acero-sae1010', espesor: 2, cantidad: 1 },
+      { materialId: 'inox-304', espesor: 10, cantidad: 1 },
+    ],
+  }));
+  const c = calibrar(mezcladas);
+  assert.ok(c.activa, 'sirven para el global');
+  assert.equal(Object.keys(c.grupos).length, 0, 'atribuirle el tiempo a un material sería inventar');
+  assert.equal(factorPara(c, 'acero-sae1010', 2).origen, 'global');
+});
+
+test('cae al factor global cuando el grupo no juntó suficientes', () => {
+  const c = calibrar(ordenesCon([1.3, 1.35, 1.28, 1.32, 1.3, 1.31]));
+  const f = factorPara(c, 'inox-304', 6); // material sin muestras propias
+  assert.equal(f.origen, 'global');
+  assert.ok(f.factor > 1.2);
+});
+
+test('marca como poco confiable lo que está desparramado', () => {
+  const disperso = calibrar(ordenesCon([0.5, 2.5, 0.6, 2.2, 1.0, 3.0, 0.4, 2.8]));
+  assert.ok(disperso.global.suficiente, 'hay cantidad');
+  assert.ok(!disperso.global.confiable, 'pero van de 0,4 a 3: eso no calibra nada');
+});
+
+test('sin calibración el precio no cambia en absoluto', () => {
+  const sh = makeShape(rect(0, 0, 200, 150));
+  const it = { shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 10 };
+  const sinCal = cotizarItem(it, CTX);
+  const conCalVacia = cotizarItem(it, { ...CTX, calibracion: calibrar([]) });
+  cerca(conCalVacia.costos.total, sinCal.costos.total, 1e-9, 'una calibración sin datos no puede tocar el precio');
+});
+
+test('el factor corrige el tiempo y el precio, y queda explicado', () => {
+  const sh = makeShape(rect(0, 0, 200, 150));
+  const it = { shape: sh, materialId: 'acero-sae1010', espesor: 2, cantidad: 10 };
+  const cal = calibrar(ordenesCon([1.5, 1.5, 1.5, 1.5, 1.5, 1.5]));
+
+  const base = cotizarItem(it, CTX);
+  const cor = cotizarItem(it, { ...CTX, calibracion: cal });
+
+  cerca(cor.corte.tTotal, base.corte.tTotal * 1.5, 1e-6, 'el tiempo se corrige');
+  assert.ok(cor.costos.corte > base.costos.corte, 'y con él el costo');
+  // La suma tiene que seguir cerrando
+  cerca(cor.corte.tProduccion + cor.corte.tChapas + cor.corte.tSetup, cor.corte.tTotal, 1e-6);
+  // Y tiene que poder explicarse
+  assert.ok(cor.corte.calibracion?.origen === 'grupo' || cor.corte.calibracion?.origen === 'global');
+  const txt = explicarFactor(cor.corte.calibracion);
+  assert.ok(/50 % más/.test(txt), txt);
+});
+
+test('el texto dice cuando la estimación ya daba bien', () => {
+  const cal = calibrar(ordenesCon([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]));
+  const txt = explicarFactor(factorPara(cal, 'acero-sae1010', 2));
+  assert.ok(/igual que la realidad/.test(txt), txt);
+});
+
 /* ================================================================== */
 
 grupo('Consumibles del láser');

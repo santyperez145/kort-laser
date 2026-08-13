@@ -12,28 +12,46 @@
 
 import { create } from 'zustand';
 import { api } from './api';
+import { calibrar } from '@core/calibracion.js';
 
 export const usarEstado = create((set, get) => ({
   config: null,
   materiales: [],
   maquinas: [],
   clientes: [],
+  calibracion: null,
   listo: false,
   errorConexion: null,
 
   async cargar() {
     try {
-      const [config, materiales, maquinas, clientes] = await Promise.all([
+      const [config, materiales, maquinas, clientes, ordenes] = await Promise.all([
         api.get('config'),
         api.get('materiales'),
         api.get('maquinas'),
         api.get('clientes'),
+        // Las órdenes se traen sólo para calibrar. Si fallan, el cotizador
+        // tiene que seguir andando: se cotiza con el modelo sin corregir,
+        // que es exactamente lo que hacía antes.
+        api.get('ordenes').catch(() => []),
       ]);
-      set({ config, materiales, maquinas, clientes, listo: true, errorConexion: null });
+      set({
+        config, materiales, maquinas, clientes,
+        calibracion: calibrar(ordenes),
+        listo: true, errorConexion: null,
+      });
     } catch (e) {
       set({ listo: false, errorConexion: e.message });
       throw e;
     }
+  },
+
+  /** Se llama al anotar el tiempo real de una orden. */
+  async recargarCalibracion() {
+    const ordenes = await api.get('ordenes').catch(() => []);
+    const calibracion = calibrar(ordenes);
+    set({ calibracion });
+    return calibracion;
   },
 
   async recargarClientes() {
@@ -58,8 +76,8 @@ export const usarEstado = create((set, get) => ({
 
   /** Contexto que espera `cotizarPresupuesto()` del motor de cálculo. */
   ctx() {
-    const { materiales, maquinas, config } = get();
-    return { materiales, maquinas, config };
+    const { materiales, maquinas, config, calibracion } = get();
+    return { materiales, maquinas, config, calibracion };
   },
 
   laser() {
