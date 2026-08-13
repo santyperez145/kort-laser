@@ -83,6 +83,32 @@ antes de decidir.**
 
 ## Fase 1 — Precisión de lo que ya existe
 
+### ✅ 1.0b El plano del cliente entra por foto o PDF
+
+`src/core/vectorizar.js` y `src/core/pdf-plano.js`, con el botón **Importar
+plano** en el cotizador. El cliente manda una foto del plano por WhatsApp o un
+PDF del CAD y sale una pieza cotizable, con su 2D, 3D, nesting y DXF. Antes eso
+se redibujaba a mano: media hora por pieza.
+
+Los dos caminos no son iguales y la interfaz lo dice:
+
+- **PDF vectorial**: la geometría está adentro del archivo en unidades reales.
+  Sale **exacta** y no hay nada que calibrar. Medido: 400,00 × 250,00 mm.
+- **Imagen**: son píxeles. Hay que decir cuánto mide algo del dibujo. El
+  sistema **no lo adivina**, porque adivinarlo sería cotizar una pieza que no
+  es la que el cliente pidió, y eso se descubre con la chapa ya cortada.
+
+Medido contra una placa de 400×250 con dos agujeros Ø40, en cinco condiciones
+(limpio, con ruido, foto con sombra lateral, baja resolución y línea gruesa):
+error menor al 2 % en las cotas y al 4 % en el área, con los dos agujeros
+reconocidos como círculos en todos los casos.
+
+Tres cosas que costaron y quedaron documentadas en CLAUDE.md porque son
+trampas de verdad: Douglas-Peucker colapsa un contorno cerrado; enderezar
+segmentos aplana los lados verticales si se mide `ang % 90`; y una línea
+dibujada tiene grosor, así que da DOS contornos que hay que juntar en su línea
+media.
+
 ### ✅ 1.0 Cada precio muestra de dónde sale
 
 `src/core/explicacion.js`. El cotizador y el tarifario abren la cuenta completa

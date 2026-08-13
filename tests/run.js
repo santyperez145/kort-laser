@@ -41,6 +41,8 @@ import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/co
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
+import { vectorizar, aPieza, escalaDesdeReferencia } from '../src/core/vectorizar.js';
+import { leerPlanoPDF, planoAPieza, MM_POR_PUNTO } from '../src/core/pdf-plano.js';
 import { construirMesh } from '../src/core/mesh3d.js';
 import { PDF, anchoTexto } from '../src/core/pdf.js';
 import { generarPresupuestoPDF } from '../src/core/quote-pdf.js';
@@ -1785,6 +1787,59 @@ test('el ángulo de mínima área encuentra el giro de una pieza en diagonal', (
   assert.ok(bueno, `esperaba un giro cerca de 330° o 60°, dio ${angulos.map((x) => x.toFixed(0)).join(', ')}`);
 });
 
+test('el aprovechamiento nunca puede pasar del 100 %', () => {
+  /* Daba 114 % con un trapecio, y no era un detalle cosmético: se medía el
+     área del RECTÁNGULO ENVOLVENTE en vez de la de la pieza. Un trapecio ocupa
+     el 73 % de su envolvente, así que el anidado se veía mucho mejor de lo que
+     era — y de ese número salen las chapas a comprar y el retazo que se
+     promete guardar. Mentía para el lado peligroso. */
+  const formas = {
+    trapecio: makeShape(polyline([[0, 0], [300, 0], [220, 180], [80, 180]], true)),
+    triangulo: makeShape(polyline([[0, 0], [280, 0], [140, 200]], true)),
+    ele: makeShape(polyline([[0, 0], [240, 0], [240, 80], [80, 80], [80, 220], [0, 220]], true)),
+    disco: makeShape(circle(100, 100, 90)),
+  };
+  for (const [nombre, sh] of Object.entries(formas)) {
+    const bb = shapeBBox(sh);
+    const r = nest(
+      [{ id: 'p', nombre, w: bb.w, h: bb.h, cantidad: 120, shape: sh }],
+      { w: 3000, h: 1500 },
+      { separacion: 4, margen: 10, formaReal: true }
+    );
+    assert.ok(
+      r.aprovechamientoGlobal > 0 && r.aprovechamientoGlobal <= 1,
+      `${nombre}: dio ${(r.aprovechamientoGlobal * 100).toFixed(1)} % y no puede pasar de 100`
+    );
+    for (const ch of r.chapas) {
+      assert.ok(ch.aprovechamiento <= 1, `${nombre}: una chapa dio ${(ch.aprovechamiento * 100).toFixed(1)} %`);
+    }
+    // Y el área consumida tiene que ser la de las piezas, no la del envolvente
+    const areaPieza = shapeArea(sh);
+    cerca(r.areaConsumidaTotal, areaPieza * 120, areaPieza * 0.5, `${nombre}: el área consumida`);
+  }
+});
+
+test('el multi-arranque deja la última chapa lo más vacía posible', () => {
+  /* El desempate era el área total usada, que es la MISMA en todas las
+     variantes porque las piezas son las mismas: nunca desempataba y ganaba
+     siempre la primera de la lista. Ahora desempata la última chapa, que es
+     lo que deja un retazo grande y entero en vez de varios pedacitos. */
+  const sh = makeShape(polyline([[0, 0], [300, 0], [220, 180], [80, 180]], true));
+  const bb = shapeBBox(sh);
+  const items = () => [{ id: 'p', nombre: 'trapecio', w: bb.w, h: bb.h, cantidad: 200, shape: sh }];
+  const chapa = { w: 3000, h: 1500 };
+  const base = { separacion: 4, margen: 10, formaReal: true };
+
+  const conservador = nest(items(), chapa, { ...base, orden: 'lado', rotacionLibre: false, pesos: { y: 1, hueco: 0, alto: 0 } });
+  const multi = nest(items(), chapa, base);
+
+  assert.ok(
+    multi.chapas[0].piezas.length >= conservador.chapas[0].piezas.length,
+    `el multi-arranque metió ${multi.chapas[0].piezas.length} y el conservador ${conservador.chapas[0].piezas.length}: nunca puede ser menos`
+  );
+  assert.ok(multi.cantidadChapas <= conservador.cantidadChapas, 'ni usar más chapas');
+});
+
 test('el anidado nunca queda peor que el motor anterior', () => {
   const casos = [
     ['triángulo', makeShape(polyline([[0, 0], [240, 0], [120, 200]], true)), 240, 200, 24000],
@@ -2015,6 +2070,169 @@ test('el tonelaje sale de la fórmula de plegado al aire', () => {
   const kNporMetro = (1.33 * acero.Rm * 2 * 2) / 16;
   cerca(p.toneladasPorMetro, kNporMetro / 9.80665, 0.01);
   cerca(p.toneladas, (p.toneladasPorMetro * 1000) / 1000, 0.01);
+});
+
+/* ================================================================== */
+grupo('Planos del cliente: imagen y PDF');
+
+/** Dibuja un plano sintético: placa 400×250 con dos agujeros Ø40. */
+function planoDePrueba({ escala = 2, grueso = 3, ruido = 0, sombra = false } = {}) {
+  const w = 400 * escala + 200;
+  const h = 250 * escala + 200;
+  const data = new Uint8ClampedArray(w * h * 4).fill(255);
+  const set = (x, y, v) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    const p = (y * w + x) * 4;
+    data[p] = data[p + 1] = data[p + 2] = v;
+    data[p + 3] = 255;
+  };
+  if (sombra) {
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) set(x, y, 255 - Math.round((x / w) * 90));
+  }
+  const ox = 100, oy = 100, W = 400 * escala, H = 250 * escala;
+  for (let t = 0; t < grueso; t++) {
+    for (let x = 0; x <= W; x++) { set(ox + x, oy + t, 20); set(ox + x, oy + H - t, 20); }
+    for (let y = 0; y <= H; y++) { set(ox + t, oy + y, 20); set(ox + W - t, oy + y, 20); }
+  }
+  for (const [cxmm, cymm] of [[100, 125], [300, 125]]) {
+    const cx = ox + cxmm * escala, cy = oy + cymm * escala, r = 20 * escala;
+    for (let a = 0; a < 3600; a++) {
+      const th = (a / 3600) * Math.PI * 2;
+      for (let t = 0; t < grueso; t++) {
+        set(Math.round(cx + (r - t) * Math.cos(th)), Math.round(cy + (r - t) * Math.sin(th)), 20);
+      }
+    }
+  }
+  if (ruido) {
+    let s = 12345;
+    const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let i = 0; i < w * h * ruido; i++) {
+      set((rnd() * w) | 0, (rnd() * h) | 0, rnd() < 0.5 ? 60 : 230);
+    }
+  }
+  return { width: w, height: h, data, anchoPiezaPx: W };
+}
+
+test('una línea dibujada da UN contorno, no dos', () => {
+  /* Es el error que hace que todo lo demás falle: una línea tiene grosor, así
+     que el trazado devuelve el borde de afuera y el de adentro. Sin juntarlos,
+     una placa con dos agujeros da seis contornos, los agujeros se convierten
+     en piezas y el largo de corte sale al doble. */
+  const img = planoDePrueba();
+  const r = vectorizar(img);
+  assert.equal(r.contornos.length, 3, `dieron ${r.contornos.length} contornos y son 3: la placa y dos agujeros`);
+  assert.ok(r.grosorLineaPx >= 2, 'tiene que medir el grosor del trazo');
+  // Los dos agujeros se reconocen como círculos y no como polígonos
+  const circulos = r.contornos.filter((c) => c.circulo);
+  assert.equal(circulos.length, 2, 'los agujeros redondos tienen que salir como círculos');
+});
+
+test('la pieza vectorizada mide lo que dice el plano', () => {
+  /* La prueba que importa: si las medidas no salen, se corta otra pieza. Se
+     verifica en cuatro condiciones distintas porque una foto de taller no es
+     un escaneo de laboratorio. */
+  const casos = [
+    ['limpio', { }],
+    ['con ruido', { ruido: 0.004 }],
+    ['foto con sombra', { sombra: true }],
+    ['baja resolución', { escala: 1 }],
+    ['línea gruesa', { grueso: 6 }],
+  ];
+  for (const [nombre, opts] of casos) {
+    const img = planoDePrueba(opts);
+    const r = vectorizar(img);
+    const mmPorPx = escalaDesdeReferencia(img.anchoPiezaPx, 400);
+    const p = aPieza(r.contornos, mmPorPx, { altoImagen: img.height });
+    const bb = shapeBBox(p.shape);
+
+    cerca(bb.w, 400, 400 * 0.02, `${nombre}: el ancho`);
+    cerca(bb.h, 250, 250 * 0.02, `${nombre}: el alto`);
+    assert.equal(p.agujeros, 2, `${nombre}: tienen que salir los dos agujeros`);
+
+    // Área: rectángulo menos los dos círculos
+    const esperada = 400 * 250 - 2 * Math.PI * 20 * 20;
+    cerca(shapeArea(p.shape), esperada, esperada * 0.04, `${nombre}: el área`);
+  }
+});
+
+test('sin escala no hay pieza: no se inventa una medida', () => {
+  /* Una imagen tiene píxeles, no milímetros. Inventar la escala sería cotizar
+     una pieza que no es la que el cliente pidió, y eso se descubre con la
+     chapa ya cortada. */
+  const r = vectorizar(planoDePrueba());
+  assert.throws(() => aPieza(r.contornos, 0), /escala/i);
+  assert.throws(() => aPieza(r.contornos, undefined), /escala/i);
+  assert.equal(escalaDesdeReferencia(0, 400), null);
+  assert.equal(escalaDesdeReferencia(800, 0), null);
+});
+
+test('la pieza vectorizada sale derecha, no espejada', () => {
+  /* El eje Y de una imagen crece hacia abajo y el de un plano hacia arriba.
+     Sin espejar, una pieza asimétrica se corta al revés — y eso no se nota
+     hasta que no encastra. Se verifica con un agujero descentrado. */
+  const img = planoDePrueba();
+  // El agujero de la izquierda está a 100 mm del borde izquierdo y a 125 del piso
+  const r = vectorizar(img);
+  const mmPorPx = escalaDesdeReferencia(img.anchoPiezaPx, 400);
+  const p = aPieza(r.contornos, mmPorPx, { altoImagen: img.height });
+  /* La pieza se lleva al origen al normalizarla, así que los agujeros se
+     miden contra el borde de la PLACA (el contorno más grande) y no contra
+     el borde de la imagen. */
+  const placa = r.contornos[0].bbox;
+  const centros = r.contornos
+    .filter((c) => c.circulo)
+    .map((c) => ({
+      x: (c.circulo.cx - placa.x) * mmPorPx,
+      // Desde abajo: es el sentido del plano, no el de la imagen
+      y: (placa.y + placa.h - c.circulo.cy) * mmPorPx,
+    }))
+    .sort((a, b) => a.x - b.x);
+  cerca(centros[0].x, 100, 8, 'el agujero izquierdo en X');
+  cerca(centros[0].y, 125, 8, 'el agujero izquierdo en Y');
+  cerca(centros[1].x, 300, 8, 'el agujero derecho en X');
+});
+
+test('la vectorización avisa cuando no encuentra nada', () => {
+  const blanco = { width: 200, height: 200, data: new Uint8ClampedArray(200 * 200 * 4).fill(255) };
+  const r = vectorizar(blanco);
+  assert.equal(r.contornos.length, 0);
+  assert.ok(r.avisos.some((a) => a.nivel === 'error'), 'una hoja en blanco tiene que dar error, no una pieza vacía');
+});
+
+test('el PDF vectorial da la medida exacta, sin calibrar', () => {
+  /* Un PDF exportado del CAD trae la geometría en unidades reales. Ahí no hay
+     que estimar nada: si el sistema no lo aprovechara, estaríamos degradando
+     un dato exacto a uno medido a ojo. */
+  const P = 1 / MM_POR_PUNTO;
+  const doc = new PDF({ ancho: 595.28, alto: 841.89, margen: 20 });
+  doc.hex('#000000', true);
+  doc.rect(50, 50, 400 * P, 250 * P, 'S');
+  doc.rect(50 + 80 * P, 50 + 105 * P, 40 * P, 40 * P, 'S');
+  doc.rect(50 + 280 * P, 50 + 105 * P, 40 * P, 40 * P, 'S');
+
+  return leerPlanoPDF(doc.save()).then((r) => {
+    assert.ok(r.vectorial, 'tiene que reconocerlo como vectorial');
+    assert.equal(r.contornos.length, 3);
+    const p = planoAPieza(r.contornos);
+    const bb = shapeBBox(p.shape);
+    cerca(bb.w, 400, 0.01, 'el ancho sale exacto');
+    cerca(bb.h, 250, 0.01, 'el alto sale exacto');
+    assert.equal(p.agujeros, 2);
+    cerca(shapeArea(p.shape), 400 * 250 - 2 * 40 * 40, 0.1, 'el área sale exacta');
+  });
+});
+
+test('un PDF sin vectores lo dice en vez de devolver una pieza vacía', () => {
+  const doc = new PDF({ ancho: 300, alto: 300, margen: 10 });
+  doc.texto(20, 20, 'Esto es sólo texto', { size: 12 });
+  return leerPlanoPDF(doc.save()).then((r) => {
+    assert.equal(r.contornos.length, 0);
+    assert.ok(!r.vectorial);
+    assert.ok(
+      r.avisos.some((a) => a.nivel === 'error' && /imagen/i.test(a.msg)),
+      'tiene que mandar al camino de la imagen'
+    );
+  });
 });
 
 /* ================================================================== */

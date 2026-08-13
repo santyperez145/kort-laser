@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 240 verificaciones del núcleo
+npm test           # 249 verificaciones del núcleo
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -52,7 +52,7 @@ código.
   deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
   react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
   **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
-  Node y en el navegador, y lo que permite que los 240 tests lo verifiquen sin
+  Node y en el navegador, y lo que permite que los 249 tests lo verifiquen sin
   levantar un navegador.
 - **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
   sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde
@@ -80,7 +80,7 @@ tests/run.js  Suite completa. Un solo archivo, sin runner externo.
 docs/PRECIOS.md  De dónde sale cada número, con nivel de confianza.
 ```
 
-Dos módulos del núcleo **no calculan nada nuevo, leen lo ya calculado**:
+Tres módulos del núcleo **no calculan nada nuevo, leen lo ya calculado**:
 
 - `explicacion.js` — arma la derivación paso a paso de un precio (`explicarItem`)
   o de una tarifa (`explicarTarifa`) para mostrarla al lado del número.
@@ -89,7 +89,16 @@ Dos módulos del núcleo **no calculan nada nuevo, leen lo ya calculado**:
 - `envio.js` — arma el mensaje y el enlace para mandarle el presupuesto al
   cliente por WhatsApp o por mail.
 
-Si alguno de los dos hiciera su propia cuenta, tarde o temprano diría algo
+Y dos que traen geometría de afuera:
+
+- `vectorizar.js` — de una FOTO o escaneo de un plano saca el contorno y sus
+  agujeros. **No adivina la escala**: la pone una persona diciendo cuánto mide
+  algo del dibujo. Inventarla sería cotizar una pieza que no es la pedida.
+- `pdf-plano.js` — de un PDF exportado del CAD lee la geometría vectorial en
+  unidades reales. Ahí la medida sale EXACTA y no hay nada que calibrar. Si el
+  PDF es un escaneo lo dice y manda al camino de la imagen.
+
+Si los que leen hicieran su propia cuenta, tarde o temprano dirían algo
 distinto de lo que se cobra. Esa es toda la regla.
 
 El servidor sólo persiste, sirve y valida la forma de lo que entra: **todo el
@@ -209,6 +218,23 @@ uno de los dos sería inventar. Esas siguen contando para el factor global.
 exactamente como estaba. Hay un test que lo fija.
 
 ## Trampas conocidas
+
+- **Douglas-Peucker sobre un contorno CERRADO colapsa.** El algoritmo fija el
+  primer y el último punto como extremos, y en un lazo esos dos son vecinos:
+  la recta de referencia mide un píxel y todo queda "cerca". Un rectángulo de
+  800×500 salía con 5 puntos y **área cero**. Hay que cortar el lazo en el
+  punto más lejano del primero y simplificar las dos mitades.
+
+- **Enderezar segmentos: 90° también es múltiplo de 90°.** Medir `ang % 90` y
+  emparejar la Y cuando el resto es chico convierte los lados VERTICALES en
+  horizontales, porque 90 % 90 = 0. Las piezas salían aplanadas. Hay que ver a
+  cuál múltiplo se acerca: par = horizontal, impar = vertical.
+
+- **Una línea DIBUJADA tiene grosor, así que da DOS contornos.** El borde de
+  afuera y el de adentro del trazo. Sin juntarlos en su línea media, una placa
+  con dos agujeros da seis contornos, los agujeros se vuelven piezas y el
+  largo de corte sale al doble. Y hay que tomar la línea MEDIA: quedarse con
+  el borde externo hace la pieza un ancho de línea más grande.
 
 - **`PUT /api/config` FUSIONA, no reemplaza.** Reemplazaba: mandar sólo
   `{comercial:{margen:50}}` borraba empresa, producción y estructura de costos,

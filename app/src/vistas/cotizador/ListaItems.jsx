@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Plus, Upload, Copy, X, Package } from 'lucide-react';
+import { Plus, Upload, Copy, X, Package, Image } from 'lucide-react';
 import { usarCotizador } from './contexto';
 import { Biblioteca, ImportarDXF } from './Modales';
+import { ImportarPlano } from './ImportarPlano';
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
 import { miniatura } from '@/lib/miniatura';
@@ -33,6 +34,7 @@ export function ListaItems() {
   const sim = usarEstado((s) => s.simbolo());
   const [abrirBiblioteca, setAbrirBiblioteca] = useState(false);
   const [abrirDXF, setAbrirDXF] = useState(false);
+  const [abrirPlano, setAbrirPlano] = useState(false);
 
   return (
     <>
@@ -95,6 +97,12 @@ export function ListaItems() {
               Importar DXF
             </Boton>
           </div>
+          {/* El camino más frecuente: el cliente manda una foto del plano por
+              WhatsApp o un PDF del CAD. Antes eso se redibujaba a mano. */}
+          <Boton ancho="completo" onClick={() => setAbrirPlano(true)}>
+            <Image />
+            Importar plano (imagen o PDF)
+          </Boton>
           <Boton ancho="completo" tono="fantasma" onClick={duplicarItem} disabled={!doc.items.length}>
             <Copy />
             Duplicar el ítem actual
@@ -104,6 +112,7 @@ export function ListaItems() {
 
       <Biblioteca abierto={abrirBiblioteca} alCerrar={() => setAbrirBiblioteca(false)} />
       <ImportarDXF abierto={abrirDXF} alCerrar={() => setAbrirDXF(false)} />
+      <ImportarPlano abierto={abrirPlano} alCerrar={() => setAbrirPlano(false)} />
     </>
   );
 }

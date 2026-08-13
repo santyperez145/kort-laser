@@ -20,7 +20,7 @@
  * cada columna, así que nunca promete un encastre que no entra.
  */
 
-import { flattenPath, pathBBox, shapeBBox, esMultiParte } from './geometry.js';
+import { flattenPath, pathBBox, shapeBBox, shapeArea, esMultiParte } from './geometry.js';
 
 /** El rectángulo envolvente como polígono, para anidar del lado seguro. */
 const rectanguloDe = (b) => [
@@ -631,6 +631,24 @@ function nestFormaReal(items, chapa, opts) {
  * @param {Object} opts   { margen, separacion, maxChapas, formaReal, resolucion }
  */
 export function nest(items, chapa, opts = {}) {
+  /**
+   * El área REAL de cada pieza, para medir el aprovechamiento.
+   *
+   * ⚠️ Sin esto se usaba el rectángulo envolvente, y el aprovechamiento salía
+   * **por encima del 100 %** con cualquier pieza que no fuera rectangular: un
+   * trapecio ocupa el 73 % de su envolvente, así que 84 % real se mostraba
+   * como 114 %. Un número imposible que además mentía para el lado peligroso
+   * — hacía ver el anidado mejor de lo que es, y de ese número salen las
+   * chapas a comprar y el retazo que se promete guardar.
+   *
+   * Se calcula acá y no en cada llamador porque la forma ya está en el ítem:
+   * pedirle al que llama que además mande el área es pedirle que se acuerde,
+   * y el cotizador no se acordaba.
+   */
+  items = items.map((i) =>
+    i.areaReal != null || !i.shape ? i : { ...i, areaReal: shapeArea(i.shape) }
+  );
+
   const usarForma = opts.formaReal !== false && items.some((i) => i.shape || i.poly);
 
   /**
@@ -673,12 +691,31 @@ export function nest(items, chapa, opts = {}) {
     ];
   }
 
+  /**
+   * Elige la mejor variante. El orden de criterios importa:
+   *
+   * 1. Que entren todas las piezas.
+   * 2. La menor cantidad de chapas: es plata directa.
+   * 3. **Que la ÚLTIMA chapa quede lo más vacía posible.**
+   *
+   * El tercero es el que hace la diferencia en el taller y antes no existía:
+   * el desempate era el área total usada, que es la misma en todas las
+   * variantes —las piezas son las mismas— así que nunca desempataba nada y
+   * siempre ganaba la primera de la lista.
+   *
+   * Concentrar las piezas en las primeras chapas y dejar la última lo más
+   * libre posible deja **un retazo grande y entero** en vez de varios
+   * pedacitos repartidos. Un retazo grande se usa en el próximo trabajo; tres
+   * chicos se oxidan en el fondo del taller. Y es exactamente el número que
+   * `compras.js` informa como material reutilizable.
+   */
   const mejorDe = (cands) => {
     let mejor = null;
     for (const c of cands) {
       if (!c) continue;
-      const usadas = c.chapas.reduce((a, ch) => a + ch.areaUsada, 0);
-      const puntaje = c.chapas.length * 1e12 + (c.noEntran?.length || 0) * 1e15 - usadas;
+      const ultima = c.chapas.length ? c.chapas[c.chapas.length - 1].areaUsada : 0;
+      const puntaje =
+        (c.noEntran?.length || 0) * 1e15 + c.chapas.length * 1e9 + ultima;
       if (!mejor || puntaje < mejor.puntaje) mejor = { r: c, puntaje };
     }
     return mejor?.r || null;

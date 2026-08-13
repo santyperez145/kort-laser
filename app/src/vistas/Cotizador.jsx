@@ -48,6 +48,53 @@ function geometria(item, materiales) {
 /** Clave donde el diseñador de plegado deja la pieza para cotizar. */
 export const CLAVE_ITEM_PENDIENTE = 'kort-item-pendiente';
 
+/* ── Borrador que sobrevive a cerrar la pestaña ─────────────────────────── */
+
+/**
+ * El presupuesto en curso vivía sólo en memoria. Cambiar a Materiales y
+ * volver, recargar la página o cerrar el navegador sin querer borraba todo lo
+ * cargado sin un aviso — y armar un presupuesto de varios ítems con DXF del
+ * cliente son veinte minutos de trabajo.
+ *
+ * Se guarda en `localStorage` y no en la base a propósito: un borrador no es
+ * un presupuesto. Mandarlo al servidor llenaría el listado de basura a medio
+ * hacer y consumiría números de presupuesto que después quedan con agujeros.
+ */
+const CLAVE_BORRADOR = 'kort-borrador-cotizador';
+
+function guardarBorrador(doc) {
+  try {
+    // Un documento sin nada cargado no pisa uno que sí tenía cosas
+    const vacio = !doc?.cliente?.nombre && (doc?.items || []).length <= 1 && !doc?.items?.[0]?.shape;
+    if (doc?.id || vacio) return;
+    localStorage.setItem(CLAVE_BORRADOR, JSON.stringify({ doc, fecha: Date.now() }));
+  } catch {
+    /* Sin espacio (un DXF grande puede llenar la cuota): se sigue trabajando
+       en memoria. No vale la pena molestar con un error por esto. */
+  }
+}
+
+function leerBorrador() {
+  try {
+    const crudo = localStorage.getItem(CLAVE_BORRADOR);
+    if (!crudo) return null;
+    const { doc, fecha } = JSON.parse(crudo);
+    // Una semana. Más viejo que eso ya no es "lo que estaba haciendo".
+    if (!doc || Date.now() - fecha > 7 * 24 * 3600 * 1000) return null;
+    return doc;
+  } catch {
+    return null;
+  }
+}
+
+function olvidarBorrador() {
+  try {
+    localStorage.removeItem(CLAVE_BORRADOR);
+  } catch {
+    /* nada que hacer */
+  }
+}
+
 /**
  * Levanta la pieza que dejó otra vista y la borra: es un pase de mano, no un
  * guardado. Si quedara, volver al cotizador la volvería a agregar sola.
@@ -116,8 +163,29 @@ export function VistaCotizador() {
         // Sin esto, "Cotizar esta pieza" abría el cotizador con la plantilla
         // por defecto y el perfil diseñado se perdía.
         const delPlegado = tomarItemPendiente();
-        setDoc({ ...docVacio(), items: [delPlegado || itemNuevo(materiales)] });
-        if (delPlegado) toast.success('Perfil plegado cargado en el presupuesto');
+        if (delPlegado) {
+          setDoc({ ...docVacio(), items: [delPlegado] });
+          toast.success('Perfil plegado cargado en el presupuesto');
+        } else {
+          // Lo que quedó a medio hacer la última vez tiene prioridad sobre
+          // empezar de cero: si estaba ahí, es porque nadie lo cerró a mano.
+          const borrador = leerBorrador();
+          if (borrador) {
+            setDoc({ ...docVacio(), ...borrador });
+            toast.info('Se recuperó el presupuesto que estabas armando', {
+              duration: 6000,
+              action: {
+                label: 'Empezar de cero',
+                onClick: () => {
+                  olvidarBorrador();
+                  setDoc({ ...docVacio(), items: [itemNuevo(materiales)] });
+                },
+              },
+            });
+          } else {
+            setDoc({ ...docVacio(), items: [itemNuevo(materiales)] });
+          }
+        }
       }
       if (vivo) setSel(0);
     }
@@ -126,6 +194,14 @@ export function VistaCotizador() {
       vivo = false;
     };
   }, [id, materiales]);
+
+  /* Autoguardado del borrador. Con retardo porque `doc` cambia en cada tecla
+     y serializar un DXF grande en cada una se nota al escribir. */
+  useEffect(() => {
+    if (!arrancado.current) return undefined;
+    const t = setTimeout(() => guardarBorrador(doc), 800);
+    return () => clearTimeout(t);
+  }, [doc]);
 
   /* ---------------- Cálculo derivado ----------------
      `useDeferredValue` deja que la tecla se pinte antes de recotizar. Sin
@@ -195,6 +271,9 @@ export function VistaCotizador() {
   }, [sel]);
 
   const nuevoPresupuesto = useCallback(() => {
+    // Pedir uno nuevo es decir explícitamente "esto ya no me sirve": es el
+    // único momento en que se descarta el borrador sin haberlo guardado.
+    olvidarBorrador();
     setDoc({ ...docVacio(), items: [itemNuevo(materiales)] });
     setSel(0);
     if (id) setParams({}, { replace: true });
@@ -213,7 +292,13 @@ export function VistaCotizador() {
         const r = coti.items[i];
         return {
           ...it,
-          shape: it.origen === 'dxf' ? it.shape : undefined,
+          /* Se guarda la geometría SALVO que se pueda reconstruir.
+             Estaba al revés —"guardala sólo si es DXF"— y eso deja sin
+             geometría a todo origen que no sea `libreria` ni `dxf`: la pieza
+             se guarda, se reabre vacía y no hay forma de recuperarla. La
+             regla correcta es la inversa, porque el caso reconstruible es uno
+             solo y conocido. */
+          shape: it.origen === 'libreria' ? undefined : it.shape,
           gas: r?.corte?.gasTipo ?? it.gas ?? null,
           _pesoTotal: r?.geometria?.pesoTotal ?? 0,
           _largoCorte: r?.geometria?.largoCorteMM ?? 0,
@@ -245,6 +330,9 @@ export function VistaCotizador() {
       } else {
         const nuevo = await api.post('presupuestos', cuerpo);
         actualizarDoc({ id: nuevo.id, numero: nuevo.numero, clienteId: cuerpo.clienteId ?? doc.clienteId });
+        // Ya vive en la base: el borrador dejaría una copia vieja que después
+        // se recupera sola y pisa el trabajo bueno.
+        olvidarBorrador();
         toast.success(`Presupuesto ${nuevo.numero} guardado`);
       }
     } catch (e) {
