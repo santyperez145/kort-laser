@@ -31,6 +31,7 @@ import {
 } from '../src/core/costos.js';
 import { calcularPliegue, calcularDesarrollo, matrizRecomendada, validarPlegado, tiempoPlegado } from '../src/core/bending.js';
 import { nest, piezasPorChapa, compararMetodos, rellenoSinCosto } from '../src/core/nesting.js';
+import { rectanguloEnHueco, huecosDe, aprovecharHuecos } from '../src/core/huecos.js';
 import { generarDXF } from '../src/core/dxf-write.js';
 import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
@@ -1785,6 +1786,80 @@ test('el ángulo de mínima área encuentra el giro de una pieza en diagonal', (
     return d < 3 || Math.abs(d - 90) < 3;
   });
   assert.ok(bueno, `esperaba un giro cerca de 330° o 60°, dio ${angulos.map((x) => x.toFixed(0)).join(', ')}`);
+});
+
+test('el mayor rectángulo de un agujero redondo es su cuadrado inscripto', () => {
+  /* Es la cota que define cuánto se puede meter adentro de un agujero. En un
+     círculo de radio R el cuadrado inscripto tiene lado R·√2; con la holgura
+     de corte queda un poco menos. Si diera más, se estaría prometiendo un
+     encaje que no existe y las dos piezas se cortarían encima. */
+  const R = 120;
+  const poly = [];
+  for (let i = 0; i < 96; i++) {
+    const a = (i / 96) * Math.PI * 2;
+    poly.push([300 + R * Math.cos(a), 300 + R * Math.sin(a)]);
+  }
+  const sep = 7.5;
+  const r = rectanguloEnHueco(poly, sep, 2);
+  const ladoIdeal = R * Math.SQRT2;
+  assert.ok(r, 'tiene que encontrar un rectángulo');
+  assert.ok(r.w <= ladoIdeal && r.h <= ladoIdeal,
+    `dio ${r.w.toFixed(0)}×${r.h.toFixed(0)} y el cuadrado inscripto es ${ladoIdeal.toFixed(0)}: no puede pasarse`);
+  assert.ok(r.w > ladoIdeal - 4 * sep, `dio ${r.w.toFixed(0)} y desperdicia demasiado`);
+
+  // Y todo el rectángulo tiene que caer adentro del círculo con su holgura
+  for (const [x, y] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]) {
+    const d = Math.hypot(x - 300, y - 300);
+    assert.ok(d <= R - sep + 2, `una esquina quedó a ${d.toFixed(1)} mm del centro y el borde útil es ${(R - sep).toFixed(1)}`);
+  }
+});
+
+test('las piezas chicas se meten en el agujero de las grandes y ahorran una chapa', () => {
+  /* El material de adentro de un agujero ya está comprado y ya se paga. Es lo
+     que más ataca el desperdicio en un taller que corta bridas o tapas. */
+  const brida = makeShape(rect(0, 0, 320, 320, 20), [circle(160, 160, 120)]);
+  const chapita = makeShape(rect(0, 0, 70, 50, 4));
+  const b1 = shapeBBox(brida);
+  const b2 = shapeBBox(chapita);
+  const items = () => [
+    { id: 'brida', nombre: 'Brida', w: b1.w, h: b1.h, cantidad: 36, shape: brida },
+    { id: 'chapita', nombre: 'Chapita', w: b2.w, h: b2.h, cantidad: 260, shape: chapita },
+  ];
+  const chapa = { w: 3000, h: 1500 };
+  const opts = { separacion: 5, margen: 10, formaReal: true };
+
+  const sinHuecos = nest(items(), chapa, { ...opts, usarHuecos: false });
+  const conHuecos = nest(items(), chapa, opts);
+
+  assert.ok(
+    conHuecos.cantidadChapas < sinHuecos.cantidadChapas,
+    `con huecos usó ${conHuecos.cantidadChapas} chapas y sin huecos ${sinHuecos.cantidadChapas}: tiene que ahorrar al menos una`
+  );
+  assert.ok(conHuecos.piezasEnHuecos > 0, 'tiene que informar cuántas piezas metió en agujeros');
+  assert.ok(
+    conHuecos.aprovechamientoGlobal > sinHuecos.aprovechamientoGlobal,
+    'y el aprovechamiento tiene que subir'
+  );
+  // Todas las piezas pedidas siguen estando: no se puede perder ninguna
+  const colocadas = conHuecos.chapas.reduce((a, c) => a + c.piezas.length, 0);
+  assert.equal(colocadas, 36 + 260, `quedaron ${colocadas} piezas de 296`);
+});
+
+test('no se mete una pieza en un agujero donde no entra', () => {
+  /* La regla que no se afloja: nunca prometer un encaje que no existe. Una
+     brida de 320 no entra en un agujero de 240 por más que sobre chapa. */
+  const brida = makeShape(rect(0, 0, 320, 320, 20), [circle(160, 160, 120)]);
+  const b1 = shapeBBox(brida);
+  const r = nest(
+    [{ id: 'brida', nombre: 'Brida', w: b1.w, h: b1.h, cantidad: 78, shape: brida }],
+    { w: 3000, h: 1500 },
+    { separacion: 5, margen: 10, formaReal: true }
+  );
+  assert.ok(!r.piezasEnHuecos, 'no puede haber metido una brida adentro de otra brida');
+  assert.equal(
+    r.chapas.reduce((a, c) => a + c.piezas.length, 0), 78,
+    'y no puede haber perdido ninguna'
+  );
 });
 
 test('el aprovechamiento nunca puede pasar del 100 %', () => {

@@ -260,16 +260,37 @@ sola entrada recta para todo.
 
 ---
 
-### 📋 1.7 Anidado dentro del hueco de otra pieza
+### ✅ 1.7 Anidado dentro del hueco de otra pieza
 
-El anidado por perfil no mete piezas en las "cuevas": si una pieza en U deja un
-hueco cerrado adentro, ahí no entra nada aunque quepa. Para piezas grandes con
-recortes internos (bridas, marcos) eso es material tirado.
+`src/core/huecos.js`. El material de adentro de un agujero grande **ya está
+comprado y ya se paga**: si ahí entra una pieza chica, esa pieza sale gratis en
+material. Es lo que hace el software de nesting profesional y es lo que más
+ataca el desperdicio en un taller que corta bridas, tapas o anillos.
 
-Requiere pasar del perfil por columna a una malla de ocupación real. Es el
-salto grande del anidado y el que más material queda por ganar.
+Medido con 36 bridas de 320 mm con agujero de 240 más 260 chapitas de 70×50:
 
-**Esfuerzo:** alto.
+| | Chapas | Aprovechamiento | Última chapa |
+|---|---|---|---|
+| Antes | **2** | 32,8 % | 8,2 % |
+| Ahora | **1** | **65,6 %** | — |
+
+**Una chapa de 3000×1500 ahorrada**, con 106 piezas metidas en los agujeros.
+
+Dos decisiones que no se aflojan:
+
+- **Nunca prometer un encaje que no existe.** El agujero se rasteriza, se
+  achica el borde por la separación de corte y adentro se busca el mayor
+  rectángulo inscripto. Se anida dentro de ESE rectángulo, no del contorno del
+  agujero. En un agujero con forma de riñón desperdicia un poco, pero lo que
+  promete entra siempre. Un anidado optimista se descubre con la máquina
+  cortando y la chapa arruinada.
+- **La erosión mira los ocho vecinos, no los cuatro ortogonales.** Con cuatro
+  come un rombo en vez de un cuadrado y la holgura en diagonal queda un 30 %
+  más corta que la pedida. Poco, pero un parámetro que no vale lo que dice no
+  sirve para decidir.
+
+Sólo mueve piezas de la ÚLTIMA chapa: es la única que se puede llegar a
+evitar, y tocar las demás sería reacomodar un anidado que ya está bien.
 
 ### 📋 1.8 Anidar también los agujeros grandes
 
@@ -441,6 +462,99 @@ para el celular —ver la orden, marcar avance, sacar la foto del trabajo
 terminado— tendría sentido cuando haya más de una persona produciendo.
 
 **Esfuerzo:** medio.
+
+---
+
+## Usuarios y permisos: por qué NO
+
+Se evaluó armar una base de usuarios con login. **La conclusión es que hoy no
+corresponde, y conviene dejar escrito el porqué para no volver a discutirlo.**
+
+El sistema corre en **una máquina del taller**, servido desde Express en
+`localhost`, y puede estar sin internet. Quien se sienta ahí ya tiene el
+archivo `data/kort.db` a mano: un login no protege nada que el acceso físico
+no entregue igual. Lo único que agrega es fricción diaria — y una contraseña
+que se pide todas las mañanas termina en un papel pegado al monitor, que es
+peor que no tenerla.
+
+Pedir usuarios sin necesitarlos también cuesta: hay que mantener altas, bajas,
+recuperación de contraseña y permisos por vista, y nada de eso mueve un peso.
+
+**Lo que sí hace falta de todo eso es saber quién tocó qué**, y para eso no
+hacen falta contraseñas:
+
+### 🔜 U.1 Firma en la bitácora
+
+La tabla `bitacora` ya registra cada cambio con fecha, tipo y detalle. Le falta
+**quién**. Un selector de "operario actual" sin contraseña, que se guarda en el
+navegador y viaja en cada escritura, alcanza para contestar las dos preguntas
+que se hacen de verdad: *¿quién cambió este precio?* y *¿quién cargó este
+tiempo real?*
+
+**Esfuerzo:** bajo. Una columna, un selector y pasarlo en las escrituras.
+
+### 💭 U.2 Login de verdad
+
+Recién tiene sentido si pasa alguna de estas tres cosas:
+
+1. El sistema se publica fuera de la red del taller (ahí es obligatorio, y
+   antes hay que revisar toda la superficie de la API).
+2. Entra alguien que no debe ver precios de costo ni márgenes — un pasante, un
+   cliente mirando el avance de su trabajo.
+3. Hace falta responder legalmente por quién aprobó un presupuesto.
+
+Mientras sean Santiago y un operario en la misma máquina, no.
+
+---
+
+## Fase 5 — Producción y taller
+
+Lo que sigue apunta al otro lado del negocio: hoy el sistema cotiza muy bien y
+acompaña poco al que está parado frente a la máquina.
+
+### 🔜 5.1 Micro-uniones y orden de corte seguro
+
+Dos problemas de producción que hoy no se modelan y se pagan en chapa:
+
+- Las piezas chicas **se caen entre los travesaños** de la mesa y se pierden o
+  se rayan. La solución estándar son micro-uniones: dejar 0,3-0,5 mm sin
+  cortar en dos o tres puntos del contorno.
+- Una pieza que se suelta antes de tiempo **se levanta y golpea el cabezal**.
+  Eso es una boquilla rota y, si hay mala suerte, la lente.
+
+El orden correcto es: primero todos los contornos interiores, después el
+exterior, y dentro de cada chapa de arriba hacia abajo para no pasar el
+cabezal sobre lo ya cortado. Con `1.7` ya hecho esto pesa más: una pieza
+anidada adentro de un agujero **tiene** que cortarse antes que el agujero que
+la contiene.
+
+**Esfuerzo:** medio. **Evita roturas, que es plata grande y de golpe.**
+
+### 📋 5.2 Etiquetas de pieza para el taller
+
+Una etiqueta por pieza con número de OT, cliente, material, espesor, cantidad y
+un QR que abra la ficha. En un lote de treinta piezas parecidas, saber cuál es
+cuál sin ir a buscar el plano ahorra errores de entrega.
+
+**Esfuerzo:** bajo — el generador de PDF ya está.
+
+### 📋 5.3 Carga de la máquina y fecha de entrega realista
+
+El sistema ya sabe cuántos minutos de máquina lleva cada orden. Sumando las
+órdenes abiertas sale **cuántas horas hay comprometidas**, y con eso una fecha
+de entrega que no sea "7 días" por costumbre. Prometer una fecha que no se
+cumple cuesta el cliente siguiente.
+
+**Esfuerzo:** medio. Necesita estados de orden con fecha comprometida.
+
+### 💭 5.4 Aviso de consumibles por horas de arco
+
+La boquilla, la lente y el vidrio protector se cambian por horas de trabajo, no
+por calendario. El sistema ya acumula tiempo de máquina real: puede avisar
+"llevás 180 horas desde el último cambio de lente".
+
+**Esfuerzo:** bajo, apoyado en `consumibles.js` y `calibracion.js`.
+
 
 ---
 

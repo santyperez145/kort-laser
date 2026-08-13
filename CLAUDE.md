@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 249 verificaciones del núcleo
+npm test           # 252 verificaciones del núcleo
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -52,7 +52,7 @@ código.
   deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
   react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
   **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
-  Node y en el navegador, y lo que permite que los 249 tests lo verifiquen sin
+  Node y en el navegador, y lo que permite que los 252 tests lo verifiquen sin
   levantar un navegador.
 - **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
   sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde
@@ -288,6 +288,18 @@ exactamente como estaba. Hay un test que lo fija.
   encender la máquina. Cualquier cuenta de $/kg que use el precio de compra
   directo subestima el costo casi un 30 %. Ver `tarifario.js` → `materialKg`.
 
+
+- **Anidar adentro de un agujero: NUNCA prometer un encaje que no existe.**
+  `huecos.js` rasteriza el agujero, le achica el borde por la separación de
+  corte y busca el mayor rectángulo INSCRIPTO. Se anida dentro de ese
+  rectángulo, no del contorno del agujero. En un agujero con forma de riñón
+  desperdicia un poco, pero lo que promete entra siempre — un anidado
+  optimista se descubre con la máquina cortando y la chapa arruinada.
+
+  Y la erosión mira los **ocho** vecinos, no los cuatro ortogonales: con
+  cuatro come un rombo en vez de un cuadrado y la holgura en diagonal queda un
+  30 % más corta que la pedida. Hay un test que verifica las cuatro esquinas
+  contra el radio útil.
 
 - **El multi-arranque del nesting DEBE incluir la variante conservadora.**
   Elegir la rotación pieza por pieza es óptimo localmente y peor en conjunto:
