@@ -13,8 +13,9 @@ import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Calculator, FileText, Factory, Users,
   Layers, Cpu, Wallet, Settings, Moon, Sun, Wifi, WifiOff, FoldVertical, Tags,
+  UserRound,
 } from 'lucide-react';
-import { usarEstado, usarTema } from '@/lib/estado';
+import { usarEstado, usarOperario, usarTema } from '@/lib/estado';
 import { Boton } from '@/componentes/ui/boton';
 import { cn } from '@/lib/utils';
 
@@ -90,6 +91,26 @@ function ChipConexion() {
   );
 }
 
+function SelectorOperario() {
+  const nombre = usarOperario((s) => s.nombre);
+  const cambiar = usarOperario((s) => s.cambiar);
+
+  return (
+    <label
+      className="hidden lg:flex h-9 w-[172px] shrink-0 items-center gap-2 rounded-lg border border-white/10 bg-white/8 px-2.5 text-acero-100 focus-within:border-corte-400/70 focus-within:ring-2 focus-within:ring-corte-500/25"
+      title="Operario que firma los cambios en la bitácora"
+    >
+      <UserRound className="size-4 text-acero-300" />
+      <input
+        value={nombre}
+        onChange={(e) => cambiar(e.target.value)}
+        placeholder="Operario"
+        className="min-w-0 flex-1 bg-transparent text-[12px] font-medium text-white outline-none placeholder:text-acero-300/70"
+      />
+    </label>
+  );
+}
+
 export function Estructura({ children }) {
   const oscuro = usarTema((s) => s.oscuro);
   const alternar = usarTema((s) => s.alternar);
@@ -125,6 +146,7 @@ export function Estructura({ children }) {
         </nav>
 
         <div className="flex shrink-0 items-center gap-2">
+          <SelectorOperario />
           <ChipConexion />
           <Boton
             tono="fantasma" tam="icono" onClick={alternar} title="Cambiar tema"

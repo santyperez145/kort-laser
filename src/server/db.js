@@ -149,6 +149,11 @@ const ESQUEMA = [
     entidad UNINDEXED, ref UNINDEXED, titulo, cuerpo
   );
   `,
+
+  /* v3 - firma simple de operario en bitacora ---------------------------- */
+  `
+  ALTER TABLE bitacora ADD COLUMN operario TEXT;
+  `,
 ];
 
 const COLECCIONES = {
@@ -213,7 +218,7 @@ export class DB {
     }
   }
 
-  escribir(clave, valor) {
+  escribir(clave, valor, operario = null) {
     const antes = clave === 'materiales' ? this.leerCrudo('materiales') : null;
     this.db.run(
       `INSERT INTO ajustes (clave, valor, modificado) VALUES (?, ?, ?)
@@ -221,7 +226,7 @@ export class DB {
       [clave, JSON.stringify(valor), new Date().toISOString()]
     );
     if (clave === 'materiales') this.registrarCambiosDePrecio(antes, valor);
-    this.log('ajuste', clave, null, null);
+    this.log('ajuste', clave, null, null, operario);
     return valor;
   }
 
@@ -316,31 +321,31 @@ export class DB {
     return f ? JSON.parse(f.datos) : null;
   }
 
-  crear(nombre, obj) {
+  crear(nombre, obj, operario = null) {
     const ahora = new Date().toISOString();
     const item = { ...obj, id: obj.id || nuevoId(), creado: obj.creado || ahora, modificado: ahora };
     this.guardarFila(nombre, item, true);
-    this.log('alta', nombre, item.id, item.numero || item.nombre);
+    this.log('alta', nombre, item.id, item.numero || item.nombre, operario);
     return item;
   }
 
-  actualizar(nombre, id, cambios) {
+  actualizar(nombre, id, cambios, operario = null) {
     const actual = this.obtener(nombre, id);
     if (!actual) return null;
     const item = { ...actual, ...cambios, id, modificado: new Date().toISOString() };
     this.guardarFila(nombre, item, false);
-    this.log('modificación', nombre, id, item.numero || item.nombre);
+    this.log('modificación', nombre, id, item.numero || item.nombre, operario);
     return item;
   }
 
-  borrar(nombre, id) {
+  borrar(nombre, id, operario = null) {
     const tabla = COLECCIONES[nombre]?.tabla;
     if (!tabla) return false;
     const antes = this.db.get(`SELECT id FROM ${tabla} WHERE id = ?`, [id]);
     if (!antes) return false;
     this.db.run(`DELETE FROM ${tabla} WHERE id = ?`, [id]);
     this.db.run('DELETE FROM busqueda WHERE ref = ?', [id]);
-    this.log('baja', nombre, id, null);
+    this.log('baja', nombre, id, null, operario);
     return true;
   }
 
@@ -453,10 +458,10 @@ export class DB {
     return `${anio}-${String(v).padStart(4, '0')}`;
   }
 
-  log(tipo, entidad, entidadId, detalle) {
+  log(tipo, entidad, entidadId, detalle, operario = null) {
     try {
-      this.db.run('INSERT INTO bitacora (fecha, tipo, entidad, entidad_id, detalle) VALUES (?,?,?,?,?)',
-        [new Date().toISOString(), tipo, entidad || null, entidadId || null, detalle || null]);
+      this.db.run('INSERT INTO bitacora (fecha, tipo, entidad, entidad_id, detalle, operario) VALUES (?,?,?,?,?,?)',
+        [new Date().toISOString(), tipo, entidad || null, entidadId || null, detalle || null, operario || null]);
     } catch {}
   }
 

@@ -3122,9 +3122,13 @@ let dbt = null;
 
 test('crea el esquema y siembra los datos de fábrica', () => {
   dbt = new DB(dirTmp);
-  assert.ok(dbt.version >= 2, `versión de esquema inesperada: ${dbt.version}`);
+  assert.ok(dbt.version >= 3, `versión de esquema inesperada: ${dbt.version}`);
   assert.equal(dbt.leerCrudo('materiales').length, DEFAULT_MATERIALS.length);
   assert.ok(dbt.leerCrudo('config').estructura, 'la config debe traer la estructura');
+  assert.ok(
+    dbt.db.all('PRAGMA table_info(bitacora)').some((c) => c.name === 'operario'),
+    'la bitácora debe tener firma de operario'
+  );
 });
 
 test('numeración correlativa por año, sin repetir', () => {
@@ -3142,6 +3146,15 @@ test('alta, lectura, modificación y baja de un cliente', () => {
   assert.equal(dbt.obtener('clientes', c.id).telefono, '3804-111111');
   assert.ok(dbt.borrar('clientes', c.id));
   assert.equal(dbt.obtener('clientes', c.id), null);
+});
+
+test('la bitácora firma los cambios con el operario actual', () => {
+  const c = dbt.crear('clientes', { nombre: 'Corte Norte' }, 'Santiago');
+  assert.equal(dbt.bitacora(1)[0].operario, 'Santiago');
+  dbt.actualizar('clientes', c.id, { telefono: '3804-222222' }, 'Mariela');
+  assert.equal(dbt.bitacora(1)[0].operario, 'Mariela');
+  dbt.borrar('clientes', c.id, 'Taller');
+  assert.equal(dbt.bitacora(1)[0].operario, 'Taller');
 });
 
 test('guarda un presupuesto y lo puede consultar por material', () => {

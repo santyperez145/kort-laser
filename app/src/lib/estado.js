@@ -139,3 +139,17 @@ export const usarTema = create((set, get) => ({
     aplicar(get().oscuro);
   },
 }));
+
+export const usarOperario = create((set) => ({
+  nombre: (localStorage.getItem('kort-operario') || '').trim(),
+
+  cambiar(nombre) {
+    const limpio = String(nombre || '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trimStart()
+      .slice(0, 60);
+    localStorage.setItem('kort-operario', limpio.trim());
+    set({ nombre: limpio });
+  },
+}));

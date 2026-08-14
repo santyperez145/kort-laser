@@ -17,6 +17,7 @@ import {
 import {
   Plus, FileText, TrendingUp, Target, CheckCircle2, Percent,
   Layers, Users, Gauge, ArrowRight, OctagonAlert, TriangleAlert,
+  History, UserRound,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
@@ -141,6 +142,13 @@ function RevisionDatos() {
   );
 }
 
+function fechaHoraCorta(valor) {
+  if (!valor) return 'Sin fecha';
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(valor));
+}
+
 /* ------------------------------------------------------------------ */
 
 export function VistaPanel() {
@@ -161,6 +169,11 @@ export function VistaPanel() {
     queryKey: ['estructura'],
     queryFn: () => api.get('estructura'),
     retry: false,
+  });
+
+  const { data: bitacora = [] } = useQuery({
+    queryKey: ['bitacora-reciente'],
+    queryFn: () => api.get('bitacora?limite=8'),
   });
 
   if (isLoading || !st || !config) {
@@ -555,6 +568,40 @@ export function VistaPanel() {
           </PanelCuerpo>
         </Panel>
       </div>
+
+      <Panel>
+        <PanelCab acciones={<span className="text-[11px] text-tenue">últimos 8 cambios</span>}>
+          <History className="size-3.5 text-corte-500" />
+          <PanelTitulo>Bitácora reciente</PanelTitulo>
+        </PanelCab>
+        <PanelCuerpo>
+          {bitacora.length ? (
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {bitacora.map((m) => (
+                <div key={m.id} className="rounded-lg border border-borde bg-panel-alto p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-semibold text-tinta">
+                        {m.tipo} · {m.entidad || 'sistema'}
+                      </div>
+                      <div className="mt-0.5 truncate text-[11.5px] text-suave">
+                        {m.detalle || m.entidad_id || 'sin detalle'}
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-[10.5px] text-tenue">{fechaHoraCorta(m.fecha)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-1.5 text-[11.5px] text-tenue">
+                    <UserRound className="size-3.5" />
+                    <span className="truncate">{m.operario || 'Sin firma'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Vacio icono={<History />} titulo="Todavía no hay movimientos registrados" />
+          )}
+        </PanelCuerpo>
+      </Panel>
     </div>
   );
 }

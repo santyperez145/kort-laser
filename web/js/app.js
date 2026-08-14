@@ -81,8 +81,24 @@ function tema() {
   });
 }
 
+function operario() {
+  const input = $('#operario-actual');
+  if (!input) return;
+  input.value = (localStorage.getItem('kort-operario') || '').trim();
+  input.addEventListener('input', () => {
+    const limpio = input.value
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trimStart()
+      .slice(0, 60);
+    input.value = limpio;
+    localStorage.setItem('kort-operario', limpio.trim());
+  });
+}
+
 async function arrancar() {
   if (!embebida()) tema();
+  operario();
   try {
     await cargarEstado();
     chipEstado('Conectado');

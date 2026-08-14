@@ -2,9 +2,17 @@
 
 import { bytesABase64 } from './ui.js';
 
+function operarioActual() {
+  return (localStorage.getItem('kort-operario') || '').trim();
+}
+
 async function pedir(url, opciones = {}) {
+  const operario = operarioActual();
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(operario ? { 'X-KORT-Operario': operario } : {}),
+    },
     ...opciones,
     body: opciones.body ? JSON.stringify(opciones.body) : undefined,
   });

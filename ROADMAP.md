@@ -565,15 +565,16 @@ recuperación de contraseña y permisos por vista, y nada de eso mueve un peso.
 **Lo que sí hace falta de todo eso es saber quién tocó qué**, y para eso no
 hacen falta contraseñas:
 
-### 🔜 U.1 Firma en la bitácora
+### ✅ U.1 Firma en la bitácora
 
-La tabla `bitacora` ya registra cada cambio con fecha, tipo y detalle. Le falta
-**quién**. Un selector de "operario actual" sin contraseña, que se guarda en el
-navegador y viaja en cada escritura, alcanza para contestar las dos preguntas
-que se hacen de verdad: *¿quién cambió este precio?* y *¿quién cargó este
-tiempo real?*
+Hecho el 2026-08-14. La tabla `bitacora` tiene columna `operario`, el servidor
+toma `X-KORT-Operario` en cada escritura y la barra superior tiene un selector
+simple de firma. La interfaz anterior lo comparte por `localStorage`, así que
+también firma cuando se abre una vista legacy aparte.
 
-**Esfuerzo:** bajo. Una columna, un selector y pasarlo en las escrituras.
+El panel muestra la bitácora reciente con fecha, entidad, detalle y operario.
+No es login ni reemplaza permisos: es trazabilidad operativa para responder
+*quién cambió este precio* o *quién cargó este tiempo real* sin fricción.
 
 ### 💭 U.2 Login de verdad
 

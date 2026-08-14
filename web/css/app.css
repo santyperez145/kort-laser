@@ -80,6 +80,31 @@ html, body {
 #nav a.activo { background: var(--naranja); color: #fff; font-weight: 600; }
 
 .topbar-acciones { display: flex; align-items: center; gap: 10px; }
+.operario-legacy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .08);
+  color: #c2d3e2;
+}
+.operario-legacy span { font-size: 10px; color: #a9c0d6; text-transform: uppercase; letter-spacing: .4px; }
+.operario-legacy input {
+  width: 96px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  outline: none;
+}
+.operario-legacy input::placeholder { color: rgba(194, 211, 226, .68); }
 .btn-icono {
   background: rgba(255, 255, 255, .12); border: 0; color: #fff;
   width: 30px; height: 30px; border-radius: 7px; cursor: pointer; font-size: 15px;

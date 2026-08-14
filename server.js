@@ -92,6 +92,15 @@ function nombreSeguro(s) {
     .slice(0, 180);
 }
 
+function operarioSeguro(s) {
+  const limpio = String(s || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  return limpio || null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Aplicación                                                          */
 /* ------------------------------------------------------------------ */
@@ -163,6 +172,10 @@ app.use(
 
 app.use(compression());
 app.use(express.json({ limit: '60mb' }));
+app.use((req, _res, siguiente) => {
+  req.operario = operarioSeguro(req.get('x-kort-operario'));
+  siguiente();
+});
 
 /* ---------------- API ---------------- */
 
@@ -211,7 +224,7 @@ api.put('/:recurso', (req, res, siguiente) => {
         });
       }
     }
-    return res.json(db.escribir(recurso, cuerpo));
+    return res.json(db.escribir(recurso, cuerpo, req.operario));
   }
 
   // config: se fusiona sobre lo guardado, nunca se reemplaza a ciegas
@@ -219,7 +232,7 @@ api.put('/:recurso', (req, res, siguiente) => {
     return res.status(400).json({ error: 'La configuración tiene que ser un objeto. No se guardó nada.' });
   }
   const actual = db.leer('config') || {};
-  return res.json(db.escribir('config', fusionarProfundo(actual, cuerpo)));
+  return res.json(db.escribir('config', fusionarProfundo(actual, cuerpo), req.operario));
 });
 
 // --- Colecciones
@@ -248,13 +261,13 @@ api.post('/:recurso', (req, res, siguiente) => {
   const body = { ...req.body };
   if (recurso === 'presupuestos' && !body.numero) body.numero = db.siguienteNumero('P');
   if (recurso === 'ordenes' && !body.numero) body.numero = db.siguienteNumero('OT');
-  res.status(201).json(db.crear(recurso, body));
+  res.status(201).json(db.crear(recurso, body, req.operario));
 });
 
 api.put('/:recurso/:id', (req, res, siguiente) => {
   const { recurso, id } = req.params;
   if (!COLECCIONES.includes(recurso)) return siguiente();
-  const o = db.actualizar(recurso, id, req.body);
+  const o = db.actualizar(recurso, id, req.body, req.operario);
   if (!o) return res.status(404).json({ error: 'No existe' });
   res.json(o);
 });
@@ -262,7 +275,7 @@ api.put('/:recurso/:id', (req, res, siguiente) => {
 api.delete('/:recurso/:id', (req, res, siguiente) => {
   const { recurso, id } = req.params;
   if (!COLECCIONES.includes(recurso)) return siguiente();
-  res.json({ ok: db.borrar(recurso, id) });
+  res.json({ ok: db.borrar(recurso, id, req.operario) });
 });
 
 // --- Numeración correlativa
@@ -327,9 +340,9 @@ api.post('/restaurar', async (req, res) => {
   const { DEFAULT_MATERIALS } = await import('./src/core/materials.js');
   const { DEFAULT_MACHINE, DEFAULT_PLEGADORA } = await import('./src/core/cutting.js');
   const { DEFAULT_CONFIG } = await import('./src/core/pricing.js');
-  if (tabla === 'materiales') return res.json(db.escribir('materiales', DEFAULT_MATERIALS));
-  if (tabla === 'maquinas') return res.json(db.escribir('maquinas', [DEFAULT_MACHINE, DEFAULT_PLEGADORA]));
-  res.json(db.escribir('config', DEFAULT_CONFIG));
+  if (tabla === 'materiales') return res.json(db.escribir('materiales', DEFAULT_MATERIALS, req.operario));
+  if (tabla === 'maquinas') return res.json(db.escribir('maquinas', [DEFAULT_MACHINE, DEFAULT_PLEGADORA], req.operario));
+  res.json(db.escribir('config', DEFAULT_CONFIG, req.operario));
 });
 
 // --- Estadísticas para el panel (consultas SQL, no recorriendo arrays)
