@@ -251,13 +251,13 @@ export function Precio() {
           </PanelCab>
           <PanelCuerpo className="space-y-2">
             <p className="text-[11.5px] leading-relaxed text-suave">
-              Elegí un sobrante compatible para reservarlo en este presupuesto. El precio usa el área que se consume,
+              Elegí un sobrante compatible para calcular este presupuesto. La reserva física se confirma al aprobar la orden. El precio usa el área que se consume,
               no una chapa nueva completa.
             </p>
             {item.retazoId && r.retazo ? (
               <div className="flex items-center justify-between gap-2 rounded-lg border border-chapa-500/30 bg-chapa-500/8 px-3 py-2 text-[12px]">
-                <span><strong>Reservado:</strong> {r.retazo.w} × {r.retazo.h} mm{r.retazo.rotacion ? ' · gira 90°' : ''}</span>
-                <Boton tam="sm" tono="fantasma" onClick={() => actualizarItem(sel, { retazoId: null })}>Quitar</Boton>
+                <span><strong>Seleccionado:</strong> {r.retazo.w} × {r.retazo.h} mm{r.retazo.rotacion ? ' · gira 90°' : ''}</span>
+                <Boton tam="sm" tono="fantasma" onClick={() => actualizarItem(sel, { retazoId: null })}>Quitar selección</Boton>
               </div>
             ) : null}
             {sugerenciasRetazo.slice(0, 3).map((c) => (

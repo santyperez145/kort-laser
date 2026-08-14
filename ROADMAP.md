@@ -395,9 +395,10 @@ Dos decisiones que importan:
 
 Hecho el 2026-08-14. `listaDeCompra()` sigue informando el retazo que queda en
 cada programa, y ahora el stock persistente permite darlo de alta, editarlo,
-reservarlo y buscar candidatos por material, espesor y rectángulo envolvente.
-El cotizador puede reservar un retazo compatible y calcula el material por el
-área consumida, sin compartirlo automáticamente con otro programa.
+seleccionarlo y buscar candidatos por material, espesor y rectángulo envolvente.
+El cotizador puede seleccionar un retazo compatible y calcula el material por
+el área consumida, sin compartirlo automáticamente con otro programa. La
+reserva física queda para el paso de aprobación de la orden.
 
 El ABM vive en `Stock de chapa`, con ubicación, lote, estado, cantidad, peso y
 valor de referencia. La preselección es conservadora: el nesting sigue siendo

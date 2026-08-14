@@ -206,7 +206,7 @@ export function planificarNesting(itemsCrudos, ctx) {
   const grupos = new Map();
   (itemsCrudos || []).forEach((item, indice) => {
     if (!item?.shape) return;
-    // Un retazo es un recurso fisico reservado para ese item: no se mezcla
+    // Un retazo es un recurso fisico seleccionado para ese item: no se mezcla
     // con otro presupuesto ni se reparte entre programas automaticamente.
     if (item.retazoId) return;
     const material = findMaterial(ctx.materiales, item.materialId);
