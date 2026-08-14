@@ -436,14 +436,17 @@ prueba, incluido el área de 4 dígitos y un número brasileño que no se toca.
 El mensaje sigue la misma regla que el PDF: ni costo, ni margen, ni tiempo de
 máquina, ni chapas. Un test lo verifica.
 
-### 📋 3.2 Actualización de precios desde lista del proveedor
+### ✅ 3.2 Actualización de precios desde lista del proveedor
 
-Importar el Excel o CSV que manda el proveedor y actualizar los precios de una.
-Con la inflación argentina esto pasa todos los meses y hoy es carga manual.
+Hecho el 2026-08-14. Materiales tiene **Importar lista**: se puede subir o pegar
+un CSV exportado desde Excel, con columnas flexibles (`código`, `material`,
+`descripción`, `$/kg`, `precio`). Reconoce formatos argentinos como `18.600` y
+`3.850,50`, matchea por id o nombre, muestra vista previa de variación y lista
+las filas ignoradas para que nada cambie en silencio.
 
-El historial de precios ya está: sólo falta la importación.
-
-**Esfuerzo:** bajo-medio.
+Los cambios quedan preparados sobre la copia de trabajo y recién impactan al
+tocar **Guardar cambios**, usando el mismo endpoint que ya registra el historial
+de precios. No hay camino paralelo.
 
 ### 📋 3.3 Seguimiento de presupuestos
 
@@ -643,13 +646,17 @@ El panel muestra horas comprometidas, capacidad real y fecha libre. Producción
 agrega una banda de carga y cada tarjeta muestra fecha prometible y horas
 restantes. Ya no se promete "7 días" por costumbre: se ve la cola.
 
-### 💭 5.4 Aviso de consumibles por horas de arco
+### ✅ 5.4 Aviso de consumibles por horas de arco
 
-La boquilla, la lente y el vidrio protector se cambian por horas de trabajo, no
-por calendario. El sistema ya acumula tiempo de máquina real: puede avisar
-"llevás 180 horas desde el último cambio de lente".
+Hecho el 2026-08-14. El panel cruza las órdenes terminadas con la vida útil de
+`consumibles.js` y muestra estado preventivo por horas medidas: boquilla, lente
+protectora, cerámica, filtros, lente de enfoque y varios. Marca vencido desde
+100 % de vida y por vencer desde 80 %.
 
-**Esfuerzo:** bajo, apoyado en `consumibles.js` y `calibracion.js`.
+Si todavía no se cargó la fecha del último cambio, usa todo el historial medido
+y lo dice explícitamente. La función ya acepta `produccion.consumiblesUltimoCambio`
+para que el próximo paso sea agregar el botón "marcar cambiado" sin tocar el
+cálculo.
 
 
 ---

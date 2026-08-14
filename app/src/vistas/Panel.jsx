@@ -17,7 +17,7 @@ import {
 import {
   Plus, FileText, TrendingUp, Target, CheckCircle2, Percent,
   Layers, Users, Gauge, ArrowRight, OctagonAlert, TriangleAlert,
-  History, UserRound, CalendarClock,
+  History, UserRound, CalendarClock, Wrench,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
@@ -28,6 +28,7 @@ import { InsigniaEstado } from '@/componentes/ui/insignia';
 import { PALETA, usarColores, ejeMoneda, Globo } from '@/componentes/graficos';
 import { calcularEstructura, calcularCostoHoraMaquina, puntoEquilibrio } from '@core/costos.js';
 import { revisarDatos } from '@core/salud.js';
+import { CONSUMIBLES_LASER, estadoConsumiblesPorHoras } from '@core/consumibles.js';
 import { Aviso } from '@/componentes/ui/varios';
 import { BotonCalculadorConsumibles } from '@/componentes/CalculadorConsumibles';
 import { cn } from '@/lib/utils';
@@ -149,6 +150,64 @@ function fechaHoraCorta(valor) {
   }).format(new Date(valor));
 }
 
+function ControlConsumibles({ estado }) {
+  if (!estado || estado.horasTotales <= 0) return null;
+  const criticos = estado.items.slice(0, 4);
+  const nivel = estado.vencidos ? 'error' : estado.porVencer ? 'aviso' : 'info';
+
+  return (
+    <Panel className={cn('border-l-4', estado.vencidos ? 'border-l-peligro-500' : estado.porVencer ? 'border-l-alerta-500' : 'border-l-chapa-500')}>
+      <PanelCab
+        acciones={
+          <span className="text-[11px] text-tenue">
+            {num(estado.horasTotales, 1)} h registradas
+          </span>
+        }
+      >
+        <Wrench className="size-3.5 text-corte-500" />
+        <PanelTitulo>Consumibles por horas de corte</PanelTitulo>
+      </PanelCab>
+      <PanelCuerpo className="space-y-3">
+        <Aviso nivel={nivel}>
+          {estado.vencidos ? (
+            <span>Hay {estado.vencidos} consumible{estado.vencidos === 1 ? '' : 's'} pasado{estado.vencidos === 1 ? '' : 's'} de vida útil.</span>
+          ) : estado.porVencer ? (
+            <span>Hay {estado.porVencer} consumible{estado.porVencer === 1 ? '' : 's'} cerca del cambio preventivo.</span>
+          ) : (
+            <span>Las horas medidas todavía están dentro de la vida útil cargada.</span>
+          )}
+          {estado.sinCambiosCargados ? (
+            <span className="mt-1 block text-[11.5px] opacity-85">
+              Falta cargar la fecha del último cambio para que el aviso sea exacto; mientras tanto usa todo el historial medido.
+            </span>
+          ) : null}
+        </Aviso>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {criticos.map((c) => (
+            <div key={c.id} className="rounded-lg border border-borde bg-panel-alto px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-[12px] font-semibold">{c.nombre}</span>
+                <span className={cn('text-[11px] font-bold tabular-nums', c.nivel === 'error' ? 'text-peligro-500' : c.nivel === 'aviso' ? 'text-alerta-500' : 'text-chapa-500')}>
+                  {num(c.pct, 0)}%
+                </span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-borde">
+                <div
+                  className={cn('h-full rounded-full', c.nivel === 'error' ? 'bg-peligro-500' : c.nivel === 'aviso' ? 'bg-alerta-500' : 'bg-chapa-500')}
+                  style={{ width: `${Math.min(100, c.pct)}%` }}
+                />
+              </div>
+              <div className="mt-1.5 text-[11px] text-suave">
+                {num(c.horas, 1)} h / {num(c.vidaHoras, 0)} h
+              </div>
+            </div>
+          ))}
+        </div>
+      </PanelCuerpo>
+    </Panel>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 
 export function VistaPanel() {
@@ -179,6 +238,11 @@ export function VistaPanel() {
   const { data: agenda } = useQuery({
     queryKey: ['agenda-produccion'],
     queryFn: () => api.get('agenda'),
+  });
+
+  const { data: ordenes = [] } = useQuery({
+    queryKey: ['ordenes-consumibles'],
+    queryFn: () => api.get('ordenes'),
   });
 
   if (isLoading || !st || !config) {
@@ -220,6 +284,11 @@ export function VistaPanel() {
   }));
 
   const ch = laser ? calcularCostoHoraMaquina(laser, est) : null;
+  const estadoConsumibles = estadoConsumiblesPorHoras(
+    ordenes,
+    config.produccion?.consumibles || CONSUMIBLES_LASER,
+    { ultimosCambios: config.produccion?.consumiblesUltimoCambio || {} }
+  );
   const partesCosto = ch
     ? [
         ['Amortización', ch.amortizacion], ['Energía', ch.energia], ['Mantenimiento', ch.mantenimiento],
@@ -307,6 +376,8 @@ export function VistaPanel() {
           </PanelCuerpo>
         </Panel>
       ) : null}
+
+      <ControlConsumibles estado={estadoConsumibles} />
 
       <RevisionDatos />
 

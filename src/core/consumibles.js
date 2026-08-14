@@ -136,3 +136,56 @@ export function revisarConsumiblesHora(valorCargado, referencia = null) {
   }
   return null;
 }
+
+function fechaOrden(o) {
+  return new Date(o.real?.fecha || o.actualizado || o.creado || o.fecha || 0).getTime();
+}
+
+function horasOrden(o) {
+  const real = n(o.real?.segundos) / 3600;
+  if (real > 0) return real;
+  return n(o.resumen?.tiempoProduccion) / 3600;
+}
+
+/**
+ * Estado preventivo por horas de arco/corte acumuladas desde el ultimo cambio.
+ *
+ * Si no hay fecha de cambio cargada se usa todo el historial medido: no sirve
+ * para decidir "cambiar hoy", pero si para mostrar que falta cargar el hito de
+ * mantenimiento y que el sistema ya tiene las horas para avisar.
+ */
+export function estadoConsumiblesPorHoras(ordenes = [], lista = CONSUMIBLES_LASER, opts = {}) {
+  const cambios = opts.ultimosCambios || {};
+  const cerradas = new Set(['terminada', 'entregada', 'facturada', 'cerrada']);
+  const horasTotales = (ordenes || [])
+    .filter((o) => !o.estado || cerradas.has(o.estado))
+    .reduce((acc, o) => acc + horasOrden(o), 0);
+
+  const items = (lista || []).map((c) => {
+    const desde = cambios[c.id] ? new Date(cambios[c.id]).getTime() : 0;
+    const horas = (ordenes || [])
+      .filter((o) => !o.estado || cerradas.has(o.estado))
+      .filter((o) => !desde || fechaOrden(o) >= desde)
+      .reduce((acc, o) => acc + horasOrden(o), 0);
+    const vida = n(c.vidaHoras);
+    const pct = vida > 0 ? (horas / vida) * 100 : 0;
+    return {
+      id: c.id,
+      nombre: c.nombre,
+      vidaHoras: vida,
+      horas,
+      pct,
+      horasRestantes: vida - horas,
+      ultimoCambio: cambios[c.id] || null,
+      nivel: pct >= 100 ? 'error' : pct >= 80 ? 'aviso' : 'ok',
+    };
+  }).sort((a, b) => b.pct - a.pct);
+
+  return {
+    horasTotales,
+    items,
+    vencidos: items.filter((x) => x.nivel === 'error').length,
+    porVencer: items.filter((x) => x.nivel === 'aviso').length,
+    sinCambiosCargados: !Object.keys(cambios).length,
+  };
+}

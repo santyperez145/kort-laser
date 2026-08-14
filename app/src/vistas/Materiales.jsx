@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  Save, Plus, TrendingUp, Percent, Zap, Pencil, Trash2, Eye, EyeOff, Info,
+  Save, Plus, TrendingUp, Percent, Zap, Pencil, Trash2, Eye, EyeOff, Info, FileUp,
 } from 'lucide-react';
 
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/ui/panel';
@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 import {
   cuttingSpeed, pierceTime, GASES, gasFlow, presionGas, boquilla, espesorMaximo,
 } from '@core/materials.js';
+import { aplicarPreciosProveedor, importarPreciosProveedor } from '@core/importar-precios.js';
 
 /** Copia profunda. Los materiales son JSON puro, así que alcanza. */
 const clonar = (v) => JSON.parse(JSON.stringify(v));
@@ -63,6 +64,7 @@ export function VistaMateriales() {
   const [tablasDe, setTablasDe] = useState(null);
   const [verHistorial, setVerHistorial] = useState(false);
   const [verMasivo, setVerMasivo] = useState(false);
+  const [verImportador, setVerImportador] = useState(false);
 
   const tocar = (fn) => {
     setMats((prev) => {
@@ -119,6 +121,10 @@ export function VistaMateriales() {
           <Boton tam="sm" onClick={() => setVerMasivo(true)}>
             <Percent />
             Actualizar en masa
+          </Boton>
+          <Boton tam="sm" onClick={() => setVerImportador(true)}>
+            <FileUp />
+            Importar lista
           </Boton>
           <Boton tam="sm" onClick={nuevo}>
             <Plus />
@@ -281,6 +287,20 @@ export function VistaMateriales() {
       ) : null}
 
       {verHistorial ? <DialogoHistorial sim={sim} alCerrar={() => setVerHistorial(false)} /> : null}
+
+      {verImportador ? (
+        <DialogoImportarProveedor
+          materiales={mats}
+          sim={sim}
+          alAplicar={(cambios) => {
+            setMats((prev) => aplicarPreciosProveedor(prev, cambios));
+            setSucio(true);
+            setVerImportador(false);
+            toast.success(`${cambios.length} precios preparados. Revisá y guardá para confirmar.`);
+          }}
+          alCerrar={() => setVerImportador(false)}
+        />
+      ) : null}
 
       {verMasivo ? (
         <DialogoMasivo
@@ -740,5 +760,137 @@ function DialogoMasivo({ familias, alAplicar, alCerrar }) {
         </div>
       </ContenidoDialogo>
     </Dialogo>
+  );
+}
+
+function DialogoImportarProveedor({ materiales, sim, alAplicar, alCerrar }) {
+  const [texto, setTexto] = useState('');
+  const [nombreArchivo, setNombreArchivo] = useState('');
+  const preview = useMemo(() => importarPreciosProveedor(texto, materiales), [texto, materiales]);
+
+  const leerArchivo = (file) => {
+    if (!file) return;
+    setNombreArchivo(file.name);
+    file.text()
+      .then(setTexto)
+      .catch((e) => toast.error(`No se pudo leer el archivo: ${e.message}`));
+  };
+
+  return (
+    <Dialogo open onOpenChange={(v) => !v && alCerrar()}>
+      <ContenidoDialogo
+        titulo="Importar lista de proveedor"
+        descripcion="Pegá un CSV o subí un archivo exportado desde Excel. Se actualiza sólo el precio de compra por kilo."
+        ancho="max-w-4xl"
+      >
+        <Aviso nivel="info">
+          Reconoce columnas como <strong>material</strong>, <strong>descripción</strong>, <strong>código</strong>,{' '}
+          <strong>$/kg</strong> o <strong>precio</strong>. Las filas no reconocidas quedan abajo para revisar:
+          no se aplican en silencio.
+        </Aviso>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1.15fr]">
+          <div>
+            <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-borde bg-panel-alto px-3 py-4 text-center text-[12px] text-suave hover:border-corte-500/60">
+              <FileUp className="mb-2 size-5 text-corte-500" />
+              <strong className="text-tinta">Subir CSV</strong>
+              <span>{nombreArchivo || 'También podés pegar el texto abajo'}</span>
+              <input
+                type="file"
+                accept=".csv,.txt,text/csv,text/plain"
+                className="hidden"
+                onChange={(e) => leerArchivo(e.target.files?.[0])}
+              />
+            </label>
+
+            <Campo etiqueta="Contenido" className="mt-3">
+              <AreaTexto
+                rows={11}
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                placeholder={'Codigo;Descripcion;$/kg\nacero-sae1010;SAE 1010;4450\ninox-304;Inoxidable 304;10900'}
+                className="font-mono text-[12px]"
+              />
+            </Campo>
+          </div>
+
+          <div className="min-w-0">
+            <div className="grid grid-cols-3 gap-2">
+              <MiniDato titulo="Filas" valor={preview.totalFilas} />
+              <MiniDato titulo="Cambios" valor={preview.cambios.length} tono="text-chapa-500" />
+              <MiniDato titulo="Ignoradas" valor={preview.ignoradas.length} tono="text-alerta-500" />
+            </div>
+
+            <div className="mt-3 overflow-hidden rounded-lg border border-borde">
+              <table className="w-full text-[12px]">
+                <thead className="bg-panel-alto">
+                  <tr>
+                    {['Material', 'Antes', 'Nuevo', 'Var.'].map((h, i) => (
+                      <th key={h} className={cn('px-2 py-1.5 text-[10px] uppercase tracking-wide text-tenue', i ? 'text-right' : 'text-left')}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.cambios.slice(0, 9).map((c) => (
+                    <tr key={c.id} className="border-t border-borde/60">
+                      <td className="px-2 py-1.5 font-medium">{c.nombre}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-suave">{money(c.anterior, sim, 0)}</td>
+                      <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{money(c.nuevo, sim, 0)}</td>
+                      <td className={cn('px-2 py-1.5 text-right font-semibold tabular-nums', c.variacionPct >= 0 ? 'text-peligro-500' : 'text-chapa-500')}>
+                        {(c.variacionPct >= 0 ? '+' : '') + num(c.variacionPct, 1)} %
+                      </td>
+                    </tr>
+                  ))}
+                  {!preview.cambios.length ? (
+                    <tr>
+                      <td colSpan={4} className="px-2 py-6 text-center text-suave">
+                        Todavía no hay precios reconocidos.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            {preview.cambios.length > 9 ? (
+              <p className="mt-1.5 text-[11px] text-tenue">Hay {preview.cambios.length - 9} cambios más en la lista.</p>
+            ) : null}
+
+            {preview.ignoradas.length ? (
+              <div className="mt-3 rounded-lg border border-alerta-500/25 bg-alerta-500/8 p-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-alerta-500">Filas ignoradas</div>
+                <div className="mt-1 max-h-24 overflow-y-auto text-[11.5px] text-suave">
+                  {preview.ignoradas.slice(0, 8).map((r) => (
+                    <div key={r.fila}>
+                      Fila {r.fila}: {r.material || 'sin material'} · {r.motivo}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <CerrarDialogo asChild>
+            <Boton>Cancelar</Boton>
+          </CerrarDialogo>
+          <Boton tono="corte" disabled={!preview.cambios.length} onClick={() => alAplicar(preview.cambios)}>
+            Aplicar {preview.cambios.length || ''} cambios
+          </Boton>
+        </div>
+      </ContenidoDialogo>
+    </Dialogo>
+  );
+}
+
+function MiniDato({ titulo, valor, tono = 'text-tinta' }) {
+  return (
+    <div className="rounded-lg border border-borde bg-panel-alto px-3 py-2">
+      <div className="text-[10px] font-bold uppercase tracking-wide text-tenue">{titulo}</div>
+      <div className={cn('mt-1 text-xl font-bold tabular-nums', tono)}>{valor}</div>
+    </div>
   );
 }

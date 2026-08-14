@@ -40,7 +40,7 @@ import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
-import { costoConsumiblesHora, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
+import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } from '../src/core/agenda.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
@@ -52,6 +52,7 @@ import { leerPlanoPDF, planoAPieza, MM_POR_PUNTO } from '../src/core/pdf-plano.j
 import { construirMesh } from '../src/core/mesh3d.js';
 import { PDF, anchoTexto } from '../src/core/pdf.js';
 import { generarPresupuestoPDF, generarEtiquetasPiezasPDF } from '../src/core/quote-pdf.js';
+import { aplicarPreciosProveedor, importarPreciosProveedor, numeroProveedor } from '../src/core/importar-precios.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -168,6 +169,34 @@ test('la velocidad crece con la potencia, sublinealmente', () => {
 
 test('peso de una chapa 3000x1500x2 de acero = 70,65 kg', () => {
   cerca(pesoKg(3000 * 1500, 2, 7.85), 70.65, 0.01);
+});
+
+test('interpreta precios argentinos de proveedor', () => {
+  assert.equal(numeroProveedor('$ 3.850,50'), 3850.5);
+  assert.equal(numeroProveedor('12,4'), 12.4);
+  assert.equal(numeroProveedor('18.600'), 18600);
+  assert.equal(numeroProveedor('22,000.75'), 22000.75);
+});
+
+test('importa una lista CSV de proveedor y matchea por nombre o id', () => {
+  const csv = [
+    'Codigo;Descripcion;$/kg',
+    'acero-sae1010;SAE 1010 laminado;4.450',
+    'x;Inoxidable 304 brillante;10.900',
+    'zzz;Fantasia;1.000',
+    'aluminio-5052;Aluminio 5052;0',
+  ].join('\n');
+  const r = importarPreciosProveedor(csv, DEFAULT_MATERIALS);
+  assert.equal(r.cambios.length, 2);
+  assert.equal(r.cambios[0].id, 'acero-sae1010');
+  assert.equal(r.cambios[0].nuevo, 4450);
+  assert.equal(r.cambios[1].id, 'inox-304');
+  assert.ok(r.ignoradas.some((x) => /no reconocido/.test(x.motivo)));
+  assert.ok(r.ignoradas.some((x) => /invalido/.test(x.motivo)));
+
+  const actualizados = aplicarPreciosProveedor(DEFAULT_MATERIALS, r.cambios);
+  assert.equal(actualizados.find((m) => m.id === 'acero-sae1010').precioKg, 4450);
+  assert.equal(actualizados.find((m) => m.id === 'inox-304').precioKg, 10900);
 });
 
 /* ================================================================== */
@@ -1156,6 +1185,32 @@ test('la revisión de datos usa la lista real, no una proporción', () => {
 test('no le pide lentes ni boquillas a la plegadora', () => {
   const r = revisarDatos({ config: DEFAULT_CONFIG, maquinas: [DEFAULT_PLEGADORA], materiales: DEFAULT_MATERIALS });
   assert.ok(!r.hallazgos.some((h) => /consumibles/i.test(h.msg)));
+});
+
+test('controla consumibles por horas reales acumuladas', () => {
+  const ordenes = [
+    { estado: 'terminada', real: { segundos: 45 * 3600, fecha: '2026-08-10' } },
+    { estado: 'terminada', real: { segundos: 12 * 3600, fecha: '2026-08-11' } },
+    { estado: 'pendiente', real: { segundos: 100 * 3600, fecha: '2026-08-12' } },
+  ];
+  const r = estadoConsumiblesPorHoras(ordenes, [{ id: 'boquilla', nombre: 'Boquilla', vidaHoras: 45 }]);
+  assert.equal(r.items[0].nivel, 'error');
+  assert.equal(r.vencidos, 1);
+  assert.equal(r.horasTotales, 57);
+});
+
+test('el control de consumibles respeta el ultimo cambio cargado', () => {
+  const ordenes = [
+    { estado: 'terminada', real: { segundos: 80 * 3600, fecha: '2026-08-01' } },
+    { estado: 'terminada', real: { segundos: 30 * 3600, fecha: '2026-08-10' } },
+  ];
+  const r = estadoConsumiblesPorHoras(
+    ordenes,
+    [{ id: 'lente', nombre: 'Lente', vidaHoras: 40 }],
+    { ultimosCambios: { lente: '2026-08-05' } }
+  );
+  assert.equal(r.items[0].horas, 30);
+  assert.equal(r.items[0].nivel, 'ok');
 });
 
 /* ================================================================== */
