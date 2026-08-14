@@ -604,6 +604,14 @@ Dos problemas de producción que hoy no se modelan y se pagan en chapa:
 - Una pieza que se suelta antes de tiempo **se levanta y golpea el cabezal**.
   Eso es una boquilla rota y, si hay mala suerte, la lente.
 
+✅ **Micro-uniones hechas.** El ítem tiene modo automático / forzado / apagado.
+En automático sólo actúa sobre piezas chicas o livianas; el DXF de producción
+sale con los cortes interrumpidos y el presupuesto suma el repaso manual. No se
+descuenta el milímetro sin cortar del tiempo de láser: es despreciable y es más
+conservador cobrarlo como si se cortara.
+
+Falta la mitad de seguridad de recorrido:
+
 El orden correcto es: primero todos los contornos interiores, después el
 exterior, y dentro de cada chapa de arriba hacia abajo para no pasar el
 cabezal sobre lo ya cortado. Con `1.7` ya hecho esto pesa más: una pieza

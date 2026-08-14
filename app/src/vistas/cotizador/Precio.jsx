@@ -131,6 +131,12 @@ export function Precio() {
               {r.costos.procesos > 0 && (
                 <Fila etiqueta="Procesos extra" valor={money(r.costos.procesos, sim, 0)} />
               )}
+              {r.costos.microUniones > 0 && (
+                <Fila
+                  etiqueta={`Quebrar micro-uniones · ${fmtTiempo(r.tiempos.microUniones)}`}
+                  valor={money(r.costos.microUniones, sim, 0)}
+                />
+              )}
               {r.costos.ingenieria > 0 && (
                 <Fila etiqueta="Ingeniería" valor={money(r.costos.ingenieria, sim, 0)} />
               )}
@@ -248,6 +254,12 @@ export function Precio() {
               <Dato etiqueta="Producción del lote" valor={fmtTiempo(r.corte.tProduccion)} />
               <Dato etiqueta="Puesta a punto y carga" valor={fmtTiempo(r.costos.tPreparacion)} />
               <Dato etiqueta="Máquina ocupada (total)" valor={fmtTiempo(r.corte.tTotal)} />
+              {r.microUniones?.activa ? (
+                <Dato
+                  etiqueta="Micro-uniones"
+                  valor={`${r.microUniones.cantidadUniones} × ${num(r.microUniones.ancho, 2)} mm · repaso ${fmtTiempo(r.tiempos.microUniones)}`}
+                />
+              ) : null}
               {r.corte.tTotalModelo ? (
                 <Dato
                   etiqueta="Estimación sin corregir"
@@ -394,7 +406,7 @@ export function Precio() {
             Orden de trabajo (taller)
           </Boton>
           <div className="grid grid-cols-2 gap-2">
-            <Boton onClick={() => descargarDXFItem(item, resuelto)}>
+            <Boton onClick={() => descargarDXFItem(item, resuelto, r)}>
               <Download />
               DXF pieza
             </Boton>

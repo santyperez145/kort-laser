@@ -198,6 +198,12 @@ Son la razón de ser de varios tests.
    esas palabras o el número del costo. Se verifica sobre el texto y no sobre
    el código a propósito: es lo único que ataja una línea agregada después.
 
+8. **Las micro-uniones son producción, no diseño.** No se modifican las medidas
+   de la pieza ni se descuentan del corte cotizado: se exporta un DXF de máquina
+   con pequeños tramos abiertos en el contorno exterior y se cobra el repaso
+   manual. En automático sólo se aplican a piezas chicas o livianas; forzarlas
+   o apagarlas es una decisión explícita del ítem.
+
 ## El sistema se calibra solo
 
 Todo el tiempo de máquina que cotiza es **simulado**. `src/core/calibracion.js`

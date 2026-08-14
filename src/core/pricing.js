@@ -31,6 +31,7 @@ import { tiempoPlegado, calcularPliegue } from './bending.js';
 import { nest } from './nesting.js';
 import { factorPara } from './calibracion.js';
 import { DEFAULT_GUILLOTINA, compararConLaser, tiempoGuillotina } from './guillotina.js';
+import { planificarMicroUniones } from './micro-uniones.js';
 
 /** Catálogo de acabados. Precios de referencia de tercerizadores, ago-2026. */
 export const DEFAULT_ACABADOS = [
@@ -568,10 +569,33 @@ export function cotizarItem(item, ctx, planItem = null) {
   /* --- Ingeniería ------------------------------------------------------- */
   const costoIngenieria = nz(item.ingenieriaHoras, 0) * nz(com.ingenieriaHora);
 
+  /* --- Micro-uniones ----------------------------------------------------
+     Son una decisión de PRODUCCIÓN, no del diseño de la pieza. Por eso no se
+     descuentan del largo de corte cotizado: el ahorro de dejar 0,4-0,8 mm sin
+     cortar es despreciable y dependería del CAM. Sí se cobra el trabajo real
+     que aparece después: quebrarlas y sacar la marca. */
+  const microUniones =
+    usaGuillotina
+      ? { activa: false, motivo: 'se corta en guillotina', uniones: [] }
+      : planificarMicroUniones(shape, {
+          espesor: t,
+          material,
+          cantidad,
+          modo: item.microUniones || 'auto',
+          anchoMM: nz(item.microUnionAncho, 0),
+        });
+  const costoHoraManual = Math.max(
+    nz(laser.costo?.operarioHora, 0),
+    nz(costoHoraLaser.operario, 0)
+  );
+  const costoMicroUniones = microUniones.activa
+    ? (microUniones.segundosDesbarbado / 3600) * costoHoraManual
+    : 0;
+
   /* --- Totales ---------------------------------------------------------- */
   const costoTotal =
     costoMaterial + costoCorteEfectivo + costoPreparacionEfectivo + costoGasEfectivo + costoPlegado +
-    costoAcabado + costoProcesos + costoIngenieria;
+    costoAcabado + costoProcesos + costoIngenieria + costoMicroUniones;
   const margen = nz(item.margen, com.margen);
   const precioLista = costoTotal * (1 + margen / 100);
 
@@ -648,6 +672,7 @@ export function cotizarItem(item, ctx, planItem = null) {
     corte,
     plegado,
     datosPliegue,
+    microUniones,
     alternativasGas,
     costos: {
       material: costoMaterial,
@@ -694,6 +719,7 @@ export function cotizarItem(item, ctx, planItem = null) {
       procesos: costoProcesos,
       detalleProcesos,
       ingenieria: costoIngenieria,
+      microUniones: costoMicroUniones,
       total: costoTotal,
       porPieza: costoTotal / cantidad,
     },
@@ -714,7 +740,8 @@ export function cotizarItem(item, ctx, planItem = null) {
       corteUnitario: corte.tPieza,
       corteTotal: corte.tTotal,
       plegadoTotal: plegado?.tTotal || 0,
-      total: corte.tTotal + (plegado?.tTotal || 0),
+      microUniones: microUniones.activa ? microUniones.segundosDesbarbado : 0,
+      total: corte.tTotal + (plegado?.tTotal || 0) + (microUniones.activa ? microUniones.segundosDesbarbado : 0),
     },
   };
 }

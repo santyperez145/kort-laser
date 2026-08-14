@@ -42,6 +42,7 @@ import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/libra
 import { revisarDatos } from '../src/core/salud.js';
 import { costoConsumiblesHora, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
+import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -877,6 +878,59 @@ test('respeta la chapa que trae el cliente', () => {
   const estandar = cotizarItem({ ...ITEM_MC, materialCliente: true }, CTX);
   assert.equal(chica.nesting.chapa.w, 1000);
   assert.ok(chica.nesting.chapas >= estandar.nesting.chapas, 'en una chapa más chica entran menos');
+});
+
+/* ================================================================== */
+
+grupo('Micro-uniones');
+
+test('una pieza chica en automático recibe micro-uniones', () => {
+  const sh = makeShape(rect(0, 0, 35, 25));
+  const plan = planificarMicroUniones(sh, { espesor: 1.2, material: acero, cantidad: 10 });
+  assert.equal(plan.activa, true);
+  assert.equal(plan.cantidadUniones, 2);
+  assert.ok(plan.ancho >= 0.35 && plan.ancho <= 0.8);
+  assert.equal(plan.segundosDesbarbado, 100);
+});
+
+test('una pieza grande no recibe puentes si no se fuerzan', () => {
+  const sh = makeShape(rect(0, 0, 500, 300));
+  const plan = planificarMicroUniones(sh, { espesor: 2, material: acero });
+  assert.equal(plan.activa, false);
+});
+
+test('forzar micro-uniones funciona aunque la pieza sea grande', () => {
+  const sh = makeShape(rect(0, 0, 500, 300));
+  const plan = planificarMicroUniones(sh, { espesor: 2, material: acero, modo: 'si' });
+  assert.equal(plan.activa, true);
+});
+
+test('aplicar micro-uniones abre el contorno exterior del DXF', () => {
+  const sh = makeShape(rect(0, 0, 35, 25));
+  const plan = planificarMicroUniones(sh, { espesor: 1.2, material: acero });
+  const prod = aplicarMicroUniones(sh, plan);
+  assert.ok(shapeCutLength(prod) < shapeCutLength(sh), 'deja tramos sin cortar');
+
+  const dxf = generarDXF([prod]);
+  const vuelta = leerDXF(dxf);
+  assert.equal(vuelta.piezas.length, 0, 'el contorno queda abierto por los puentes');
+  assert.ok(vuelta.abiertos.length >= 2, 'el CAM recibe segmentos de corte separados');
+});
+
+test('cotizar con micro-uniones suma el repaso manual y lo deja explicado', () => {
+  const sh = makeShape(rect(0, 0, 35, 25));
+  const sin = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 1.2, cantidad: 10, microUniones: 'no' }, CTX);
+  const con = cotizarItem({ shape: sh, materialId: 'acero-sae1010', espesor: 1.2, cantidad: 10, microUniones: 'auto' }, CTX);
+  assert.equal(con.microUniones.activa, true);
+  assert.ok(con.costos.microUniones > 0);
+  assert.ok(con.costos.total > sin.costos.total);
+  assert.equal(con.tiempos.microUniones, con.microUniones.segundosDesbarbado);
+});
+
+test('el ancho de la micro-unión crece con el espesor pero queda acotado', () => {
+  assert.equal(anchoMicroUnion(0.8), 0.35);
+  assert.equal(anchoMicroUnion(10), 0.8);
+  assert.equal(anchoMicroUnion(2), 0.5);
 });
 
 /* ================================================================== */

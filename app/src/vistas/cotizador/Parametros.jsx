@@ -210,6 +210,32 @@ export function Parametros() {
           </span>
         </label>
 
+        <Campo
+          etiqueta="Micro-uniones"
+          ayuda={
+            r?.microUniones?.activa
+              ? `${r.microUniones.cantidadUniones} puente(s) de ${num(r.microUniones.ancho, 2)} mm. Después se quebran y se repasa la marca.`
+              : r?.microUniones?.motivo
+                ? `Ahora no se aplican: ${r.microUniones.motivo}.`
+                : undefined
+          }
+        >
+          <Selector
+            valor={item.microUniones || 'auto'}
+            alCambiar={(v) => actualizarItem(sel, { microUniones: v })}
+          >
+            <Opcion valor="auto" detalle="sólo piezas chicas o livianas">
+              Automáticas
+            </Opcion>
+            <Opcion valor="si" detalle="dejar puentes aunque la pieza sea grande">
+              Forzar
+            </Opcion>
+            <Opcion valor="no" detalle="canto limpio; el CAM no deja puentes">
+              Sin micro-uniones
+            </Opcion>
+          </Selector>
+        </Campo>
+
         {/* Cómo se corta la chapa. El desarrollo de una pieza plegada suele
             ser un rectángulo pelado, y cortarlo con el láser es pagar fuente,
             gas y perforaciones para hacer cuatro líneas rectas. */}

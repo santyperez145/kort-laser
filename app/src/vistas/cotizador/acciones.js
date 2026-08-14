@@ -12,6 +12,7 @@ import { api } from '@/lib/api';
 import { descargar } from '@/lib/formato';
 import { miniatura } from '@/lib/miniatura';
 import { generarDXF, generarDXFNesting } from '@core/dxf-write.js';
+import { aplicarMicroUniones } from '@core/micro-uniones.js';
 import { generarPresupuestoPDF, generarOrdenTrabajoPDF } from '@core/quote-pdf.js';
 import { listaDeCompra } from '@core/compras.js';
 import { mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '@core/envio.js';
@@ -37,12 +38,16 @@ export function miniaturasDeItems(resueltos) {
   return m;
 }
 
-export function descargarDXFItem(item, resuelto) {
+function shapeProduccion(shape, r) {
+  return r?.microUniones?.activa ? aplicarMicroUniones(shape, r.microUniones) : shape;
+}
+
+export function descargarDXFItem(item, resuelto, r = null) {
   if (!resuelto?.shape) return toast.error('Ese ítem no tiene geometría');
 
   // Las líneas de plegado ya viajan dentro de shape.pliegues: no repetirlas
   // acá, o el CAM recibiría cada una dos veces y las cortaría.
-  const dxf = generarDXF([{ shape: resuelto.shape }], {
+  const dxf = generarDXF([{ shape: shapeProduccion(resuelto.shape, r) }], {
     titulo: `KORT - ${item.nombre}`,
     subtitulo: `${item.materialId} ${item.espesor} mm - Cantidad ${item.cantidad}`,
   });
@@ -57,8 +62,9 @@ export function descargarDXFNesting(item, resuelto, r) {
     return toast.error('Sin nesting para exportar');
   }
   let n = 0;
+  const shape = shapeProduccion(resuelto.shape, r);
   for (const chapa of r.nesting.layout) {
-    const dxf = generarDXFNesting(chapa, { p: resuelto.shape });
+    const dxf = generarDXFNesting(chapa, { p: shape });
     const nombre = `nesting-${limpio(item.nombre)}-chapa${chapa.indice}.dxf`;
     descargar(nombre, dxf, 'application/dxf');
     api.guardarArchivo(nombre, dxf, 'dxf').catch(() => {});
