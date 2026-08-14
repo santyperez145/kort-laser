@@ -30,6 +30,7 @@ import { calcularEstructura, calcularCostoHoraMaquina, DEFAULT_ESTRUCTURA } from
 import { tiempoPlegado, calcularPliegue } from './bending.js';
 import { nest } from './nesting.js';
 import { factorPara } from './calibracion.js';
+import { DEFAULT_GUILLOTINA, compararConLaser, tiempoGuillotina } from './guillotina.js';
 
 /** Catálogo de acabados. Precios de referencia de tercerizadores, ago-2026. */
 export const DEFAULT_ACABADOS = [
@@ -467,6 +468,62 @@ export function cotizarItem(item, ctx, planItem = null) {
     piercings: corte.piercingsTotal || piercings * cantidad,
   });
 
+  /* --- ¿Y si esto va a la guillotina? -----------------------------------
+     El desarrollo de una pieza plegada es casi siempre un rectángulo pelado:
+     un ángulo, una U, una bandeja. Cortar eso con el láser es pagar fuente,
+     gas y perforaciones para hacer cuatro líneas rectas.
+
+     Se compara SIEMPRE y se informa, pero sólo se aplica si el ítem lo pide
+     (`corte: 'guillotina'`) o si está en automático. La decisión se muestra
+     con los dos números al lado: una máquina que elige sola y no explica es
+     una que nadie audita. */
+  const guillotina = (ctx.maquinas || []).find((m) => m.tipo === 'guillotina') || DEFAULT_GUILLOTINA;
+  const costoHoraGuillotina = calcularCostoHoraMaquina(guillotina, estructura);
+  const alternativaGuillotina = compararConLaser(
+    { shape, espesor: t, material, cantidad, chapa },
+    {
+      horaGuillotina: costoHoraGuillotina.total,
+      tiempoLaser: corte.tTotal,
+      costoLaser: costoCorteBase + costoPreparacionBase + costoGas,
+    },
+    guillotina
+  );
+
+  /* En automático la guillotina se usa para el DESARROLLO DE UNA PIEZA QUE SE
+     PLIEGA, y no para cualquier rectángulo.
+
+     La razón es el canto: la guillotina deja una rebaba y un leve arrastre que
+     en un blanco plegado no se ve —queda adentro del perfil o lo tapa el
+     pliegue— pero en una placa que se entrega tal cual, sí. Una chapa lisa
+     cortada es un producto terminado y el cliente la mira; el desarrollo de un
+     ángulo es una etapa intermedia.
+
+     Quien quiera forzarlo tiene `corte: 'guillotina'` y `corte: 'laser'`. */
+  const modoCorte = item.corte || 'auto';
+  const esDesarrolloPlegado = Math.max(0, Math.round(nz((item.plegado || {}).pliegues, 0))) > 0;
+  const usaGuillotina =
+    modoCorte === 'guillotina'
+      ? alternativaGuillotina.apta
+      : modoCorte === 'auto' &&
+        esDesarrolloPlegado &&
+        alternativaGuillotina.apta &&
+        alternativaGuillotina.ahorro > 0;
+
+  /* Los tiempos y costos que EFECTIVAMENTE se cobran. Si va a la guillotina,
+     el láser no se enciende: no hay gas, no hay perforaciones y la hora de
+     máquina es otra. */
+  const tGuillo = usaGuillotina
+    ? tiempoGuillotina(alternativaGuillotina.ancho, alternativaGuillotina.alto, cantidad, chapa, guillotina)
+    : null;
+  const costoCorteEfectivo = usaGuillotina
+    ? (tGuillo.tProduccion / 3600) * costoHoraGuillotina.total * factorMC
+    : costoCorte;
+  const costoPreparacionEfectivo = usaGuillotina
+    ? (tGuillo.tSetup / 3600) * costoHoraGuillotina.total * factorMC
+    : costoPreparacion;
+  const costoGasEfectivo = usaGuillotina ? 0 : costoGas;
+  const tPreparacionEfectivo = usaGuillotina ? tGuillo.tSetup : tPreparacion;
+
   /* --- Plegado ---------------------------------------------------------- */
   const pl = item.plegado || {};
   const nPliegues = Math.max(0, Math.round(nz(pl.pliegues, 0)));
@@ -513,7 +570,7 @@ export function cotizarItem(item, ctx, planItem = null) {
 
   /* --- Totales ---------------------------------------------------------- */
   const costoTotal =
-    costoMaterial + costoCorte + costoPreparacion + costoGas + costoPlegado +
+    costoMaterial + costoCorteEfectivo + costoPreparacionEfectivo + costoGasEfectivo + costoPlegado +
     costoAcabado + costoProcesos + costoIngenieria;
   const margen = nz(item.margen, com.margen);
   const precioLista = costoTotal * (1 + margen / 100);
@@ -611,16 +668,24 @@ export function cotizarItem(item, ctx, planItem = null) {
       // `corte` es SÓLO producción (cortar las piezas del lote). La puesta a
       // punto va aparte: sumarlas escondía que un trabajo de una pieza es casi
       // todo preparación.
-      corte: costoCorte,
-      preparacion: costoPreparacion,
-      tPreparacion,
+      corte: costoCorteEfectivo,
+      preparacion: costoPreparacionEfectivo,
+      tPreparacion: tPreparacionEfectivo,
+      /* Con qué máquina se corta y cuánto se ahorró por no usar el láser.
+         Se informan las dos cosas: el número solo no permite discutir la
+         decisión, y ésta es una decisión que a veces hay que revertir (una
+         pieza a la vista quiere canto de láser, no rebaba de guillotina). */
+      proceso: usaGuillotina ? 'guillotina' : 'laser',
+      guillotina: alternativaGuillotina,
+      golpesGuillotina: tGuillo?.golpes ?? 0,
+      tirasGuillotina: tGuillo?.tiras ?? 0,
       // Qué parte del costo es preparación. Arriba de ~0,4 conviene avisarle a
       // quien cotiza que subiendo la cantidad el unitario se desploma.
       preparacionPct: costoTotal > 0 ? costoPreparacion / costoTotal : 0,
       costoHoraLaser: costoHoraLaser.total,
       desgloseHoraLaser: costoHoraLaser,
-      gas: costoGas,
-      gasTipo: corte.gasTipo,
+      gas: costoGasEfectivo,
+      gasTipo: usaGuillotina ? null : corte.gasTipo,
       gasM3: corte.gasM3Total,
       precioGasM3: precioGas,
       plegado: costoPlegado,

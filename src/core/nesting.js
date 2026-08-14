@@ -676,19 +676,42 @@ export function nest(items, chapa, opts = {}) {
   const conservadora = { orden: 'lado', rotacionLibre: false, pesos: { y: 1, hueco: 0, alto: 0 } };
   const libre = { rotacionLibre: opts.rotacionLibre !== false };
 
+  /**
+   * Giro fino: la pieza puede quedar en CUALQUIER ángulo, no sólo en los ocho
+   * de 45°.
+   *
+   * ⚠️ Va como una variante más y no como el comportamiento por defecto, y
+   * eso se midió. Darle a cada pieza la libertad de elegir entre 24 ángulos
+   * es óptimo pieza por pieza y **peor en conjunto**: en un trapecio entran
+   * 74 piezas con paso de 15° contra 85 con paso de 45°, porque la colocación
+   * es golosa y la rotación que mejor apoya a una arruina el apoyo de la que
+   * sigue.
+   *
+   * Como variante completa, en cambio, sólo puede ayudar: el anidado entero
+   * se corre con ese juego de ángulos y compite contra los demás. Si gana, es
+   * porque metió más piezas de verdad.
+   */
+  const pasoFino = opts.pasoAngular ?? 15;
+  const anguloFino = [];
+  for (let g = 0; g < 360; g += pasoFino) anguloFino.push(g);
+  const fina = { ...libre, orden: 'lado', rotaciones: anguloFino };
+
   let variantes;
   if (opts.orden || opts.pesos) {
     variantes = [{}]; // el llamador fijó la estrategia: se respeta
   } else if (totalPiezas > 400) {
+    // Con muchas piezas el giro fino cuesta segundos y el cotizador recalcula
+    // con cada tecla: no entra en el presupuesto de tiempo.
     variantes = [conservadora, { ...libre, orden: 'lado' }];
   } else if (totalPiezas > 120) {
-    variantes = [conservadora, { ...libre, orden: 'lado' }, { ...libre, orden: 'area' }];
+    variantes = [conservadora, { ...libre, orden: 'lado' }, { ...libre, orden: 'area' }, fina];
   } else {
     variantes = [
       conservadora,
       { ...libre, orden: 'lado' },
       { ...libre, orden: 'area' },
       { ...libre, orden: 'alto' },
+      fina,
     ];
   }
 

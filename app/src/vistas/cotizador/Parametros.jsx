@@ -210,6 +210,36 @@ export function Parametros() {
           </span>
         </label>
 
+        {/* Cómo se corta la chapa. El desarrollo de una pieza plegada suele
+            ser un rectángulo pelado, y cortarlo con el láser es pagar fuente,
+            gas y perforaciones para hacer cuatro líneas rectas. */}
+        <Campo
+          etiqueta="Corte de la chapa"
+          ayuda={
+            r?.costos?.guillotina?.apta
+              ? `En guillotina se ahorran ${money(r.costos.guillotina.ahorro, sim, 0)} (${num(r.costos.guillotina.ahorroPct, 0)} %) de corte.`
+              : r?.costos?.guillotina?.motivo
+                ? `Guillotina no: ${r.costos.guillotina.motivo}.`
+                : undefined
+          }
+        >
+          <Selector
+            valor={item.corte || 'auto'}
+            alCambiar={(v) => actualizarItem(sel, { corte: v })}
+          >
+            <Opcion valor="auto" detalle="guillotina si es un desarrollo plegado sin agujeros">
+              Automático
+            </Opcion>
+            <Opcion valor="laser" detalle="canto limpio, sin rebaba">Láser siempre</Opcion>
+            <Opcion
+              valor="guillotina"
+              detalle={r?.costos?.guillotina?.apta ? 'más barato, deja rebaba' : 'esta pieza no se puede'}
+            >
+              Guillotina
+            </Opcion>
+          </Selector>
+        </Campo>
+
         <Campo etiqueta="Gas de asistencia">
           <Selector
             valor={item.gas || '__reco__'}

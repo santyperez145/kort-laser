@@ -129,6 +129,51 @@ tuviera cuentas propias, tarde o temprano diría algo distinto de lo que se
 cobra, que es justo lo que tiene que evitar. Un test verifica que los bloques
 sumen exactamente el costo total.
 
+### ✅ 1.9 La chapa de un plegado se corta en guillotina
+
+`src/core/guillotina.js`. El desarrollo de una pieza plegada es casi siempre
+**un rectángulo pelado**: un ángulo, una U, una bandeja, un peldaño. Cortar eso
+con el láser es pagar amortización de fuente, gas y perforaciones para hacer
+cuatro líneas rectas.
+
+Medido con piezas de la biblioteca, sobre el costo de corte:
+
+| Pieza | Espesor | Cant. | Proceso | Ahorro |
+|---|---|---|---|---|
+| Bandeja portacables sin perforar | 1,5 mm | 20 | guillotina | **$10.507 (80 %)** |
+| Peldaño sin antideslizante | 3 mm | 30 | guillotina | **$13.341 (80 %)** |
+| Ángulo L con agujeros | 2 mm | 50 | láser | — |
+| Parante de rack ranurado | 2 mm | 20 | láser | — |
+
+Tres reglas:
+
+- **La decisión se toma sobre la geometría**, no sobre una bandera que alguien
+  puso a mano. Si la pieza cambió y la bandera quedó vieja, se manda a la
+  guillotina algo que no puede cortar.
+- **En automático sólo va el desarrollo de algo que se pliega.** El canto de
+  guillotina deja rebaba: adentro de un perfil no se ve, en una placa que se
+  entrega tal cual, sí. Se puede forzar en los dos sentidos.
+- **La capacidad baja con la resistencia del material.** Se publica en acero
+  dulce; un inoxidable de Rm 620 se corta hasta bastante menos espesor.
+
+🔴 Los números de la guillotina (`DEFAULT_GUILLOTINA`) son de referencia:
+**confirmá capacidad y tiempos con la máquina que tengas.**
+
+### ✅ 1.10 Las piezas giran en cualquier ángulo
+
+El anidado prueba un juego fino de ángulos (paso de 15° por defecto,
+configurable con `pasoAngular`) además de los ocho de 45°.
+
+⚠️ Va como **una variante completa más** del multi-arranque y no como libertad
+por pieza, y eso se midió: darle a cada pieza 24 ángulos para elegir es óptimo
+pieza por pieza y **peor en conjunto** — en un trapecio entran 74 piezas contra
+85 con el paso grueso, porque la colocación es golosa y la rotación que mejor
+apoya a una arruina el apoyo de la que sigue.
+
+Como variante sólo puede ayudar, porque compite contra las demás y gana la que
+usa menos chapa. Medido en una pieza tipo gota: **de 2 chapas a 1**, del 35,4 %
+al 70,9 % de aprovechamiento.
+
 ### ✅ 1.1 Nesting por presupuesto, no por ítem
 
 **Era la limitación más importante que tenía el sistema. Ya está hecho.**

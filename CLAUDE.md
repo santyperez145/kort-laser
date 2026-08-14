@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 252 verificaciones del núcleo
+npm test           # 257 verificaciones del núcleo
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -52,7 +52,7 @@ código.
   deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
   react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
   **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
-  Node y en el navegador, y lo que permite que los 252 tests lo verifiquen sin
+  Node y en el navegador, y lo que permite que los 257 tests lo verifiquen sin
   levantar un navegador.
 - **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
   sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde
@@ -288,6 +288,28 @@ exactamente como estaba. Hay un test que lo fija.
   encender la máquina. Cualquier cuenta de $/kg que use el precio de compra
   directo subestima el costo casi un 30 %. Ver `tarifario.js` → `materialKg`.
 
+
+- **La guillotina se decide por la GEOMETRÍA, no por una bandera.** Corta de
+  lado a lado, recto y pasante: nada de agujeros, radios de esquina,
+  escotaduras ni varias partes. `esRectangularPelada()` lo mide sobre el
+  contorno real — si la pieza cambió y un `esRectangulo: true` quedó viejo, se
+  manda a la guillotina algo que no puede cortar y se para la producción con
+  la chapa comprada.
+
+  Y en **automático** sólo va el desarrollo de una pieza que se PLIEGA, no
+  cualquier rectángulo: el canto de guillotina deja rebaba, que adentro de un
+  perfil plegado no se ve y en una placa que se entrega tal cual, sí.
+
+  La capacidad baja con la resistencia del material: se publica en acero dulce
+  (Rm 370) y un inox de Rm 620 se corta hasta bastante menos espesor.
+
+- **Más ángulos de rotación en el nesting NO es mejor.** Medido: en un
+  trapecio entran 74 piezas con paso de 15° contra 85 con paso de 45°. La
+  colocación es golosa y la rotación que mejor apoya a una pieza arruina el
+  apoyo de la siguiente. Por eso el giro fino va como **una variante completa
+  más** del multi-arranque y no como libertad por pieza: así sólo puede
+  ayudar. Como variante gana donde importa — en una pieza tipo gota, de 2
+  chapas a 1.
 
 - **Anidar adentro de un agujero: NUNCA prometer un encaje que no existe.**
   `huecos.js` rasteriza el agujero, le achica el borde por la separación de

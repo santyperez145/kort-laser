@@ -32,6 +32,7 @@ import {
 import { calcularPliegue, calcularDesarrollo, matrizRecomendada, validarPlegado, tiempoPlegado } from '../src/core/bending.js';
 import { nest, piezasPorChapa, compararMetodos, rellenoSinCosto } from '../src/core/nesting.js';
 import { rectanguloEnHueco, huecosDe, aprovecharHuecos } from '../src/core/huecos.js';
+import { DEFAULT_GUILLOTINA, esRectangularPelada, puedeGuillotinarse, tiempoGuillotina, espesorMaximoGuillotina } from '../src/core/guillotina.js';
 import { generarDXF } from '../src/core/dxf-write.js';
 import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
@@ -2145,6 +2146,99 @@ test('el tonelaje sale de la fórmula de plegado al aire', () => {
   const kNporMetro = (1.33 * acero.Rm * 2 * 2) / 16;
   cerca(p.toneladasPorMetro, kNporMetro / 9.80665, 0.01);
   cerca(p.toneladas, (p.toneladasPorMetro * 1000) / 1000, 0.01);
+});
+
+/* ================================================================== */
+grupo('Guillotina');
+
+test('sólo un rectángulo pelado va a la guillotina', () => {
+  /* La guillotina corta de lado a lado, recto y pasante. Mandarle algo que no
+     puede hacer es parar la producción con la chapa ya comprada, así que la
+     decisión se toma sobre la GEOMETRÍA y no sobre una bandera que alguien
+     puso a mano y quedó vieja. */
+  const apta = esRectangularPelada(makeShape(rect(0, 0, 400, 250)));
+  assert.ok(apta.apta, 'un rectángulo pelado sí');
+  cerca(apta.ancho, 400, 0.01);
+  cerca(apta.alto, 250, 0.01);
+
+  const casos = [
+    ['con un agujero', makeShape(rect(0, 0, 400, 250), [circle(200, 125, 20)]), /agujero/i],
+    ['con esquinas redondeadas', makeShape(rect(0, 0, 400, 250, 15)), /esquina|vértice/i],
+    ['un triángulo', makeShape(polyline([[0, 0], [400, 0], [200, 250]], true)), /vértice|rectángulo/i],
+    ['una L', makeShape(polyline([[0, 0], [400, 0], [400, 100], [150, 100], [150, 250], [0, 250]], true)), /vértice|escotadura|rectángulo/i],
+  ];
+  for (const [nombre, sh, patron] of casos) {
+    const r = esRectangularPelada(sh);
+    assert.ok(!r.apta, `${nombre} NO puede ir a la guillotina`);
+    assert.ok(patron.test(r.motivo), `${nombre}: el motivo "${r.motivo}" tiene que explicar por qué`);
+  }
+});
+
+test('la capacidad de la guillotina baja con la resistencia del material', () => {
+  /* La capacidad se publica en acero dulce. Lo que limita es la fuerza, y la
+     fuerza va con la resistencia: un inoxidable de Rm 620 se corta hasta
+     bastante menos espesor que un acero de Rm 370. Ignorarlo es prometer un
+     corte que la máquina no da. */
+  const dulce = espesorMaximoGuillotina({ Rm: 370 });
+  const inox = espesorMaximoGuillotina({ Rm: 620 });
+  cerca(dulce, 6, 0.01, 'en acero dulce es la capacidad nominal');
+  assert.ok(inox < dulce * 0.7, `en inox dio ${inox.toFixed(1)} mm y tiene que ser bastante menos que ${dulce}`);
+
+  const placa = makeShape(rect(0, 0, 300, 200));
+  const r = puedeGuillotinarse(placa, 5, { Rm: 620, nombre: 'Inox 304' });
+  assert.ok(!r.apta, 'inox de 5 mm no entra en una guillotina de 6 mm en dulce');
+  assert.ok(/supera/.test(r.motivo));
+});
+
+test('la guillotina corta por tiras: la serie no cuesta un golpe por lado', () => {
+  /* Es lo que la hace barata en serie. Se corta la chapa en tiras (un golpe
+     por tira) y después cada tira al largo (un golpe por pieza). Cuarenta
+     piezas de una tira son cuarenta golpes, no ciento sesenta. */
+  const chapa = { w: 3000, h: 1500 };
+  const una = tiempoGuillotina(400, 250, 1, chapa, DEFAULT_GUILLOTINA);
+  const cuarenta = tiempoGuillotina(400, 250, 40, chapa, DEFAULT_GUILLOTINA);
+  assert.ok(cuarenta.golpes < 40 * 4, `dio ${cuarenta.golpes} golpes: no puede ser cuatro por pieza`);
+  assert.ok(cuarenta.tProduccion / 40 < una.tProduccion, 'el tiempo por pieza tiene que bajar con la cantidad');
+  assert.ok(cuarenta.tiras >= 1 && cuarenta.tiras <= 40);
+});
+
+test('el desarrollo de un plegado va a la guillotina y ahorra plata', () => {
+  /* El caso real: el desarrollo de una bandeja o un peldaño es un rectángulo
+     pelado. Cortarlo con el láser es pagar fuente, gas y perforaciones para
+     hacer cuatro líneas rectas. */
+  const CTXG = { ...CTX, maquinas: [DEFAULT_MACHINE, DEFAULT_PLEGADORA, DEFAULT_GUILLOTINA] };
+  const r = construir('bandeja-portacables', { perforada: false, diaUnion: 0 },
+    { espesor: 1.5, material: acero });
+  const item = {
+    nombre: 'Bandeja', shape: r.shape, materialId: 'acero-sae1010',
+    espesor: 1.5, cantidad: 20, plegado: r.plegado,
+  };
+  const auto = cotizarItem(item, CTXG);
+  const forzadoLaser = cotizarItem({ ...item, corte: 'laser' }, CTXG);
+
+  assert.equal(auto.costos.proceso, 'guillotina', 'un desarrollo pelado va a la guillotina');
+  assert.equal(forzadoLaser.costos.proceso, 'laser', 'y se puede forzar el láser');
+  assert.equal(auto.costos.gas, 0, 'la guillotina no consume gas');
+  assert.ok(auto.costos.total < forzadoLaser.costos.total, 'y tiene que salir más barato');
+  assert.ok(auto.costos.guillotina.ahorroPct > 30,
+    `el ahorro dio ${auto.costos.guillotina.ahorroPct.toFixed(0)} % y en un rectángulo pelado tiene que ser grande`);
+});
+
+test('una placa lisa que se entrega tal cual sigue yendo al láser', () => {
+  /* En automático la guillotina es para el DESARROLLO de una pieza que se
+     pliega, no para cualquier rectángulo. El canto de guillotina deja rebaba:
+     adentro de un perfil plegado no se ve, en una placa que se entrega sí. */
+  const CTXG = { ...CTX, maquinas: [DEFAULT_MACHINE, DEFAULT_PLEGADORA, DEFAULT_GUILLOTINA] };
+  const placa = { nombre: 'Placa', shape: makeShape(rect(0, 0, 400, 250)),
+    materialId: 'acero-sae1010', espesor: 2, cantidad: 20 };
+  const r = cotizarItem(placa, CTXG);
+  assert.equal(r.costos.proceso, 'laser', 'sin pliegues se corta con láser');
+  assert.ok(r.costos.guillotina.apta, 'pero el sistema igual informa que se podría');
+  assert.ok(r.costos.guillotina.ahorro > 0, 'y cuánto se ahorraría si se decide');
+
+  // Forzándola, se usa
+  const forzada = cotizarItem({ ...placa, corte: 'guillotina' }, CTXG);
+  assert.equal(forzada.costos.proceso, 'guillotina');
 });
 
 /* ================================================================== */
