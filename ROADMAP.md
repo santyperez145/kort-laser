@@ -411,13 +411,18 @@ en un sobrante que sólo alcanza para una unidad.
 
 **Esfuerzo:** medio-alto.
 
-### 📋 2.3 Stock de chapa y punto de reposición
+### ✅ 2.3 Stock de chapa y punto de reposición
 
-Saber cuánta chapa hay de cada material y espesor, descontar al producir y
-avisar cuándo reponer. Con el historial de consumo que ya guarda la base y la
-lista de compra que ya sale de cada presupuesto, puede sugerir la orden.
+Hecho el 2026-08-14. Cada presupuesto guarda la foto de las chapas que pidió
+su nesting y la OT la hereda al aprobarse. Stock separa las chapas enteras de
+los retazos y calcula por material, espesor y medida:
 
-**Esfuerzo:** medio.
+`OTs abiertas + seguridad para 10 días - stock libre = chapas a comprar`.
+
+La seguridad sale del consumo real de los últimos 90 días. Sin historial no
+inventa rotación: cubre sólo lo comprometido. Las reservas se descuentan del
+stock libre y ni el material del cliente ni una pieza asignada a un retazo
+generan una compra falsa. La pantalla muestra cada término de la cuenta.
 
 ---
 

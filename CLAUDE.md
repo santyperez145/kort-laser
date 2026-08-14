@@ -296,6 +296,13 @@ exactamente como estaba. Hay un test que lo fija.
   cosas y calcula la relación sobre `costos.material`, que es lo que el
   cotizador ya decidió.
 
+- **La reposición usa la foto del NESTING aprobado, no recalcula una OT.** El
+  presupuesto guarda `requerimientosChapa` y la orden lo hereda. Si después
+  cambia la chapa estándar, el precio o un parámetro de nesting, la producción
+  vendida sigue necesitando exactamente el material con el que se aprobó. El
+  punto de pedido es demanda comprometida + seguridad histórica - stock libre;
+  no usa umbrales en pesos y no cuenta material aportado por el cliente.
+
 - **Cobrar por kilo: el recorte lo paga el taller.** El kilo que se entrega NO
   cuesta el kilo que se compró: cuesta el de compra dividido el aprovechamiento.
   Con chapa a $2.950 y 77 % de nesting, el kilo entregado sale $3.869 antes de

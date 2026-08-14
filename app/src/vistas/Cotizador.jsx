@@ -16,6 +16,7 @@ import { FilePlus2 } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
+import { requerimientosDeCotizacion } from '@core/reposicion.js';
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
 import { Campo, Entrada, Selector, Opcion } from '@/componentes/ui/campos';
@@ -288,6 +289,7 @@ export function VistaCotizador() {
     const cuerpo = {
       ...doc,
       resumen: coti.resumen,
+      requerimientosChapa: requerimientosDeCotizacion(coti),
       items: doc.items.map((it, i) => {
         const r = coti.items[i];
         return {

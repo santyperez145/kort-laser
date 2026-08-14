@@ -56,6 +56,7 @@ import {
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } from '../src/core/agenda.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
+import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -3566,6 +3567,50 @@ test('la migración de config no arrastra los precios de gas viejos', () => {
   assert.equal(f.produccion.separacionPiezas, 8);
   assert.equal(f.produccion.gases.O2, DEFAULT_CONFIG.produccion.gases.O2, 'los gases se recargan con el modelo nuevo');
   assert.ok(f.estructura, 'la estructura nueva tiene que estar');
+});
+
+/* ================================================================== */
+grupo('Reposición de chapa');
+
+test('el requerimiento cuenta una sola vez un nesting compartido', () => {
+  const base = {
+    material: { id: 'acero', nombre: 'Acero' }, espesor: 2,
+    costos: { materialDelCliente: false }, nesting: {
+      chapa: { w: 3000, h: 1500 }, compartido: true, grupo: 'g1', chapasGrupo: 2,
+    },
+  };
+  const r = requerimientosDeCotizacion({ items: [base, { ...base }] });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].chapas, 2, 'dos ítems del mismo programa no duplican sus chapas');
+});
+
+test('material del cliente y retazos elegidos no disparan compras', () => {
+  const base = {
+    material: { id: 'acero', nombre: 'Acero' }, espesor: 2,
+    nesting: { chapa: { w: 3000, h: 1500 }, compartido: false, chapas: 1 },
+  };
+  const r = requerimientosDeCotizacion({ items: [
+    { ...base, costos: { materialDelCliente: true } },
+    { ...base, costos: { materialDelCliente: false }, retazo: { id: 'r1' } },
+  ] });
+  assert.equal(r.length, 0);
+});
+
+test('la reposición cubre órdenes abiertas más seguridad y descuenta stock libre', () => {
+  const materiales = [{ id: 'acero', nombre: 'Acero', chapaStd: { w: 3000, h: 1500 } }];
+  const req = { materialId: 'acero', material: 'Acero', espesor: 2, chapa: { w: 3000, h: 1500 }, chapas: 3 };
+  const retazos = [{ materialId: 'acero', espesor: 2, w: 3000, h: 1500, cantidad: 5, estado: 'disponible', reservas: [{ cantidad: 1 }] }];
+  const ordenes = [
+    { estado: 'pendiente', requerimientosChapa: [req], creado: '2026-08-10' },
+    { estado: 'entregado', requerimientosChapa: [{ ...req, chapas: 9 }], modificado: '2026-08-01' },
+    { estado: 'cancelado', requerimientosChapa: [{ ...req, chapas: 99 }], modificado: '2026-08-01' },
+  ];
+  const [r] = planReposicion({ retazos, ordenes, materiales, hoy: new Date('2026-08-14T12:00:00Z'), diasHistorial: 90, plazoDias: 10 });
+  assert.equal(r.disponibles, 4);
+  assert.equal(r.comprometidas, 3);
+  assert.equal(r.seguridad, 1, '9 chapas en 90 días requieren una de colchón para 10 días');
+  assert.equal(r.comprar, 0);
+  assert.equal(r.explicacion, '3 comprometidas + 1 de seguridad - 4 disponibles = 0 a comprar');
 });
 
 if (dbt) {

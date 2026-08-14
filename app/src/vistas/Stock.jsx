@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  Archive, Pencil, Plus, Save, Search, Trash2, X,
+  Archive, Pencil, Plus, Save, Search, ShoppingCart, Trash2, X,
 } from 'lucide-react';
 
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/ui/panel';
@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import {
   candidatosRetazo, cantidadReservada, normalizarRetazo, pesoRetazoKg, resumenStockRetazos, superficieRetazoM2, unidadesDisponibles, valorRetazo,
 } from '@core/retazos.js';
+import { planReposicion } from '@core/reposicion.js';
 
 const clonar = (v) => JSON.parse(JSON.stringify(v));
 const ESTADO_TONO = { disponible: 'verde', reservado: 'amarillo', descartado: 'rojo' };
@@ -46,6 +47,17 @@ function fichaVacia(materiales) {
   };
 }
 
+function chapaVacia(materiales) {
+  const m = materiales[0];
+  return {
+    ...fichaVacia(materiales),
+    w: m?.chapaStd?.w || 3000,
+    h: m?.chapaStd?.h || 1500,
+    ubicacion: 'Stock de chapas',
+    origen: 'compra',
+  };
+}
+
 function estadoStock(r) {
   return <Insignia tono={ESTADO_TONO[r.estado] || 'gris'}>{ESTADO_TEXTO[r.estado] || r.estado}</Insignia>;
 }
@@ -54,6 +66,7 @@ export function VistaStock() {
   const guardados = usarEstado((s) => s.retazos);
   const materiales = usarEstado((s) => s.materiales);
   const guardarRetazos = usarEstado((s) => s.guardarRetazos);
+  const ordenes = usarEstado((s) => s.ordenes);
   const sim = usarEstado((s) => s.simbolo());
   const [retazos, setRetazos] = useState([]);
   const sembrado = useRef(false);
@@ -96,6 +109,7 @@ export function VistaStock() {
     kg: a.kg + x.pesoKg,
     valor: a.valor + x.valor,
   }), { unidades: 0, reservadas: 0, m2: 0, kg: 0, valor: 0 }), [resumen]);
+  const reposicion = useMemo(() => planReposicion({ retazos, ordenes, materiales }), [retazos, ordenes, materiales]);
 
   const tocar = (fn) => {
     setRetazos((prev) => {
@@ -131,6 +145,7 @@ export function VistaStock() {
           <p className="text-[13px] text-suave">Retazos identificados para bajar compras y evitar material inmovilizado</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Boton tam="sm" onClick={() => setEditando(chapaVacia(materiales))}><Plus />Nueva chapa entera</Boton>
           <Boton tam="sm" onClick={() => setEditando(fichaVacia(materiales))}><Plus />Nuevo retazo</Boton>
           <Boton tam="sm" tono={sucio ? 'corte' : 'neutro'} onClick={guardar} disabled={!sucio}>
             <Save />{sucio ? 'Guardar cambios' : 'Sin cambios'}
@@ -208,6 +223,27 @@ export function VistaStock() {
           </PanelCuerpo>
         </Panel>
       </div>
+
+      <Panel>
+        <PanelCab acciones={<Insignia tono={reposicion.some((x) => x.comprar > 0) ? 'amarillo' : 'verde'}>{reposicion.reduce((s, x) => s + x.comprar, 0)} chapas sugeridas</Insignia>}>
+          <ShoppingCart className="size-3.5 text-corte-500" /><PanelTitulo>Punto de reposición</PanelTitulo>
+        </PanelCab>
+        <PanelCuerpo sinPad>
+          <div className="border-b border-borde px-3 py-2 text-[11px] text-suave">
+            Cubre las OTs abiertas y agrega 10 días del consumo real de los últimos 90 días. Si todavía no hay historial, no inventa demanda.
+          </div>
+          {reposicion.length ? <div className="overflow-x-auto"><table className="w-full text-[12px]">
+            <thead><tr className="border-b border-borde">{['Material', 'Medida', 'Disponibles', 'Comprometidas', 'Seguridad', 'Comprar', 'Cómo sale'].map((h) => <th key={h} className="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-tenue">{h}</th>)}</tr></thead>
+            <tbody>{reposicion.map((r) => <tr key={r.clave} className="border-b border-borde/60 last:border-0">
+              <td className="px-3 py-2 font-semibold">{r.material} · {num(r.espesor, 1)} mm</td>
+              <td className="px-3 py-2 font-mono text-suave">{r.chapa.w} × {r.chapa.h}</td>
+              <td className="px-3 py-2 tabular-nums">{r.disponibles}</td><td className="px-3 py-2 tabular-nums">{r.comprometidas}</td><td className="px-3 py-2 tabular-nums">{r.seguridad}</td>
+              <td className="px-3 py-2"><Insignia tono={r.comprar ? (r.estado === 'critico' ? 'rojo' : 'amarillo') : 'verde'}>{r.comprar}</Insignia></td>
+              <td className="px-3 py-2 text-[11px] text-suave">{r.explicacion}</td>
+            </tr>)}</tbody>
+          </table></div> : <Vacio icono={<ShoppingCart />} titulo="Todavía no hay demanda de chapa entera" detalle="Al aprobar presupuestos nuevos, sus requerimientos aparecerán acá." />}
+        </PanelCuerpo>
+      </Panel>
 
       {editando ? <DialogoRetazo retazo={editando} materiales={materiales} alCerrar={() => setEditando(null)} alGuardar={(datos) => {
         tocar((copia) => {

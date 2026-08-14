@@ -19,6 +19,7 @@ export const usarEstado = create((set, get) => ({
   materiales: [],
   maquinas: [],
   retazos: [],
+  ordenes: [],
   clientes: [],
   calibracion: null,
   listo: false,
@@ -39,6 +40,7 @@ export const usarEstado = create((set, get) => ({
       ]);
       set({
         config, materiales, maquinas, retazos: Array.isArray(retazos) ? retazos : [], clientes,
+        ordenes: Array.isArray(ordenes) ? ordenes : [],
         calibracion: calibrar(ordenes),
         listo: true, errorConexion: null,
       });

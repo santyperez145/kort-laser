@@ -350,6 +350,9 @@ api.post('/ordenes/aprobar', (req, res) => {
       retazoId: item.retazoId || null,
     })),
     resumen: presupuesto.resumen,
+    // Queda congelado al aprobar: producción necesita lo que pidió ese
+    // nesting, aunque después cambien precios o medidas predeterminadas.
+    requerimientosChapa: presupuesto.requerimientosChapa || [],
     retazos: marcasRetazoOrden(asignaciones, 'reservado'),
     estado: 'pendiente',
     fechaEntrega: '',
