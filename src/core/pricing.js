@@ -32,6 +32,7 @@ import { nest } from './nesting.js';
 import { factorPara } from './calibracion.js';
 import { DEFAULT_GUILLOTINA, compararConLaser, tiempoGuillotina } from './guillotina.js';
 import { planificarMicroUniones } from './micro-uniones.js';
+import { candidatosRetazo } from './retazos.js';
 
 /** Catálogo de acabados. Precios de referencia de tercerizadores, ago-2026. */
 export const DEFAULT_ACABADOS = [
@@ -205,6 +206,9 @@ export function planificarNesting(itemsCrudos, ctx) {
   const grupos = new Map();
   (itemsCrudos || []).forEach((item, indice) => {
     if (!item?.shape) return;
+    // Un retazo es un recurso fisico reservado para ese item: no se mezcla
+    // con otro presupuesto ni se reparte entre programas automaticamente.
+    if (item.retazoId) return;
     const material = findMaterial(ctx.materiales, item.materialId);
     if (!material) return;
     const t = nz(item.espesor, material.espesores?.[0] ?? 2);
@@ -324,9 +328,19 @@ export function cotizarItem(item, ctx, planItem = null) {
   const piercings = shapePiercings(shape);
   const pesoPieza = pesoKg(areaNeta, t, material.densidad);
 
+  const retazoElegido = !item.materialCliente && item.retazoId
+    ? candidatosRetazo(ctx.retazos || [], {
+        materialId: material.id,
+        espesor: t,
+        w: bbox.w,
+        h: bbox.h,
+        cantidad,
+      }, { margen: prod.margenChapa }).find((x) => x.id === item.retazoId)
+    : null;
+
   /* --- Nesting --------------------------------------------------------- */
   const compartido = planItem?.compartido ? planItem : null;
-  const chapa = compartido?.chapa || chapaDe(item, material, laser);
+  const chapa = compartido?.chapa || (retazoElegido ? { w: retazoElegido.w, h: retazoElegido.h } : chapaDe(item, material, laser));
   const nestOpts = {
     separacion: prod.separacionPiezas,
     margen: prod.margenChapa,
@@ -388,6 +402,11 @@ export function cotizarItem(item, ctx, planItem = null) {
   if (materialDelCliente) {
     costoMaterial = 0;
     modoMaterialUsado = 'Lo pone el cliente';
+  } else if (retazoElegido) {
+    // El retazo ya fue comprado: se imputa el area que sale del stock, no una
+    // chapa entera que no se va a reponer por este trabajo.
+    costoMaterial = costoProrrateado;
+    modoMaterialUsado = 'Retazo del stock';
   } else if (com.modoMaterial === 'nesting') {
     costoMaterial = costoPorChapasEnteras;
     modoMaterialUsado = 'Chapas completas';
@@ -669,6 +688,12 @@ export function cotizarItem(item, ctx, planItem = null) {
             layout: nesting.chapas,
           }
         : { error: 'La pieza no entra en la chapa / área de trabajo', chapa },
+    retazo: retazoElegido ? {
+      id: retazoElegido.id,
+      w: retazoElegido.w,
+      h: retazoElegido.h,
+      rotacion: retazoElegido.rotacion,
+    } : null,
     corte,
     plegado,
     datosPliegue,

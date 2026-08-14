@@ -554,6 +554,7 @@ export class DB {
     if (!this.leerCrudo('config')) this.escribir('config', DEFAULT_CONFIG);
     if (!this.leerCrudo('materiales')) this.escribir('materiales', DEFAULT_MATERIALS);
     if (!this.leerCrudo('maquinas')) this.escribir('maquinas', [DEFAULT_MACHINE, DEFAULT_PLEGADORA]);
+    if (!this.leerCrudo('retazos')) this.escribir('retazos', []);
   }
 
   /**
@@ -651,6 +652,7 @@ export class DB {
       config: this.leerCrudo('config'),
       materiales: this.leerCrudo('materiales'),
       maquinas: this.leerCrudo('maquinas'),
+      retazos: this.leerCrudo('retazos') || [],
       clientes: this.lista('clientes'),
       presupuestos: this.lista('presupuestos'),
       ordenes: this.lista('ordenes'),
@@ -666,7 +668,7 @@ export class DB {
       for (const t of ['presupuesto_items', 'presupuestos', 'ordenes', 'piezas', 'clientes', 'busqueda']) {
         this.db.run(`DELETE FROM ${t}`);
       }
-      for (const doc of ['config', 'materiales', 'maquinas']) {
+      for (const doc of ['config', 'materiales', 'maquinas', 'retazos']) {
         if (data[doc]) this.escribir(doc, data[doc]);
       }
       for (const col of ['clientes', 'presupuestos', 'ordenes', 'piezas']) {

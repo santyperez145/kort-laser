@@ -181,11 +181,15 @@ export function estadoConsumiblesPorHoras(ordenes = [], lista = CONSUMIBLES_LASE
     };
   }).sort((a, b) => b.pct - a.pct);
 
+  const cambiosCargados = items.filter((x) => x.ultimoCambio).length;
+
   return {
     horasTotales,
     items,
     vencidos: items.filter((x) => x.nivel === 'error').length,
     porVencer: items.filter((x) => x.nivel === 'aviso').length,
-    sinCambiosCargados: !Object.keys(cambios).length,
+    cambiosCargados,
+    cambiosFaltantes: Math.max(0, items.length - cambiosCargados),
+    sinCambiosCargados: cambiosCargados === 0,
   };
 }

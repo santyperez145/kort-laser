@@ -7,9 +7,10 @@
  * con anillo, y la facturación al lado.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   ResponsiveContainer, ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, PieChart, Pie, Cell, BarChart, RadialBarChart, RadialBar, PolarAngleAxis,
@@ -17,7 +18,7 @@ import {
 import {
   Plus, FileText, TrendingUp, Target, CheckCircle2, Percent,
   Layers, Users, Gauge, ArrowRight, OctagonAlert, TriangleAlert,
-  History, UserRound, CalendarClock, Wrench,
+  History, UserRound, CalendarClock, Wrench, RefreshCw,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
@@ -150,10 +151,27 @@ function fechaHoraCorta(valor) {
   }).format(new Date(valor));
 }
 
-function ControlConsumibles({ estado }) {
+function ControlConsumibles({ estado, config, guardarConfig }) {
+  const [guardando, setGuardando] = useState(null);
   if (!estado || estado.horasTotales <= 0) return null;
   const criticos = estado.items.slice(0, 4);
   const nivel = estado.vencidos ? 'error' : estado.porVencer ? 'aviso' : 'info';
+
+  const marcarCambio = async (id) => {
+    setGuardando(id);
+    try {
+      const cambios = {
+        ...(config?.produccion?.consumiblesUltimoCambio || {}),
+        [id]: new Date().toISOString(),
+      };
+      await guardarConfig({ produccion: { consumiblesUltimoCambio: cambios } });
+      toast.success('Cambio registrado: las horas vuelven a cero para este consumible');
+    } catch (e) {
+      toast.error(`No se pudo registrar el cambio: ${e.message}`);
+    } finally {
+      setGuardando(null);
+    }
+  };
 
   return (
     <Panel className={cn('border-l-4', estado.vencidos ? 'border-l-peligro-500' : estado.porVencer ? 'border-l-alerta-500' : 'border-l-chapa-500')}>
@@ -180,6 +198,10 @@ function ControlConsumibles({ estado }) {
             <span className="mt-1 block text-[11.5px] opacity-85">
               Falta cargar la fecha del último cambio para que el aviso sea exacto; mientras tanto usa todo el historial medido.
             </span>
+          ) : estado.cambiosFaltantes ? (
+            <span className="mt-1 block text-[11.5px] opacity-85">
+              Hay {estado.cambiosFaltantes} consumible{estado.cambiosFaltantes === 1 ? '' : 's'} sin fecha de cambio cargada.
+            </span>
           ) : null}
         </Aviso>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -197,9 +219,20 @@ function ControlConsumibles({ estado }) {
                   style={{ width: `${Math.min(100, c.pct)}%` }}
                 />
               </div>
-              <div className="mt-1.5 text-[11px] text-suave">
-                {num(c.horas, 1)} h / {num(c.vidaHoras, 0)} h
+              <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-suave">
+                <span>{num(c.horas, 1)} h / {num(c.vidaHoras, 0)} h</span>
+                <Boton
+                  tam="iconoSm"
+                  tono="fantasma"
+                  title="Marcar cambio realizado hoy"
+                  aria-label={`Marcar cambio de ${c.nombre}`}
+                  disabled={guardando === c.id}
+                  onClick={() => marcarCambio(c.id)}
+                >
+                  <RefreshCw className={guardando === c.id ? 'animate-spin' : ''} />
+                </Boton>
               </div>
+              {c.ultimoCambio ? <div className="mt-0.5 text-[10px] text-tenue">Cambio: {fecha(c.ultimoCambio)}</div> : null}
             </div>
           ))}
         </div>
@@ -215,6 +248,7 @@ export function VistaPanel() {
   const materiales = usarEstado((s) => s.materiales);
   const laser = usarEstado((s) => s.laser());
   const sim = usarEstado((s) => s.simbolo());
+  const guardarConfig = usarEstado((s) => s.guardarConfig);
   const col = usarColores();
 
   const { data: st, isLoading } = useQuery({
@@ -377,7 +411,7 @@ export function VistaPanel() {
         </Panel>
       ) : null}
 
-      <ControlConsumibles estado={estadoConsumibles} />
+      <ControlConsumibles estado={estadoConsumibles} config={config} guardarConfig={guardarConfig} />
 
       <RevisionDatos />
 

@@ -41,6 +41,7 @@ import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, red
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
+import { candidatosRetazo, consumirRetazo, pesoRetazoKg, resumenStockRetazos, superficieRetazoM2 } from '../src/core/retazos.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } from '../src/core/agenda.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
@@ -1211,6 +1212,79 @@ test('el control de consumibles respeta el ultimo cambio cargado', () => {
   );
   assert.equal(r.items[0].horas, 30);
   assert.equal(r.items[0].nivel, 'ok');
+});
+
+test('el control de consumibles informa cambios parciales', () => {
+  const r = estadoConsumiblesPorHoras(
+    [{ estado: 'terminada', real: { segundos: 3600, fecha: '2026-08-12' } }],
+    CONSUMIBLES_LASER,
+    { ultimosCambios: { boquilla: '2026-08-12' } }
+  );
+  assert.equal(r.sinCambiosCargados, false);
+  assert.equal(r.cambiosCargados, 1);
+  assert.equal(r.cambiosFaltantes, CONSUMIBLES_LASER.length - 1);
+});
+
+/* ================================================================== */
+grupo('Stock de retazos');
+
+const RETAZOS_PRUEBA = [
+  { id: 'r1', materialId: 'acero-sae1010', espesor: 3, w: 500, h: 400, cantidad: 2, ubicacion: 'Rack A' },
+  { id: 'r2', materialId: 'acero-sae1010', espesor: 3, w: 250, h: 900, cantidad: 1 },
+  { id: 'r4', materialId: 'acero-sae1010', espesor: 3, w: 600, h: 600, cantidad: 1, estado: 'reservado' },
+  { id: 'r3', materialId: 'inox-304', espesor: 2, w: 700, h: 300, cantidad: 1 },
+];
+
+test('calcula superficie y peso real de un retazo', () => {
+  const r = RETAZOS_PRUEBA[0];
+  cerca(superficieRetazoM2(r), 0.4, 1e-9);
+  cerca(pesoRetazoKg(r, acero), 9.42, 0.01);
+});
+
+test('resume el stock por material y espesor sin mezclar reservas', () => {
+  const resumen = resumenStockRetazos(RETAZOS_PRUEBA, DEFAULT_MATERIALS);
+  const acero3 = resumen.find((x) => x.materialId === 'acero-sae1010' && x.espesor === 3);
+  assert.ok(acero3);
+  assert.equal(acero3.unidades, 4);
+  assert.equal(acero3.disponibles, 3);
+  cerca(acero3.superficieM2, 0.985, 1e-9);
+});
+
+test('encuentra retazos compatibles y prueba la rotacion', () => {
+  const candidatos = candidatosRetazo(RETAZOS_PRUEBA, {
+    materialId: 'acero-sae1010', espesor: 3, w: 380, h: 220,
+  }, { margen: 10 });
+  assert.ok(candidatos.length >= 2);
+  assert.equal(candidatos[0].id, 'r1');
+  assert.equal(candidatos[0].rotacion, 0);
+  const girado = candidatosRetazo(RETAZOS_PRUEBA, {
+    materialId: 'acero-sae1010', espesor: 3, w: 850, h: 220,
+  }, { margen: 10 });
+  assert.equal(girado[0].id, 'r2');
+  assert.equal(girado[0].rotacion, 90);
+  assert.equal(candidatosRetazo(RETAZOS_PRUEBA, {
+    materialId: 'acero-sae1010', espesor: 3, w: 380, h: 220, cantidad: 3,
+  }).length, 0, 'no debe prometer mas unidades que las que tiene el retazo');
+});
+
+test('consumir retazo descuenta unidades sin inventar el sobrante', () => {
+  const r = consumirRetazo(RETAZOS_PRUEBA, 'r1', 1);
+  assert.equal(r.encontrado, true);
+  assert.equal(r.retazos.find((x) => x.id === 'r1').cantidad, 1);
+  const reservado = consumirRetazo(RETAZOS_PRUEBA, 'r4', 1);
+  assert.equal(reservado.retazos.find((x) => x.id === 'r4').cantidad, 1);
+});
+
+test('una cotizacion puede reservar un retazo y lo imputa por area', () => {
+  const shape = makeShape(rect(0, 0, 300, 200));
+  const ctxRetazo = { ...CTX, retazos: [{ id: 'r1', materialId: 'acero-sae1010', espesor: 3, w: 500, h: 400, cantidad: 1 }] };
+  const r = cotizarItem({
+    nombre: 'Placa desde retazo', shape, materialId: 'acero-sae1010', espesor: 3, cantidad: 1, retazoId: 'r1',
+  }, ctxRetazo);
+  assert.equal(r.retazo.id, 'r1');
+  assert.equal(r.costos.modoMaterial, 'Retazo del stock');
+  assert.equal(r.nesting.chapa.w, 500);
+  assert.ok(r.costos.material > 0);
 });
 
 /* ================================================================== */
@@ -3276,6 +3350,7 @@ test('crea el esquema y siembra los datos de fábrica', () => {
   dbt = new DB(dirTmp);
   assert.ok(dbt.version >= 3, `versión de esquema inesperada: ${dbt.version}`);
   assert.equal(dbt.leerCrudo('materiales').length, DEFAULT_MATERIALS.length);
+  assert.deepEqual(dbt.leerCrudo('retazos'), [], 'el retazero nuevo empieza vacio');
   assert.ok(dbt.leerCrudo('config').estructura, 'la config debe traer la estructura');
   assert.ok(
     dbt.db.all('PRAGMA table_info(bitacora)').some((c) => c.name === 'operario'),
@@ -3353,6 +3428,7 @@ test('respaldo y restauración conservan todo', () => {
   assert.equal(dbt.lista('clientes').length, clientesAntes);
   assert.equal(dbt.lista('presupuestos').length, presAntes);
   assert.ok(backup.historialPrecios.length > 0, 'el respaldo debe incluir el historial de precios');
+  assert.deepEqual(backup.retazos, [], 'el respaldo debe incluir el retazero');
 });
 
 test('guardar una parte de la config no borra el resto', () => {

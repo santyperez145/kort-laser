@@ -391,15 +391,19 @@ Dos decisiones que importan:
   alcanza para comprar la chapa. Cuando el trabajo usa menos del 35 % de una
   chapa, en vez de mandar a comprar manda al retazero.
 
-### 📋 2.2 Stock de retazos
+### ✅ 2.2 Stock de retazos
 
-Ya está la mitad: `listaDeCompra()` informa el retazo que queda en cada
-programa, en m², en kilos y en pesos. Falta darlo de alta como stock y poder
-anidar sobre un retazo existente en vez de sobre chapa nueva.
+Hecho el 2026-08-14. `listaDeCompra()` sigue informando el retazo que queda en
+cada programa, y ahora el stock persistente permite darlo de alta, editarlo,
+reservarlo y buscar candidatos por material, espesor y rectángulo envolvente.
+El cotizador puede reservar un retazo compatible y calcula el material por el
+área consumida, sin compartirlo automáticamente con otro programa.
 
-En un taller chico esto es plata directa: los retazos hoy se apilan y se
-oxidan. Requiere ABM de retazos y que el cotizador los ofrezca cuando la pieza
-entra.
+El ABM vive en `Stock de chapa`, con ubicación, lote, estado, cantidad, peso y
+valor de referencia. La preselección es conservadora: el nesting sigue siendo
+la autoridad final para la geometría real. La búsqueda también exige que la
+cantidad del registro alcance la cantidad pedida, para no prometer producción
+en un sobrante que sólo alcanza para una unidad.
 
 **Esfuerzo:** medio-alto.
 
@@ -654,9 +658,9 @@ protectora, cerámica, filtros, lente de enfoque y varios. Marca vencido desde
 100 % de vida y por vencer desde 80 %.
 
 Si todavía no se cargó la fecha del último cambio, usa todo el historial medido
-y lo dice explícitamente. La función ya acepta `produccion.consumiblesUltimoCambio`
-para que el próximo paso sea agregar el botón "marcar cambiado" sin tocar el
-cálculo.
+y lo dice explícitamente. El panel ahora permite marcar el cambio realizado
+hoy por consumible; la fecha queda en `produccion.consumiblesUltimoCambio` y
+las horas se recalculan desde ese hito, sin alterar el historial de órdenes.
 
 
 ---

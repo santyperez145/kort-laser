@@ -49,7 +49,7 @@ const hayBundle = fs.existsSync(path.join(DIR_WEB, 'index.html'));
 /* ------------------------------------------------------------------ */
 
 const COLECCIONES = ['clientes', 'presupuestos', 'ordenes', 'piezas'];
-const DOCUMENTOS = ['config', 'materiales', 'maquinas'];
+const DOCUMENTOS = ['config', 'materiales', 'maquinas', 'retazos'];
 
 const esquemaArchivo = z.object({
   nombre: z.string().min(1).max(180).default('archivo.bin'),
@@ -205,8 +205,8 @@ api.put('/:recurso', (req, res, siguiente) => {
   if (!DOCUMENTOS.includes(recurso)) return siguiente();
   const cuerpo = req.body;
 
-  if (recurso === 'materiales' || recurso === 'maquinas') {
-    if (!Array.isArray(cuerpo) || cuerpo.length === 0) {
+  if (recurso === 'materiales' || recurso === 'maquinas' || recurso === 'retazos') {
+    if (!Array.isArray(cuerpo) || (recurso !== 'retazos' && cuerpo.length === 0)) {
       return res.status(400).json({
         error: `${recurso} tiene que ser una lista con al menos un elemento. No se guardó nada.`,
       });

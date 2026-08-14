@@ -13,7 +13,7 @@ import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Calculator, FileText, Factory, Users,
   Layers, Cpu, Wallet, Settings, Moon, Sun, Wifi, WifiOff, FoldVertical, Tags,
-  UserRound,
+  UserRound, Archive,
 } from 'lucide-react';
 import { usarEstado, usarOperario, usarTema } from '@/lib/estado';
 import { Boton } from '@/componentes/ui/boton';
@@ -30,6 +30,7 @@ export const RUTAS = [
   { a: '/ordenes', txt: 'Producción', Icono: Factory },
   { a: '/clientes', txt: 'Clientes', Icono: Users },
   { a: '/materiales', txt: 'Materiales', Icono: Layers, nuevo: true },
+  { a: '/stock', txt: 'Stock chapa', Icono: Archive, nuevo: true },
   { a: '/maquinas', txt: 'Máquinas', Icono: Cpu },
   { a: '/costos', txt: 'Costos', Icono: Wallet },
   { a: '/config', txt: 'Configuración', Icono: Settings },

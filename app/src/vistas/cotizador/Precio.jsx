@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge, MessageCircle, Mail, Tags } from 'lucide-react';
+import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge, MessageCircle, Mail, Tags, Archive } from 'lucide-react';
 import { cotizarItem } from '@core/pricing.js';
 import { explicarFactor } from '@core/calibracion.js';
 import { explicarItem } from '@core/explicacion.js';
@@ -24,6 +24,7 @@ import { usarEstado } from '@/lib/estado';
 import { money, num, pct } from '@/lib/formato';
 import { cn } from '@/lib/utils';
 import { fmtTiempo } from '@core/cutting.js';
+import { candidatosRetazo } from '@core/retazos.js';
 
 function Fila({ etiqueta, valor, clase }) {
   return (
@@ -49,9 +50,10 @@ function Dato({ etiqueta, valor }) {
 }
 
 export function Precio() {
-  const { doc, item, resuelto, resueltos, coti, r, calculando, actualizarDoc, guardar } = usarCotizador();
+  const { doc, item, resuelto, resueltos, coti, r, sel, calculando, actualizarItem, actualizarDoc, guardar } = usarCotizador();
   const config = usarEstado((s) => s.config);
   const ctx = usarEstado((s) => s.ctx);
+  const retazos = usarEstado((s) => s.retazos);
   const sim = usarEstado((s) => s.simbolo());
   const res = coti?.resumen;
   const textoCalibracion = r?.corte?.calibracion ? explicarFactor(r.corte.calibracion) : null;
@@ -82,6 +84,16 @@ export function Precio() {
   const explicacion = useMemo(() => (r ? explicarItem(r, { config }) : null), [r, config]);
 
   const args = { doc, coti, config, resueltos, actualizarDoc, ctx };
+  const sugerenciasRetazo = useMemo(() => {
+    if (!r || !item || item.materialCliente || !retazos?.length) return [];
+    return candidatosRetazo(retazos, {
+      materialId: item.materialId,
+      espesor: item.espesor,
+      w: r.geometria?.ancho,
+      h: r.geometria?.alto,
+      cantidad: item.cantidad,
+    }, { margen: config?.produccion?.margenChapa || 10 });
+  }, [r, item, retazos, config]);
 
   return (
     <>
@@ -228,6 +240,40 @@ export function Precio() {
           )}
         </PanelCuerpo>
       </Panel>
+
+      {r && !item?.materialCliente && (sugerenciasRetazo.length || item?.retazoId) ? (
+        <Panel>
+          <PanelCab
+            acciones={<span className="text-[11px] text-tenue">{sugerenciasRetazo.length} compatibles</span>}
+          >
+            <Archive className="size-3.5 text-chapa-500" />
+            <PanelTitulo>Material disponible en retazero</PanelTitulo>
+          </PanelCab>
+          <PanelCuerpo className="space-y-2">
+            <p className="text-[11.5px] leading-relaxed text-suave">
+              Elegí un sobrante compatible para reservarlo en este presupuesto. El precio usa el área que se consume,
+              no una chapa nueva completa.
+            </p>
+            {item.retazoId && r.retazo ? (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-chapa-500/30 bg-chapa-500/8 px-3 py-2 text-[12px]">
+                <span><strong>Reservado:</strong> {r.retazo.w} × {r.retazo.h} mm{r.retazo.rotacion ? ' · gira 90°' : ''}</span>
+                <Boton tam="sm" tono="fantasma" onClick={() => actualizarItem(sel, { retazoId: null })}>Quitar</Boton>
+              </div>
+            ) : null}
+            {sugerenciasRetazo.slice(0, 3).map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-2 rounded-lg border border-borde bg-panel-alto px-3 py-2">
+                <div className="min-w-0 text-[11.5px]">
+                  <div className="font-semibold">{c.w} × {c.h} mm · {c.ubicacion || 'sin ubicación'}</div>
+                  <div className="text-tenue">{c.espesor} mm · aprovecha {num(c.aprovechamiento * 100, 0)} % · {c.cantidad} unidad{c.cantidad === 1 ? '' : 'es'}</div>
+                </div>
+                <Boton tam="sm" tono={item.retazoId === c.id ? 'verde' : 'neutro'} onClick={() => actualizarItem(sel, { retazoId: c.id })}>
+                  {item.retazoId === c.id ? 'Usando' : 'Usar retazo'}
+                </Boton>
+              </div>
+            ))}
+          </PanelCuerpo>
+        </Panel>
+      ) : null}
 
       {/* ---------------- Ficha técnica ---------------- */}
       {r ? (

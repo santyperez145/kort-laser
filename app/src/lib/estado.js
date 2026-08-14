@@ -18,6 +18,7 @@ export const usarEstado = create((set, get) => ({
   config: null,
   materiales: [],
   maquinas: [],
+  retazos: [],
   clientes: [],
   calibracion: null,
   listo: false,
@@ -25,10 +26,11 @@ export const usarEstado = create((set, get) => ({
 
   async cargar() {
     try {
-      const [config, materiales, maquinas, clientes, ordenes] = await Promise.all([
+      const [config, materiales, maquinas, retazos, clientes, ordenes] = await Promise.all([
         api.get('config'),
         api.get('materiales'),
         api.get('maquinas'),
+        api.get('retazos'),
         api.get('clientes'),
         // Las órdenes se traen sólo para calibrar. Si fallan, el cotizador
         // tiene que seguir andando: se cotiza con el modelo sin corregir,
@@ -36,7 +38,7 @@ export const usarEstado = create((set, get) => ({
         api.get('ordenes').catch(() => []),
       ]);
       set({
-        config, materiales, maquinas, clientes,
+        config, materiales, maquinas, retazos: Array.isArray(retazos) ? retazos : [], clientes,
         calibracion: calibrar(ordenes),
         listo: true, errorConexion: null,
       });
@@ -89,10 +91,25 @@ export const usarEstado = create((set, get) => ({
     return guardados;
   },
 
+  /** Guarda una parte de la configuracion; el servidor fusiona el documento. */
+  async guardarConfig(parcial) {
+    const guardada = await api.put('config', parcial);
+    set({ config: guardada });
+    return guardada;
+  },
+
+  /** El retazero es un documento separado para no mezclarlo con los parametros de calculo. */
+  async guardarRetazos(retazos) {
+    const guardados = await api.put('retazos', retazos);
+    set({ retazos: Array.isArray(guardados) ? guardados : retazos });
+    return guardados;
+  },
+
   /** Contexto que espera `cotizarPresupuesto()` del motor de cálculo. */
   ctx() {
     const { materiales, maquinas, config, calibracion } = get();
-    return { materiales, maquinas, config, calibracion };
+    const { retazos } = get();
+    return { materiales, maquinas, config, calibracion, retazos };
   },
 
   laser() {
