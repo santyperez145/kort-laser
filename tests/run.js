@@ -33,10 +33,12 @@ import { calcularPliegue, calcularDesarrollo, matrizRecomendada, validarPlegado,
 import { nest, piezasPorChapa, compararMetodos, rellenoSinCosto } from '../src/core/nesting.js';
 import { rectanguloEnHueco, huecosDe, aprovecharHuecos } from '../src/core/huecos.js';
 import { DEFAULT_GUILLOTINA, esRectangularPelada, puedeGuillotinarse, tiempoGuillotina, espesorMaximoGuillotina } from '../src/core/guillotina.js';
+import { panelDecorativo, MOTIVOS, PATRONES, ligamentoMinimo, tamanioParaGrilla } from '../src/core/decorativo.js';
+import { catalogo, variantes, resumenCatalogo, paramsDeVariante } from '../src/core/variantes.js';
 import { generarDXF } from '../src/core/dxf-write.js';
 import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
-import { construir, PIEZAS, paramsPorDefecto } from '../src/core/library.js';
+import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
 import { costoConsumiblesHora, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
@@ -2146,6 +2148,150 @@ test('el tonelaje sale de la fórmula de plegado al aire', () => {
   const kNporMetro = (1.33 * acero.Rm * 2 * 2) / 16;
   cerca(p.toneladasPorMetro, kNporMetro / 9.80665, 0.01);
   cerca(p.toneladas, (p.toneladasPorMetro * 1000) / 1000, 0.01);
+});
+
+/* ================================================================== */
+grupo('Paneles decorativos');
+
+test('el motivo se reparte parejo y con margenes iguales', () => {
+  /* Margenes iguales es lo que hace que un panel se vea hecho a proposito y
+     no cortado donde llego. Y ningun motivo puede quedar cortado por la
+     mitad en el borde. */
+  const r = panelDecorativo(
+    { ancho: 1200, alto: 2400, motivo: 'rombo', tamMotivo: 60, margen: 50 },
+    { espesor: 1.5 }
+  );
+  const bb = shapeBBox(r.shape);
+  cerca(bb.w, 1200, 0.01, 'el panel mide lo que se pidio');
+  cerca(bb.h, 2400, 0.01);
+  assert.ok(r.info.cols > 1 && r.info.filas > 1, 'tiene que entrar mas de uno');
+  assert.equal(r.info.motivos, r.info.cols * r.info.filas);
+
+  // Todos los calados adentro del borde liso
+  for (const h of r.shape.holes) {
+    const b = pathBBox(h);
+    assert.ok(b.minX >= r.info.margen - 0.01, `un calado se sale por la izquierda: ${b.minX.toFixed(1)}`);
+    assert.ok(b.minY >= r.info.margen - 0.01, 'un calado se sale por abajo');
+    assert.ok(b.maxX <= bb.w - r.info.margen + 0.01, 'un calado se sale por la derecha');
+    assert.ok(b.maxY <= bb.h - r.info.margen + 0.01, 'un calado se sale por arriba');
+  }
+});
+
+test('el ligamento minimo se respeta aunque se pida menos', () => {
+  /* Si el ligamento es muy chico, el calor de dos cortes vecinos se suma, se
+     ablanda y el panel sale ondulado. No hay forma de enderezarlo despues. */
+  cerca(ligamentoMinimo(1.5), 3, 1e-9);
+  cerca(ligamentoMinimo(3), 6, 1e-9);
+  cerca(ligamentoMinimo(0.5), 1.5, 1e-9, 'nunca menos de 1,5 mm');
+
+  const r = panelDecorativo(
+    { ancho: 1200, alto: 2400, motivo: 'circulo', tamMotivo: 60, separacion: 0.5 },
+    { espesor: 3 }
+  );
+  assert.ok(r.info.ligamento >= 6 - 1e-6,
+    `dio ${r.info.ligamento.toFixed(1)} mm y el minimo en 3 mm de chapa es 6`);
+  assert.ok(r.avisos.some((x) => x.nivel === 'aviso' && /ligamento/i.test(x.msg)),
+    'y tiene que avisar que lo subio, no corregirlo en silencio');
+});
+
+test('todos los motivos generan un panel cortable', () => {
+  for (const m of MOTIVOS) {
+    for (const patron of PATRONES) {
+      const r = panelDecorativo(
+        { ancho: 900, alto: 900, motivo: m.id, tamMotivo: 70, patron: patron.id },
+        { espesor: 2 }
+      );
+      assert.ok(shapeArea(r.shape) > 0, `${m.nombre} en ${patron.nombre}: area cero`);
+      assert.ok(r.info.motivos > 0, `${m.nombre} en ${patron.nombre}: no puso ningun calado`);
+      assert.ok(r.info.caladoPct > 0 && r.info.caladoPct < 100,
+        `${m.nombre}: calado ${r.info.caladoPct.toFixed(1)} % imposible`);
+      assert.ok(!r.avisos.some((x) => x.nivel === 'error'), `${m.nombre} en ${patron.nombre} da error`);
+    }
+  }
+});
+
+test('un panel imposible lo dice en vez de devolver una chapa lisa', () => {
+  const r = panelDecorativo({ ancho: 100, alto: 100, motivo: 'circulo', tamMotivo: 200 }, { espesor: 2 });
+  assert.equal(r.info.motivos, 0);
+  assert.ok(r.avisos.some((x) => x.nivel === 'error'), 'tiene que dar error');
+  assert.ok(shapeArea(r.shape) > 0, 'y devolver la chapa entera, no algo roto');
+});
+
+test('se puede pedir por cantidad de columnas en vez de por tamano', () => {
+  /* Es como se pide en el mostrador: "quiero seis columnas a lo ancho". */
+  const tam = tamanioParaGrilla({ ancho: 1200, alto: 2400, cols: 6, filas: 12, margen: 50, separacion: 8 });
+  assert.ok(tam > 0);
+  const r = panelDecorativo(
+    { ancho: 1200, alto: 2400, motivo: 'gota', tamMotivo: tam, margen: 50, separacion: 8 },
+    { espesor: 2 }
+  );
+  assert.equal(r.info.cols, 6, `pidio 6 columnas y entraron ${r.info.cols}`);
+  assert.equal(r.info.filas, 12, `pidio 12 filas y entraron ${r.info.filas}`);
+});
+
+/* ================================================================== */
+grupo('Catalogo de medidas normalizadas');
+
+test('todas las medidas del catalogo se construyen de verdad', () => {
+  /* Es lo unico que hace real a un catalogo grande: si una medida no
+     construye, es una entrada que alguien va a elegir y le va a fallar en el
+     mostrador. Se verifican TODAS, en tres espesores. */
+  const todas = variantes();
+  assert.ok(todas.length > 250, `el catalogo tiene ${todas.length} medidas`);
+
+  const fallan = [];
+  for (const x of todas) {
+    try {
+      const p = construir(x.piezaId, paramsDeVariante(x), { espesor: 2, material: acero });
+      if (!(shapeArea(p.shape) > 0)) throw new Error('area cero');
+      const b = shapeBBox(p.shape);
+      if (!(b.w > 0 && b.h > 0)) throw new Error('sin medida');
+      const err = (p.avisos || []).find((z) => z.nivel === 'error');
+      if (err) throw new Error(err.msg.slice(0, 60));
+    } catch (e) {
+      fallan.push(`${x.nombre}: ${e.message}`);
+    }
+  }
+  assert.equal(fallan.length, 0, `no construyen:\n  ${fallan.slice(0, 8).join('\n  ')}`);
+});
+
+test('cada medida apunta a una familia que existe', () => {
+  for (const x of variantes()) {
+    assert.ok(getPieza(x.piezaId), `"${x.nombre}" apunta a la pieza inexistente "${x.piezaId}"`);
+    assert.ok(x.nombre && x.nombre.length > 3, 'toda medida necesita un nombre de catalogo');
+  }
+});
+
+test('las bridas DIN 2576 salen con la medida de la norma', () => {
+  /* Una brida con el diametro exterior mal es una brida que no calza contra
+     la otra. Se verifica contra la tabla de la norma. */
+  const casos = [['DN50', 165], ['DN100', 220], ['DN150', 285], ['DN300', 445]];
+  for (const [dn, ext] of casos) {
+    const va = variantes().find((x) => x.piezaId === 'disco' && x.nombre.includes(dn));
+    assert.ok(va, `falta la brida circular ${dn}`);
+    const p = construir(va.piezaId, paramsDeVariante(va), { espesor: 3, material: acero });
+    const b = shapeBBox(p.shape);
+    cerca(b.w, ext, 0.5, `${dn}: el diametro exterior`);
+    cerca(b.h, ext, 0.5, `${dn}: tiene que ser redonda`);
+  }
+});
+
+test('las abrazaderas usan el diametro EXTERIOR real del cano', () => {
+  /* El nominal en pulgadas NO es el diametro: un cano de 2" mide 60,3 mm. Una
+     abrazadera hecha con 50,8 mm no entra. */
+  const dos = variantes().find((x) => x.piezaId === 'abrazadera-cano' && x.nombre.includes('2"') && !x.nombre.includes('1/2'));
+  assert.ok(dos, 'falta la abrazadera de 2 pulgadas');
+  assert.ok(/60/.test(dos.nombre), `el nombre tiene que decir el diametro real: "${dos.nombre}"`);
+  const p = construir(dos.piezaId, paramsDeVariante(dos), { espesor: 2, material: acero });
+  assert.ok(p.info.radioNeutro > 30, 'el radio neutro tiene que salir del diametro exterior');
+});
+
+test('el catalogo se resume por grupo sin perder ninguna entrada', () => {
+  const r = resumenCatalogo();
+  assert.equal(r.total, r.familias + r.medidas);
+  assert.equal(r.total, catalogo().length);
+  const suma = r.grupos.reduce((a, g) => a + g.n, 0);
+  assert.equal(suma, r.total, 'la suma por grupo tiene que dar el total');
 });
 
 /* ================================================================== */

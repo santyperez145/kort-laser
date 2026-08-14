@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 257 verificaciones del núcleo
+npm test           # 267 verificaciones del núcleo
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -52,7 +52,7 @@ código.
   deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
   react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
   **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
-  Node y en el navegador, y lo que permite que los 257 tests lo verifiquen sin
+  Node y en el navegador, y lo que permite que los 267 tests lo verifiquen sin
   levantar un navegador.
 - **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
   sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde
@@ -89,8 +89,14 @@ Tres módulos del núcleo **no calculan nada nuevo, leen lo ya calculado**:
 - `envio.js` — arma el mensaje y el enlace para mandarle el presupuesto al
   cliente por WhatsApp o por mail.
 
-Y dos que traen geometría de afuera:
+Y cuatro que generan o traen geometría:
 
+- `decorativo.js` — reparte un motivo sobre una medida dada (celosías, frentes,
+  separadores). Lo difícil no es el motivo, es repartirlo: márgenes iguales,
+  sin motivos cortados al borde, y **ligamento ≥ 2 × espesor**.
+- `variantes.js` — las medidas normalizadas del catálogo (bridas DIN 2576,
+  caños en pulgadas, bandejas IEC, rack 19″). No son piezas nuevas: son tablas
+  de cotas sobre las familias que ya existen.
 - `vectorizar.js` — de una FOTO o escaneo de un plano saca el contorno y sus
   agujeros. **No adivina la escala**: la pone una persona diciendo cuánto mide
   algo del dibujo. Inventarla sería cotizar una pieza que no es la pedida.
@@ -98,8 +104,10 @@ Y dos que traen geometría de afuera:
   unidades reales. Ahí la medida sale EXACTA y no hay nada que calibrar. Si el
   PDF es un escaneo lo dice y manda al camino de la imagen.
 
-Si los que leen hicieran su propia cuenta, tarde o temprano dirían algo
-distinto de lo que se cobra. Esa es toda la regla.
+Los tres primeros no pueden hacer cuentas propias: si las hicieran, tarde o
+temprano dirían algo distinto de lo que se cobra. Esa es toda la regla.
+
+
 
 El servidor sólo persiste, sirve y valida la forma de lo que entra: **todo el
 cálculo pasa en el navegador**, para que el cotizador responda mientras se
@@ -302,6 +310,24 @@ exactamente como estaba. Hay un test que lo fija.
 
   La capacidad baja con la resistencia del material: se publica en acero dulce
   (Rm 370) y un inox de Rm 620 se corta hasta bastante menos espesor.
+
+- **En un panel calado, el LIGAMENTO es lo que decide si sale entero.** Es el
+  material que queda entre dos calados. Muy chico, el calor de los dos cortes
+  vecinos se suma, se ablanda y la chapa sale ondulada — y no se endereza.
+  `decorativo.js` usa **2 × espesor y nunca menos de 1,5 mm**, y si se pide
+  menos lo sube y lo avisa: no corrige en silencio, porque quien decide entre
+  menos motivos o más espesor es el que lo vende.
+
+- **El porcentaje de calado se mide con el área EXACTA, no con la envolvente.**
+  Una ranura o una hoja llenan menos de la mitad de su caja: con la envolvente
+  un panel al 38 % se informaba al 60 %. De ese número depende si el panel
+  aguanta donde lo van a poner.
+
+- **El catálogo grande son TABLAS, no 300 `build()` a mano.** Trescientas
+  funciones sueltas son trescientas formas de equivocarse, y las que nadie usa
+  se pudren hasta que alguien las elige. Una familia parametrizada se prueba
+  una vez y anda para todas sus medidas. Hay un test que **construye las 330
+  medidas** y falla si una sola no da una pieza con área.
 
 - **Más ángulos de rotación en el nesting NO es mejor.** Medido: en un
   trapecio entran 74 piezas con paso de 15° contra 85 con paso de 45°. La

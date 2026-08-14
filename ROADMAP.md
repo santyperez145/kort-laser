@@ -478,20 +478,57 @@ más valioso. DWG necesita una librería de terceros.
 
 **Esfuerzo:** alto.
 
-### 📋 4.2 Más piezas paramétricas
+### ✅ 4.2 Catálogo de 362 piezas
 
-**31 piezas.** Las últimas seis son la familia de estantería y racks —parante
-ranurado, estante, ménsula de pared, larguero perfil C— más el peldaño
-antideslizante y la abrazadera para caño, que son de los trabajos que más se
-repiten.
+**32 familias** parametrizadas para diseñar, y **330 medidas normalizadas**
+listas para cotizar sin tocar un parámetro. En el mostrador nadie piensa en
+parámetros: piensa en *"una brida DN100"* o *"una abrazadera para caño de 2
+pulgadas"*.
 
-Faltan, por orden de pedido probable: escalera de cable, tapa de tanque con
-boca de hombre, pie de columna con cartelas, guardacadena, puerta de tablero.
+| Grupo | Entradas | Fuente de las medidas |
+|---|---|---|
+| Chapa plana | 62 | discos, arandelas, tapas, pletinas, anillos |
+| Decoración | 58 | 12 motivos × 4 formatos, más polígonos |
+| Estanterías | 35 | parantes, estantes, ménsulas, largueros |
+| Calderería | 30 | reducciones, virolas, codos de conducto |
+| Perfiles | 29 | ángulos, U, Z y sombrero de obra |
+| Bridas | 28 | 🟢 DIN 2576 / EN 1092-1 PN10 |
+| Mecánica | 27 | piñones de cadena y engranajes módulo 2 |
+| Estructura | 20 | cartelas, placas base, escuadras |
+| Cañerías | 11 | 🟢 ASTM A53, diámetro exterior real |
+| Electricidad | 8 | 🟢 bandejas IEC 61537 |
+| Rack 19″ | 6 | 🟢 EIA-310, 1U = 44,45 mm |
 
-Cada una es un objeto en `library.js`: el formulario, el 2D, el 3D, el DXF y la
-cotización salen solos.
+**Por qué no son 300 `build()` escritos a mano.** Serían 300 formas de
+equivocarse: una familia parametrizada se prueba una vez y anda para todas sus
+medidas, mientras que trescientas funciones sueltas hay que probarlas de a una
+y las que nadie usa se pudren en silencio hasta que alguien las elige. Un
+catálogo hecho de familias verificadas es más grande **y** más confiable.
 
-**Esfuerzo:** bajo por pieza. Buen punto de entrada para agregar de a poco.
+Hay un test que **construye las 330 medidas** y falla si una sola no da una
+pieza con área. Ya atajó dos: un disco de Ø50 que salía con un agujero de Ø80
+—área negativa— y un piñón de 11 dientes donde el cubo se come el disco. El
+segundo no era un error del código sino un límite geométrico real: la tabla
+arranca en 13 dientes.
+
+### ✅ 4.4 Paneles decorativos
+
+`src/core/decorativo.js`. El cliente trae una idea y una medida —"una celosía
+de 1200 × 2400"— y el sistema reparte el motivo: **12 motivos** (círculo,
+rombo, hexágono, gota, hoja, flor, estrella, cruz, onda…) en grilla, tresbolillo
+o rombo, con márgenes iguales y sin ningún motivo cortado al borde.
+
+Lo que hace que un panel se arruine no es el dibujo, es el **ligamento**: el
+material entre dos calados. Si es muy chico, el calor de los dos cortes vecinos
+se suma, se ablanda y la chapa sale ondulada — y no hay forma de enderezarla.
+La regla es **2 × espesor y nunca menos de 1,5 mm**; si se pide menos, se sube
+y se avisa.
+
+También informa el **porcentaje de calado**, medido con el área exacta de cada
+motivo y no con su rectángulo envolvente: una ranura llena menos de la mitad de
+su caja, y con la envolvente un panel al 38 % se informaba al 60 %. Arriba del
+40 % la chapa pierde rigidez de verdad, y eso decide si sirve para una celosía
+o para una tapa que tiene que sostener algo.
 
 ### 💭 4.3 Generación de código G
 

@@ -15,6 +15,7 @@ import {
   transformPath, normalizeShape, rad, deg, TAU, pathBBox,
 } from './geometry.js';
 import { calcularDesarrollo, matrizRecomendada, radioInterno, kFactorEfectivo } from './bending.js';
+import { panelDecorativo, MOTIVOS, PATRONES } from './decorativo.js';
 
 /* ------------------------------------------------------------------ */
 /* Helpers de patrones de agujeros                                     */
@@ -1439,6 +1440,35 @@ export const PIEZAS = [
       } else path = regularPolygon(R, R, R, p.lados, rad(p.giro));
       const holes = p.diaCentral > 0 ? [circle(R, R, p.diaCentral / 2)] : [];
       return { shape: makeShape(path, holes), modelo3D: { tipo: 'plano' } };
+    },
+  },
+
+  /* ---------------------------------------------------------------- */
+  {
+    id: 'panel-decorativo',
+    nombre: 'Panel decorativo / celosía',
+    categoria: 'Decoración',
+    descripcion:
+      'Un motivo repartido parejo sobre la medida que pidas. Celosías, frentes, ' +
+      'separadores de ambiente, tapas ventiladas. El sistema calcula cuántos entran ' +
+      'y respeta el ligamento mínimo para que la chapa no salga ondulada.',
+    params: [
+      P('ancho', 'Ancho del panel', 900, { min: 50, unidad: 'mm' }),
+      P('alto', 'Alto del panel', 1800, { min: 50, unidad: 'mm' }),
+      S('motivo', 'Motivo', 'rombo', MOTIVOS.map((m) => ({ v: m.id, t: m.nombre }))),
+      P('tamMotivo', 'Tamaño del motivo', 60, { min: 3, unidad: 'mm' }),
+      S('patron', 'Distribución', 'grilla', PATRONES.map((x) => ({ v: x.id, t: x.nombre }))),
+      P('separacion', 'Ligamento entre calados', 0, { min: 0, unidad: 'mm' }),
+      P('margen', 'Borde liso', 50, { min: 0, unidad: 'mm' }),
+      P('giroMotivo', 'Giro del motivo', 0, { unidad: '°' }),
+      P('radioPanel', 'Radio de esquina del panel', 0, { min: 0, unidad: 'mm' }),
+      P('diaFijacion', 'Ø agujeros de fijación', 0, { min: 0, unidad: 'mm' }),
+    ],
+    build(p, ctx) {
+      return panelDecorativo(
+        { ...p, fijaciones: p.diaFijacion > 0 ? { dia: p.diaFijacion } : null },
+        ctx
+      );
     },
   },
 

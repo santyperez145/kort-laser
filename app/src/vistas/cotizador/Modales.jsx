@@ -13,6 +13,7 @@ import { num } from '@/lib/formato';
 import { cn } from '@/lib/utils';
 
 import { categorias, getPieza, paramsPorDefecto } from '@core/library.js';
+import { catalogo, paramsDeVariante, resumenCatalogo } from '@core/variantes.js';
 import { leerDXF } from '@core/dxf-read.js';
 import { shapeBBox } from '@core/geometry.js';
 
@@ -25,25 +26,46 @@ export function Biblioteca({ abierto, alCerrar }) {
   const materiales = usarEstado((s) => s.materiales);
   const [busca, setBusca] = useState('');
 
+  /* El catálogo son las familias (para diseñar) más todas sus medidas
+     normalizadas (para el mostrador, donde nadie piensa en parámetros sino en
+     "una brida DN100"). Sin buscar se muestran sólo las familias: 362 entradas
+     de una no se leen. Apenas se escribe algo, se busca en todo. */
+  const [verMedidas, setVerMedidas] = useState(false);
+  const todo = useMemo(() => catalogo(), []);
+  const resumen = useMemo(() => resumenCatalogo(), []);
+
   const cats = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    return categorias()
-      .map((c) => ({
-        ...c,
-        piezas: q
-          ? c.piezas.filter(
-              (p) =>
-                p.nombre.toLowerCase().includes(q) ||
-                (p.descripcion || '').toLowerCase().includes(q)
-            )
-          : c.piezas,
-      }))
-      .filter((c) => c.piezas.length);
-  }, [busca]);
+    const base = q || verMedidas ? todo : todo.filter((x) => !x.esVariante);
+    const filtradas = q
+      ? base.filter(
+          (p) =>
+            p.nombre.toLowerCase().includes(q) ||
+            (p.descripcion || '').toLowerCase().includes(q) ||
+            (p.categoria || '').toLowerCase().includes(q)
+        )
+      : base;
+    const porCat = new Map();
+    for (const p of filtradas) {
+      const c = p.categoria || 'Otros';
+      if (!porCat.has(c)) porCat.set(c, []);
+      porCat.get(c).push(p);
+    }
+    return [...porCat.entries()]
+      .map(([nombre, piezas]) => ({ nombre, piezas }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [busca, verMedidas, todo]);
 
-  const elegir = (piezaId) => {
+  const elegir = (entrada) => {
+    const piezaId = typeof entrada === 'string' ? entrada : entrada.piezaId;
     const def = getPieza(piezaId);
     const actual = doc.items[sel];
+    // Una medida normalizada trae sus cotas cargadas; una familia, las de fábrica
+    const params =
+      typeof entrada === 'string' || !entrada.esVariante
+        ? paramsPorDefecto(piezaId)
+        : paramsDeVariante(entrada);
+    const nombre = typeof entrada === 'string' ? def.nombre : entrada.nombre || def.nombre;
 
     if (actual && actual.origen === 'libreria') {
       // Cambiar la pieza del ítem actual, no agregar uno nuevo: es lo que
@@ -54,18 +76,14 @@ export function Biblioteca({ abierto, alCerrar }) {
           ...items[sel],
           origen: 'libreria',
           piezaId,
-          params: paramsPorDefecto(piezaId),
-          nombre: def.nombre,
+          params,
+          nombre,
         };
         return { ...d, items };
       });
     } else {
       agregarItem(
-        itemNuevo(materiales, {
-          piezaId,
-          params: paramsPorDefecto(piezaId),
-          nombre: def.nombre,
-        })
+        itemNuevo(materiales, { piezaId, params, nombre })
       );
     }
     alCerrar();
@@ -74,17 +92,34 @@ export function Biblioteca({ abierto, alCerrar }) {
   return (
     <Dialogo open={abierto} onOpenChange={(v) => !v && alCerrar()}>
       <ContenidoDialogo
-        titulo="Biblioteca de piezas paramétricas"
-        descripcion="Elegí una forma y ajustá las medidas después. Todas se recalculan solas al cambiar material o espesor."
+        titulo={`Biblioteca · ${resumen.total} piezas`}
+        descripcion="Elegí una familia para diseñar con parámetros, o una medida normalizada que ya viene con sus cotas cargadas."
         ancho="max-w-5xl"
       >
-        <div className="relative mb-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-tenue" />
-          <Entrada
-            autoFocus placeholder="Buscar una pieza…" className="pl-9"
-            value={busca} onChange={(e) => setBusca(e.target.value)}
-          />
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-tenue" />
+            <Entrada
+              autoFocus placeholder="Buscar por nombre o medida — «DN100», «bandeja 200», «celosía»…"
+              className="pl-9"
+              value={busca} onChange={(e) => setBusca(e.target.value)}
+            />
+          </div>
+          <Boton
+            tam="sm"
+            tono={verMedidas ? 'acero' : 'neutro'}
+            onClick={() => setVerMedidas((v) => !v)}
+          >
+            {verMedidas ? 'Ver sólo familias' : `Ver las ${resumen.medidas} medidas`}
+          </Boton>
         </div>
+
+        <p className="mb-3 text-[11.5px] leading-snug text-suave">
+          <strong>{resumen.familias} familias</strong> para diseñar con parámetros, y{' '}
+          <strong>{resumen.medidas} medidas normalizadas</strong> listas para cotizar —bridas DIN,
+          caños en pulgadas, bandejas IEC, rack 19″—. Todas se recalculan al cambiar material o
+          espesor.
+        </p>
 
         {cats.map((cat) => (
           <div key={cat.nombre} className="mb-5 last:mb-0">
@@ -92,16 +127,21 @@ export function Biblioteca({ abierto, alCerrar }) {
               {cat.nombre}
             </h4>
             <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-              {cat.piezas.map((p) => (
+              {cat.piezas.map((p, i) => (
                 <button
-                  key={p.id}
-                  onClick={() => elegir(p.id)}
+                  key={p.piezaId + '-' + p.nombre + i}
+                  onClick={() => elegir(p)}
                   className={cn(
                     'rounded-xl border border-borde bg-panel p-3 text-left transition-all cursor-pointer',
                     'hover:border-corte-500 hover:-translate-y-px hover:shadow-lg hover:shadow-corte-500/10'
                   )}
                 >
-                  <div className="text-[13.5px] font-semibold">{p.nombre}</div>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[13.5px] font-semibold">{p.nombre}</span>
+                    {p.esVariante ? (
+                      <Insignia tono="azul" className="shrink-0 text-[9.5px]">medida</Insignia>
+                    ) : null}
+                  </div>
                   <p className="mt-1 text-[11.5px] leading-relaxed text-suave">{p.descripcion}</p>
                 </button>
               ))}
