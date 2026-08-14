@@ -629,14 +629,17 @@ cuál sin ir a buscar el plano ahorra errores de entrega.
 
 **Esfuerzo:** bajo — el generador de PDF ya está.
 
-### 📋 5.3 Carga de la máquina y fecha de entrega realista
+### ✅ 5.3 Carga de la máquina y fecha de entrega realista
 
-El sistema ya sabe cuántos minutos de máquina lleva cada orden. Sumando las
-órdenes abiertas sale **cuántas horas hay comprometidas**, y con eso una fecha
-de entrega que no sea "7 días" por costumbre. Prometer una fecha que no se
-cumple cuesta el cliente siguiente.
+Hecho el 2026-08-14. `src/core/agenda.js` suma la carga pendiente de las órdenes
+abiertas, calcula la capacidad diaria desde `estructura.horasPorDia ×
+ocupacionProductiva`, saltea fines de semana y marca qué fecha es prometible
+para cada OT. Las órdenes urgentes entran primero y una OT queda en riesgo si la
+fecha comprometida no entra en la cola real.
 
-**Esfuerzo:** medio. Necesita estados de orden con fecha comprometida.
+El panel muestra horas comprometidas, capacidad real y fecha libre. Producción
+agrega una banda de carga y cada tarjeta muestra fecha prometible y horas
+restantes. Ya no se promete "7 días" por costumbre: se ve la cola.
 
 ### 💭 5.4 Aviso de consumibles por horas de arco
 

@@ -6,8 +6,9 @@ import { api, simbolo } from '../api.js';
 const COLUMNAS = ['pendiente', 'material', 'corte', 'plegado', 'terminado', 'entregado'];
 
 export async function render(cont) {
-  let ordenes = await api.get('ordenes');
+  let [ordenes, agenda] = await Promise.all([api.get('ordenes'), api.get('agenda').catch(() => null)]);
   const sim = simbolo();
+  const agendaPorId = () => new Map((agenda?.ordenes || []).map((o) => [o.id, o]));
 
   cont.appendChild(
     h('div.cabecera-vista',
@@ -16,12 +17,41 @@ export async function render(cont) {
     )
   );
 
+  const bandaAgenda = h('div.panel.mt-sm');
+  cont.appendChild(bandaAgenda);
+
   const tablero = h('div', {
     style: { display: 'grid', gridTemplateColumns: `repeat(${COLUMNAS.length}, minmax(190px, 1fr))`, gap: '12px', overflowX: 'auto', paddingBottom: '10px' },
   });
   cont.appendChild(tablero);
 
+  function pintarAgenda() {
+    vaciar(bandaAgenda);
+    if (!agenda) {
+      bandaAgenda.appendChild(h('div.panel-cuerpo', h('div.chico.suave', 'No se pudo calcular la carga de máquina.')));
+      return;
+    }
+    bandaAgenda.appendChild(h('div.panel-cuerpo',
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(130px, 1fr))', gap: '10px' } },
+        kpiAgenda('Carga abierta', `${num(agenda.horasComprometidas, 1)} h`, `${agenda.abiertas} OT pendientes`),
+        kpiAgenda('Capacidad real', `${num(agenda.capacidadDiariaHoras, 1)} h/día`, 'según estructura'),
+        kpiAgenda('Fecha libre', fecha(agenda.fechaDisponible), `${num(agenda.diasComprometidos, 1)} días de cola`),
+        kpiAgenda('Riesgo', agenda.atrasadas ? `${agenda.atrasadas} OT` : 'Sin atrasos', agenda.sinFecha ? `${agenda.sinFecha} sin fecha` : 'fechas cargadas',
+          agenda.atrasadas ? 'var(--naranja)' : 'var(--verde)')
+      )
+    ));
+  }
+
+  function kpiAgenda(titulo, valor, nota, color = 'var(--tinta)') {
+    return h('div', { style: { border: '1px solid var(--borde)', borderRadius: '8px', padding: '10px', background: 'var(--panel-2)' } },
+      h('div.chico.tenue', titulo),
+      h('div', { style: { fontSize: '20px', fontWeight: 800, color, marginTop: '2px' } }, valor),
+      h('div.chico.suave', nota)
+    );
+  }
+
   function pintar() {
+    pintarAgenda();
     vaciar(tablero);
     for (const col of COLUMNAS) {
       const dela = ordenes.filter((o) => (o.estado || 'pendiente') === col);
@@ -41,12 +71,14 @@ export async function render(cont) {
   }
 
   function tarjeta(o) {
+    const plan = agendaPorId().get(o.id);
     const vencida = o.fechaEntrega && new Date(o.fechaEntrega) < new Date() && o.estado !== 'entregado';
+    const enRiesgo = plan?.atrasada || plan?.vencida;
     const idx = COLUMNAS.indexOf(o.estado || 'pendiente');
     return h('div', {
       style: {
         border: '1px solid var(--borde)', borderRadius: '8px', padding: '10px',
-        background: 'var(--panel-2)', borderLeft: `3px solid ${vencida ? 'var(--rojo)' : o.prioridad === 'urgente' ? 'var(--naranja)' : 'var(--borde)'}`,
+        background: 'var(--panel-2)', borderLeft: `3px solid ${enRiesgo ? 'var(--rojo)' : o.prioridad === 'urgente' ? 'var(--naranja)' : 'var(--borde)'}`,
       },
     },
       h('div.fila.entre',
@@ -63,11 +95,19 @@ export async function render(cont) {
           onchange: async (e) => {
             o.fechaEntrega = e.target.value;
             await api.put('ordenes/' + o.id, { fechaEntrega: o.fechaEntrega });
+            agenda = await api.get('agenda').catch(() => agenda);
             pintar();
           },
         })
       ),
       vencida ? h('div.chico.rojo.negrita', { style: { marginTop: '4px' } }, '⚠ Fecha vencida') : null,
+      plan ? h('div.chico', {
+        style: {
+          marginTop: '5px',
+          color: enRiesgo ? 'var(--rojo)' : 'var(--suave)',
+          fontWeight: enRiesgo ? 700 : 500,
+        },
+      }, `Prometible: ${fecha(plan.fechaPrometible)} · faltan ${fmtMin(plan.segundosRestantes)}`) : null,
       tiempoReal(o),
       h('div.fila.mt-sm', { style: { gap: '4px' } },
         idx > 0 ? h('button.btn-sm', { onclick: () => mover(o, -1) }, '←') : null,
@@ -116,6 +156,7 @@ export async function render(cont) {
     if (nuevo === 'entregado' && o.presupuestoId) {
       await api.put('presupuestos/' + o.presupuestoId, { estado: 'facturado' }).catch(() => {});
     }
+    agenda = await api.get('agenda').catch(() => agenda);
     pintar();
     // Al terminar es el único momento en que el dato existe y alguien se
     // acuerda. Después nadie vuelve a cargarlo.
@@ -191,6 +232,7 @@ export async function render(cont) {
     confirmar('Eliminar orden', `Se va a borrar la orden ${o.numero}.`, async () => {
       await api.del('ordenes/' + o.id);
       ordenes = ordenes.filter((x) => x.id !== o.id);
+      agenda = await api.get('agenda').catch(() => agenda);
       pintar();
       toast('Orden eliminada', 'ok');
     }, 'Eliminar');

@@ -17,7 +17,7 @@ import {
 import {
   Plus, FileText, TrendingUp, Target, CheckCircle2, Percent,
   Layers, Users, Gauge, ArrowRight, OctagonAlert, TriangleAlert,
-  History, UserRound,
+  History, UserRound, CalendarClock,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
@@ -176,6 +176,11 @@ export function VistaPanel() {
     queryFn: () => api.get('bitacora?limite=8'),
   });
 
+  const { data: agenda } = useQuery({
+    queryKey: ['agenda-produccion'],
+    queryFn: () => api.get('agenda'),
+  });
+
   if (isLoading || !st || !config) {
     return (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -276,6 +281,32 @@ export function VistaPanel() {
           />
         )}
       </div>
+
+      {agenda ? (
+        <Panel>
+          <PanelCuerpo className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid size-10 place-items-center rounded-lg bg-corte-500/12 text-corte-500">
+                <CalendarClock className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[14px] font-semibold text-tinta">
+                  {agenda.abiertas
+                    ? `${num(agenda.horasComprometidas, 1)} h de máquina comprometidas`
+                    : 'No hay carga de máquina pendiente'}
+                </div>
+                <div className="text-[12px] text-suave">
+                  Capacidad real: {num(agenda.capacidadDiariaHoras, 1)} h/día · fecha libre: {fecha(agenda.fechaDisponible)}
+                  {agenda.atrasadas ? ` · ${agenda.atrasadas} OT en riesgo` : ''}
+                </div>
+              </div>
+            </div>
+            <Boton tono={agenda.atrasadas ? 'corte' : 'neutro'} tam="sm" comoHijo>
+              <Link to="/ordenes">Ver producción<ArrowRight /></Link>
+            </Boton>
+          </PanelCuerpo>
+        </Panel>
+      ) : null}
 
       <RevisionDatos />
 

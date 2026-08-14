@@ -42,6 +42,7 @@ import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/libra
 import { revisarDatos } from '../src/core/salud.js';
 import { costoConsumiblesHora, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
+import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } from '../src/core/agenda.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
@@ -3021,6 +3022,40 @@ test('el tarifario no inventa espesores que la máquina no corta', () => {
 });
 
 /* ================================================================== */
+/* ================================================================== */
+grupo('Agenda de producción');
+
+test('la capacidad diaria sale de horas abiertas por ocupación productiva', () => {
+  const cfg = { estructura: { horasPorDia: 8, ocupacionProductiva: 62.5 } };
+  cerca(capacidadDiariaSegundos(cfg), 5 * 3600, 1e-9);
+});
+
+test('los estados cerrados no cargan la máquina y corte queda como trabajo parcial', () => {
+  assert.equal(segundosRestantesOrden({ estado: 'entregado', resumen: { tiempoProduccion: 3600 } }), 0);
+  cerca(segundosRestantesOrden({ estado: 'corte', resumen: { tiempoProduccion: 3600 } }), 1980, 1e-9);
+});
+
+test('la agenda ordena urgentes primero y no promete sábados', () => {
+  const cfg = { estructura: { horasPorDia: 8, ocupacionProductiva: 100 } };
+  const plan = agendaProduccion([
+    { id: 'normal', numero: 'OT-2', estado: 'pendiente', creado: '2026-08-01', resumen: { tiempoProduccion: 8 * 3600 } },
+    { id: 'urgente', numero: 'OT-1', estado: 'pendiente', prioridad: 'urgente', creado: '2026-08-02', resumen: { tiempoProduccion: 8 * 3600 } },
+  ], cfg, new Date('2026-08-14T12:00:00Z')); // viernes
+  assert.equal(plan.ordenes[0].id, 'urgente');
+  assert.equal(plan.ordenes[0].fechaPrometible, '2026-08-14');
+  assert.equal(plan.ordenes[1].fechaPrometible, '2026-08-17', 'el segundo día hábil después del viernes es lunes');
+});
+
+test('marca atraso cuando la fecha comprometida no entra en la carga real', () => {
+  const cfg = { estructura: { horasPorDia: 4, ocupacionProductiva: 50 } }; // 2 h productivas/día
+  const plan = agendaProduccion([
+    { id: 'a', numero: 'OT-1', estado: 'pendiente', fechaEntrega: '2026-08-14', resumen: { tiempoProduccion: 3 * 3600 } },
+  ], cfg, new Date('2026-08-14T12:00:00Z'));
+  assert.equal(plan.fechaDisponible, '2026-08-17');
+  assert.equal(plan.ordenes[0].atrasada, true);
+  assert.equal(plan.atrasadas, 1);
+});
+
 grupo('PDF');
 
 test('el generador produce un PDF con cabecera y EOF', () => {

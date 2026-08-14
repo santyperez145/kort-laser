@@ -376,6 +376,12 @@ api.get('/estructura', async (_req, res) => {
   res.json({ ...est, equilibrio: puntoEquilibrio(est, cfg.comercial?.margen ?? 45) });
 });
 
+// --- Carga de taller y fecha prometible
+api.get('/agenda', async (_req, res) => {
+  const { agendaProduccion } = await import('./src/core/agenda.js');
+  res.json(agendaProduccion(db.lista('ordenes'), db.leer('config') || {}));
+});
+
 api.use((req, res) => {
   res.status(404).json({ error: 'Recurso desconocido: ' + req.path.split('/')[1] });
 });
