@@ -621,13 +621,17 @@ la contiene.
 
 **Esfuerzo:** medio. **Evita roturas, que es plata grande y de golpe.**
 
-### 📋 5.2 Etiquetas de pieza para el taller
+### ✅ 5.2 Etiquetas de pieza para el taller
 
-Una etiqueta por pieza con número de OT, cliente, material, espesor, cantidad y
-un QR que abra la ficha. En un lote de treinta piezas parecidas, saber cuál es
-cuál sin ir a buscar el plano ahorra errores de entrega.
+Hecho el 2026-08-14. El cotizador genera un PDF de etiquetas de 90 × 55 mm,
+una por ítem, con OT, cliente, material, espesor, cantidad, medida, entrega,
+código de control y URL preparada para la ficha de la orden. Se guardan en
+`salidas/etiquetas` además de descargarse.
 
-**Esfuerzo:** bajo — el generador de PDF ya está.
+El código visual de control sirve para no mezclar paquetes en el taller aunque
+la etiqueta se imprima chica o se manche. Cuando Producción tenga ficha
+individual navegable, se puede cambiar ese bloque por QR estándar sin tocar los
+datos de la etiqueta.
 
 ### ✅ 5.3 Carga de la máquina y fecha de entrega realista
 

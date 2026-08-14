@@ -21,7 +21,7 @@ import { leerDXF } from '/src/core/dxf-read.js';
 import { construirMesh } from '/src/core/mesh3d.js';
 import { radioInterno } from '/src/core/bending.js';
 import { nest } from '/src/core/nesting.js';
-import { generarPresupuestoPDF, generarOrdenTrabajoPDF } from '/src/core/quote-pdf.js';
+import { generarPresupuestoPDF, generarOrdenTrabajoPDF, generarEtiquetasPiezasPDF } from '/src/core/quote-pdf.js';
 import { shapeBBox } from '/src/core/geometry.js';
 
 let doc = null;
@@ -787,6 +787,7 @@ function panelPrecio() {
         h('button.btn-azul', { style: { width: '100%' }, onclick: guardar }, '💾 Guardar presupuesto'),
         h('button.btn-primario.mt-sm', { style: { width: '100%' }, onclick: exportarPDF }, '📄 Generar PDF del presupuesto'),
         h('button.mt-sm', { style: { width: '100%' }, onclick: exportarOT }, '🧾 Orden de trabajo (taller)'),
+        h('button.mt-sm', { style: { width: '100%' }, onclick: exportarEtiquetas }, '🏷 Etiquetas de piezas'),
         h('button.mt-sm', { style: { width: '100%' }, onclick: () => descargarDXFItem(sel) }, '⤓ DXF de la pieza'),
         h('button.mt-sm', { style: { width: '100%' }, onclick: descargarDXFNesting }, '⤓ DXF del nesting'),
         h('div.campo.mt', h('label', 'Observaciones para el presupuesto'),
@@ -1020,6 +1021,22 @@ async function exportarOT() {
   descargar(nombre, bytes, 'application/pdf');
   api.guardarArchivo(nombre, bytes, 'ordenes').catch(() => {});
   toast('Orden de trabajo generada', 'ok');
+}
+
+async function exportarEtiquetas() {
+  if (!coti?.items.length) return toast('No hay ítems', 'error');
+  const numero = doc.numeroOT || (await api.get('numero?tipo=OT')).numero;
+  doc.numeroOT = numero;
+  const bytes = generarEtiquetasPiezasPDF({
+    orden: { id: doc.id, numero, cliente: doc.cliente, fechaEntrega: null },
+    cotizacion: coti,
+    config: G.config,
+    baseUrl: window.location.origin,
+  });
+  const nombre = `etiquetas-${numero}.pdf`;
+  descargar(nombre, bytes, 'application/pdf');
+  api.guardarArchivo(nombre, bytes, 'etiquetas').catch(() => {});
+  toast('Etiquetas generadas', 'ok');
 }
 
 async function guardar() {

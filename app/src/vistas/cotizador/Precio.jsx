@@ -7,14 +7,14 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge, MessageCircle, Mail } from 'lucide-react';
+import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge, MessageCircle, Mail, Tags } from 'lucide-react';
 import { cotizarItem } from '@core/pricing.js';
 import { explicarFactor } from '@core/calibracion.js';
 import { explicarItem } from '@core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '@core/compras.js';
 
 import { usarCotizador } from './contexto';
-import { descargarDXFItem, descargarDXFNesting, exportarPDF, exportarOT, enviarPresupuesto } from './acciones';
+import { descargarDXFItem, descargarDXFNesting, exportarEtiquetas, exportarPDF, exportarOT, enviarPresupuesto } from './acciones';
 import { ComoSeCalcula } from '@/componentes/PorQue';
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
@@ -404,6 +404,10 @@ export function Precio() {
           <Boton ancho="completo" onClick={() => exportarOT(args)}>
             <ClipboardList />
             Orden de trabajo (taller)
+          </Boton>
+          <Boton ancho="completo" onClick={() => exportarEtiquetas(args)}>
+            <Tags />
+            Etiquetas de piezas
           </Boton>
           <div className="grid grid-cols-2 gap-2">
             <Boton onClick={() => descargarDXFItem(item, resuelto, r)}>

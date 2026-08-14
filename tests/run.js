@@ -51,7 +51,7 @@ import { vectorizar, aPieza, escalaDesdeReferencia } from '../src/core/vectoriza
 import { leerPlanoPDF, planoAPieza, MM_POR_PUNTO } from '../src/core/pdf-plano.js';
 import { construirMesh } from '../src/core/mesh3d.js';
 import { PDF, anchoTexto } from '../src/core/pdf.js';
-import { generarPresupuestoPDF } from '../src/core/quote-pdf.js';
+import { generarPresupuestoPDF, generarEtiquetasPiezasPDF } from '../src/core/quote-pdf.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -3145,6 +3145,28 @@ test('el DXF de una pieza de biblioteca se guarda como muestra', () => {
   const rel = leerDXF(dxf);
   assert.equal(rel.piezas.length, 1, 'el DXF generado debe volver a leerse como una pieza');
   console.log(`      → muestra guardada en tests/salida-bandeja.dxf`);
+});
+
+test('las etiquetas de pieza imprimen datos de taller por ítem', () => {
+  const coti = cotizarPresupuesto({
+    items: [
+      { nombre: 'Soporte A', shape: makeShape(rect(0, 0, 200, 120)), materialId: 'acero-sae1010', espesor: 3, cantidad: 12 },
+      { nombre: 'Tapa B', shape: makeShape(rect(0, 0, 100, 80)), materialId: 'inox-304', espesor: 1.5, cantidad: 4 },
+    ],
+  }, CTX);
+  const bytes = generarEtiquetasPiezasPDF({
+    orden: { numero: '2026-0042', cliente: { nombre: 'Cliente de prueba' } },
+    cotizacion: coti,
+    config: DEFAULT_CONFIG,
+    baseUrl: 'https://kort.local',
+  });
+  assert.ok(bytes.length > 2000, `PDF de etiquetas demasiado chico: ${bytes.length} bytes`);
+  const txt = textoDelPDF(bytes);
+  assert.ok(txt.includes('OT 2026-0042'));
+  assert.ok(txt.includes('Soporte A'));
+  assert.ok(txt.includes('Cliente de prueba'));
+  assert.ok(txt.includes('Cantidad'));
+  assert.ok(Buffer.from(bytes).toString('latin1').includes('%%EOF'));
 });
 
 /* ================================================================== */

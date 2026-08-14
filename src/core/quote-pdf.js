@@ -443,3 +443,135 @@ export function generarOrdenTrabajoPDF({ orden, cotizacion, config, miniaturas =
 
   return doc.save();
 }
+
+function codigoControl(texto) {
+  let h = 2166136261;
+  for (const ch of String(texto)) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36).toUpperCase().padStart(7, '0').slice(0, 7);
+}
+
+function matrizCodigo(texto, n = 13) {
+  let h = 2166136261;
+  for (const ch of String(texto)) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  const celdas = [];
+  for (let y = 0; y < n; y++) {
+    const fila = [];
+    for (let x = 0; x < n; x++) {
+      const finder =
+        (x < 4 && y < 4) ||
+        (x >= n - 4 && y < 4) ||
+        (x < 4 && y >= n - 4);
+      h ^= (x + 31) * (y + 17);
+      h = Math.imul(h, 1103515245) + 12345;
+      fila.push(finder ? (x === 0 || y === 0 || x === 3 || y === 3 || (x === 1 && y === 1)) : ((h >>> 27) & 1) === 1);
+    }
+    celdas.push(fila);
+  }
+  return celdas;
+}
+
+function dibujarCodigo(doc, texto, x, y, tam) {
+  const m = matrizCodigo(texto);
+  const n = m.length;
+  const c = tam / n;
+  doc.hex('#ffffff');
+  doc.rect(x, y, tam, tam, 'f');
+  doc.hex('#12161c');
+  for (let yy = 0; yy < n; yy++) {
+    for (let xx = 0; xx < n; xx++) {
+      if (m[yy][xx]) doc.rect(x + xx * c, y + yy * c, c + 0.08, c + 0.08, 'f');
+    }
+  }
+  doc.hex('#12161c', true);
+  doc.rect(x, y, tam, tam, 'S');
+}
+
+function materialItem(it) {
+  return it.material?.nombre || it.materialNombre || it.materialId || '-';
+}
+
+/**
+ * Etiquetas para pegar en piezas o paquetes del taller.
+ *
+ * Una etiqueta por ítem: OT, cliente, material, espesor, cantidad, control y
+ * una ruta preparada para la ficha de la orden. El código visual no reemplaza
+ * un QR estándar; evita confundir paquetes aunque se imprima chico o se moje.
+ */
+export function generarEtiquetasPiezasPDF({ orden = {}, cotizacion, config = {}, baseUrl = '' }) {
+  const doc = new PDF(A4);
+  const M = 24;
+  const etiqueta = { w: 255.12, h: 155.91 }; // 90 x 55 mm
+  const gap = 10;
+  const cols = 2;
+  const emp = config.empresa || {};
+  const items = cotizacion?.items || [];
+  let x = M;
+  let y = M;
+
+  items.forEach((it, i) => {
+    if (i > 0) {
+      if (i % cols === 0) {
+        x = M;
+        y += etiqueta.h + gap;
+      } else {
+        x += etiqueta.w + gap;
+      }
+      if (y + etiqueta.h > doc.H - M) {
+        doc.nuevaPagina();
+        x = M;
+        y = M;
+      }
+    }
+
+    const id = `${orden.numero || 'OT'}-${i + 1}`;
+    const control = codigoControl(`${id}|${it.nombre}|${it.cantidad}|${materialItem(it)}|${it.espesor}`);
+    const url = `${baseUrl || ''}/ordenes?id=${encodeURIComponent(orden.id || orden.numero || '')}#item-${i + 1}`;
+
+    doc.hex('#ffffff');
+    doc.rectRedondo(x, y, etiqueta.w, etiqueta.h, 5, 'f');
+    doc.hex(COL.linea, true);
+    doc.rectRedondo(x, y, etiqueta.w, etiqueta.h, 5, 'S');
+    doc.hex(COL.acento2);
+    doc.rectRedondo(x, y, etiqueta.w, 27, 5, 'f');
+    doc.hex(COL.acento);
+    doc.rect(x, y + 24, etiqueta.w, 3, 'f');
+
+    doc.texto(x + 10, y + 8, emp.nombre || 'KORT', { size: 8, bold: true, color: '#ffffff' });
+    doc.texto(x + etiqueta.w - 10, y + 8, `OT ${orden.numero || '-'}`, { size: 10, bold: true, color: '#ffffff', align: 'right' });
+
+    doc.texto(x + 10, y + 38, `${i + 1}. ${it.nombre}`, { size: 11, bold: true, color: COL.tinta, maxWidth: etiqueta.w - 82 });
+    doc.texto(x + 10, y + 55, orden.cliente?.nombre || 'Sin cliente', { size: 8, color: COL.suave, maxWidth: etiqueta.w - 82 });
+
+    const datos = [
+      ['Material', materialItem(it)],
+      ['Espesor', `${fmtNum(it.espesor, 1)} mm`],
+      ['Cantidad', `${it.cantidad} u`],
+      ['Medida', `${fmtNum(it.geometria?.ancho || 0, 0)} x ${fmtNum(it.geometria?.alto || 0, 0)} mm`],
+    ];
+    let yy = y + 75;
+    datos.forEach(([k, v]) => {
+      doc.texto(x + 10, yy, k, { size: 6.7, color: COL.suave });
+      doc.texto(x + 56, yy, v, { size: 7.4, bold: true, color: COL.tinta, maxWidth: etiqueta.w - 130 });
+      yy += 11;
+    });
+
+    dibujarCodigo(doc, control, x + etiqueta.w - 64, y + 39, 52);
+    doc.texto(x + etiqueta.w - 38, y + 98, control, { size: 7, bold: true, color: COL.tinta, align: 'center' });
+    doc.texto(x + etiqueta.w - 10, y + 116, `Entrega: ${orden.fechaEntrega || 'coordinar'}`, {
+      size: 7.2, bold: true, color: COL.acento, align: 'right',
+    });
+    doc.texto(x + 10, y + 137, url, { size: 5.8, color: COL.suave, maxWidth: etiqueta.w - 20 });
+  });
+
+  if (!items.length) {
+    doc.texto(M, M, 'No hay ítems para etiquetar.', { size: 12, color: COL.tinta });
+  }
+
+  return doc.save();
+}

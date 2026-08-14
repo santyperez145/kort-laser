@@ -205,6 +205,34 @@ function envolventeConvexa(pts) {
   return abajo.concat(arriba);
 }
 
+/** Un disco no gana nada rotando: se detecta por caja casi cuadrada y radio estable. */
+function esCasiCircular(pts) {
+  if (pts.length < 12) return false;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of pts) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const w = maxX - minX;
+  const h = maxY - minY;
+  const lado = Math.max(w, h);
+  if (lado <= 0 || Math.abs(w - h) / lado > 0.025) return false;
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  let minR = Infinity, maxR = -Infinity, suma = 0;
+  for (const [x, y] of pts) {
+    const r = Math.hypot(x - cx, y - cy);
+    if (r < minR) minR = r;
+    if (r > maxR) maxR = r;
+    suma += r;
+  }
+  const medio = suma / pts.length;
+  return medio > 0 && (maxR - minR) / medio < 0.035;
+}
+
 /**
  * Pesos del criterio de colocación. Están afuera y con nombre porque se
  * calibraron midiendo cuántas piezas entran en una chapa, no a ojo.
@@ -519,9 +547,11 @@ function nestFormaReal(items, chapa, opts) {
     // envolvente, girarla no gana nada y probar ocho ángulos es tiempo tirado.
     const llenado = llenadoDelRectangulo(base);
     const esCasiRectangular = llenado > 0.93;
+    const esCircular = esCasiCircular(base);
 
     let angulos;
     if (it.rotable === false) angulos = [0];
+    else if (esCircular) angulos = [0];
     else if (esCasiRectangular) angulos = [0, 90];
     else {
       angulos = [...rotaciones];

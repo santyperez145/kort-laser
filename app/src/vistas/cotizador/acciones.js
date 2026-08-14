@@ -13,7 +13,7 @@ import { descargar } from '@/lib/formato';
 import { miniatura } from '@/lib/miniatura';
 import { generarDXF, generarDXFNesting } from '@core/dxf-write.js';
 import { aplicarMicroUniones } from '@core/micro-uniones.js';
-import { generarPresupuestoPDF, generarOrdenTrabajoPDF } from '@core/quote-pdf.js';
+import { generarPresupuestoPDF, generarOrdenTrabajoPDF, generarEtiquetasPiezasPDF } from '@core/quote-pdf.js';
 import { listaDeCompra } from '@core/compras.js';
 import { mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '@core/envio.js';
 
@@ -150,4 +150,22 @@ export async function exportarOT({ doc, coti, config, resueltos, actualizarDoc, 
   descargar(nombre, bytes, 'application/pdf');
   api.guardarArchivo(nombre, bytes, 'ordenes').catch(() => {});
   toast.success('Orden de trabajo generada');
+}
+
+export async function exportarEtiquetas({ doc, coti, config, actualizarDoc }) {
+  if (!coti?.items.length) return toast.error('No hay ítems');
+
+  const numero = doc.numeroOT || (await api.get('numero?tipo=OT')).numero;
+  if (!doc.numeroOT) actualizarDoc({ numeroOT: numero });
+
+  const bytes = generarEtiquetasPiezasPDF({
+    orden: { id: doc.id, numero, cliente: doc.cliente, fechaEntrega: null },
+    cotizacion: coti,
+    config,
+    baseUrl: window.location.origin,
+  });
+  const nombre = `etiquetas-${numero}.pdf`;
+  descargar(nombre, bytes, 'application/pdf');
+  api.guardarArchivo(nombre, bytes, 'etiquetas').catch(() => {});
+  toast.success('Etiquetas generadas');
 }
