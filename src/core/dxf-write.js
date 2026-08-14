@@ -10,7 +10,7 @@
  * corten.
  */
 
-import { TAU, deg, partesDe } from './geometry.js';
+import { TAU, deg, partesDe, pathBBox, pointInPath } from './geometry.js';
 
 export const CAPAS = {
   CORTE: { nombre: 'CORTE', color: 7 },
@@ -111,6 +111,88 @@ function writePath(b, layer, p) {
   for (const s of p.segs) writeSeg(b, layer, s);
 }
 
+function moverPath(p, dx = 0, dy = 0) {
+  return {
+    closed: p.closed,
+    segs: p.segs.map((s) =>
+      s.t === 'L'
+        ? { ...s, x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy }
+        : { ...s, cx: s.cx + dx, cy: s.cy + dy }
+    ),
+  };
+}
+
+function centroBBox(b) {
+  return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+}
+
+function planDeCorteSeguro(lista) {
+  const ops = [];
+  let seq = 0;
+  for (const [piezaIndex, { shape, dx = 0, dy = 0 }] of lista.entries()) {
+    for (const [parteIndex, parte] of partesDe(shape).entries()) {
+      const agujeros = (parte.holes || []).map((h) => {
+        const path = moverPath(h, dx, dy);
+        const bbox = pathBBox(path);
+        const op = {
+          id: `op-${seq++}`,
+          tipo: 'interior',
+          piezaIndex,
+          parteIndex,
+          layer: CAPAS.INTERIOR.nombre,
+          path,
+          bbox,
+          centro: centroBBox(bbox),
+          deps: new Set(),
+        };
+        ops.push(op);
+        return op;
+      });
+
+      const path = moverPath(parte.outer, dx, dy);
+      const bbox = pathBBox(path);
+      ops.push({
+        id: `op-${seq++}`,
+        tipo: 'exterior',
+        piezaIndex,
+        parteIndex,
+        layer: CAPAS.CORTE.nombre,
+        path,
+        bbox,
+        centro: centroBBox(bbox),
+        deps: new Set(agujeros.map((h) => h.id)),
+      });
+    }
+  }
+
+  const interiores = ops.filter((op) => op.tipo === 'interior');
+  const exteriores = ops.filter((op) => op.tipo === 'exterior');
+  for (const agujero of interiores) {
+    for (const exterior of exteriores) {
+      if (agujero.piezaIndex === exterior.piezaIndex && agujero.parteIndex === exterior.parteIndex) continue;
+      if (pointInPath(agujero.path, exterior.centro.x, exterior.centro.y)) agujero.deps.add(exterior.id);
+    }
+  }
+
+  const pendientes = new Map(ops.map((op) => [op.id, op]));
+  const hechos = new Set();
+  const salida = [];
+  const ordenar = (a, b) =>
+    (b.bbox.maxY - a.bbox.maxY) ||
+    (a.bbox.minX - b.bbox.minX) ||
+    (a.tipo === 'interior' ? -1 : 1) ||
+    a.id.localeCompare(b.id);
+
+  while (pendientes.size) {
+    const listos = [...pendientes.values()].filter((op) => [...op.deps].every((id) => hechos.has(id))).sort(ordenar);
+    const op = listos[0] || [...pendientes.values()][0];
+    pendientes.delete(op.id);
+    hechos.add(op.id);
+    salida.push(op);
+  }
+  return salida;
+}
+
 /**
  * Genera el DXF de una o varias piezas.
  *
@@ -172,21 +254,12 @@ export function generarDXF(shapes, opts = {}) {
     entLine(b, CAPAS.AUXILIAR.nombre, 0, h, 0, 0);
   }
 
+  // El orden importa en taller: interiores antes que exteriores y piezas
+  // contenidas antes del agujero que las libera.
+  for (const op of planDeCorteSeguro(lista)) writePath(b, op.layer, op.path);
+
   for (const { shape, dx = 0, dy = 0 } of lista) {
-    const mv = (p) => ({
-      closed: p.closed,
-      segs: p.segs.map((s) =>
-        s.t === 'L'
-          ? { ...s, x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy }
-          : { ...s, cx: s.cx + dx, cy: s.cy + dy }
-      ),
-    });
-    // Cada parte lleva su exterior a la capa de CORTE y sus interiores a la
-    // de INTERIOR: el CAM distingue por capa qué cae y qué queda.
-    for (const parte of partesDe(shape)) {
-      writePath(b, CAPAS.CORTE.nombre, mv(parte.outer));
-      for (const h of parte.holes || []) writePath(b, CAPAS.INTERIOR.nombre, mv(h));
-    }
+    const mv = (p) => moverPath(p, dx, dy);
     for (const g of shape.grabados || []) writePath(b, CAPAS.GRABADO.nombre, mv(g));
     for (const lp of shape.pliegues || []) {
       entLine(b, CAPAS.PLEGADO.nombre, lp.x1 + dx, lp.y1 + dy, lp.x2 + dx, lp.y2 + dy);

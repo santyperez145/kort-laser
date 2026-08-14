@@ -595,7 +595,7 @@ Mientras sean Santiago y un operario en la misma máquina, no.
 Lo que sigue apunta al otro lado del negocio: hoy el sistema cotiza muy bien y
 acompaña poco al que está parado frente a la máquina.
 
-### 🔜 5.1 Micro-uniones y orden de corte seguro
+### ✅ 5.1 Micro-uniones y orden de corte seguro
 
 Dos problemas de producción que hoy no se modelan y se pagan en chapa:
 
@@ -611,15 +611,13 @@ sale con los cortes interrumpidos y el presupuesto suma el repaso manual. No se
 descuenta el milímetro sin cortar del tiempo de láser: es despreciable y es más
 conservador cobrarlo como si se cortara.
 
-Falta la mitad de seguridad de recorrido:
+Hecho el 2026-08-14. El DXF ya sale con orden de corte seguro: primero
+interiores, después exteriores, y las piezas contenidas dentro de agujeros se
+cortan antes de abrir el agujero que las rodea. En empates se prioriza de
+arriba hacia abajo para reducir pasadas del cabezal sobre chapa ya liberada.
 
-El orden correcto es: primero todos los contornos interiores, después el
-exterior, y dentro de cada chapa de arriba hacia abajo para no pasar el
-cabezal sobre lo ya cortado. Con `1.7` ya hecho esto pesa más: una pieza
-anidada adentro de un agujero **tiene** que cortarse antes que el agujero que
-la contiene.
-
-**Esfuerzo:** medio. **Evita roturas, que es plata grande y de golpe.**
+Esto vive en `src/core/dxf-write.js`, así aplica tanto al DXF de pieza como al
+DXF de nesting y a cualquier desarrollo futuro que use el escritor común.
 
 ### ✅ 5.2 Etiquetas de pieza para el taller
 

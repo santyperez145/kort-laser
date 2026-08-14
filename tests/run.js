@@ -351,6 +351,28 @@ test('ninguna pieza se sale de la chapa ni se superpone', () => {
 /* ================================================================== */
 grupo('DXF');
 
+function entidadesDXF(dxf) {
+  const inicio = dxf.indexOf('0\r\nSECTION\r\n2\r\nENTITIES');
+  const fin = dxf.indexOf('0\r\nENDSEC', inicio);
+  const toks = dxf.slice(inicio, fin).split(/\r?\n/);
+  const entidades = [];
+  let actual = null;
+  for (let i = 0; i < toks.length - 1; i += 2) {
+    const code = toks[i];
+    const value = toks[i + 1];
+    if (code === '0') {
+      if (actual) entidades.push(actual);
+      actual = value === 'LINE' || value === 'ARC' || value === 'CIRCLE' ? { tipo: value } : null;
+    } else if (actual) {
+      actual[code] = value;
+    }
+  }
+  if (actual) entidades.push(actual);
+  return entidades;
+}
+
+const entidadesCorte = (dxf) => entidadesDXF(dxf).filter((e) => e['8'] === 'CORTE' || e['8'] === 'CORTE_INTERIOR');
+
 test('escribe un DXF válido con las secciones obligatorias', () => {
   const sh = makeShape(rect(0, 0, 100, 60, 8), [circle(50, 30, 10)]);
   const dxf = generarDXF([sh], { titulo: 'Prueba' });
@@ -359,6 +381,24 @@ test('escribe un DXF válido con las secciones obligatorias', () => {
   assert.ok(dxf.includes('EOF'));
   assert.ok(dxf.includes('CORTE'));
   assert.ok(dxf.includes('CIRCLE') || dxf.includes('ARC'));
+});
+
+test('el DXF de producción corta interiores antes que exteriores', () => {
+  const sh = makeShape(rect(0, 0, 100, 60), [circle(50, 30, 10)]);
+  const entidades = entidadesCorte(generarDXF([sh]));
+  assert.equal(entidades[0]['8'], 'CORTE_INTERIOR', 'el agujero debe salir antes que el contorno exterior');
+  assert.equal(entidades.at(-1)['8'], 'CORTE', 'el exterior libera la pieza al final');
+});
+
+test('una pieza anidada en un agujero se corta antes de abrir ese agujero', () => {
+  const marco = makeShape(rect(0, 0, 200, 200), [rect(50, 50, 100, 100)]);
+  const piezaAdentro = makeShape(rect(0, 0, 20, 20));
+  const entidades = entidadesCorte(generarDXF([{ shape: marco }, { shape: piezaAdentro, dx: 90, dy: 90 }]));
+  const primerCorte = entidades.findIndex((e) => e['8'] === 'CORTE');
+  const primerInterior = entidades.findIndex((e) => e['8'] === 'CORTE_INTERIOR');
+  assert.ok(primerCorte >= 0 && primerInterior >= 0);
+  assert.ok(primerCorte < primerInterior, 'la pieza chica debe cortarse antes que el agujero que la rodea');
+  assert.equal(Number(entidades[primerCorte]['10']), 90, 'el primer exterior es la pieza contenida, no el marco grande');
 });
 
 test('ida y vuelta: escribir y volver a leer conserva las medidas', () => {
