@@ -21,7 +21,7 @@ import { usarEstado } from '@/lib/estado';
 import { money, num } from '@/lib/formato';
 import { cn } from '@/lib/utils';
 import {
-  candidatosRetazo, normalizarRetazo, pesoRetazoKg, resumenStockRetazos, superficieRetazoM2, valorRetazo,
+  candidatosRetazo, cantidadReservada, normalizarRetazo, pesoRetazoKg, resumenStockRetazos, superficieRetazoM2, unidadesDisponibles, valorRetazo,
 } from '@core/retazos.js';
 
 const clonar = (v) => JSON.parse(JSON.stringify(v));
@@ -87,14 +87,15 @@ export function VistaStock() {
     espesor: Number(busqueda.espesor),
     w: Number(busqueda.w),
     h: Number(busqueda.h),
-  }, { margen: 10 }), [retazos, busqueda]);
+  }, { margen: 10 }).map((c) => ({ ...c, cantidad: c.disponibles })), [retazos, busqueda]);
 
   const total = useMemo(() => resumen.reduce((a, x) => ({
     unidades: a.unidades + x.disponibles,
+    reservadas: a.reservadas + x.reservadas,
     m2: a.m2 + x.superficieM2,
     kg: a.kg + x.pesoKg,
     valor: a.valor + x.valor,
-  }), { unidades: 0, m2: 0, kg: 0, valor: 0 }), [resumen]);
+  }), { unidades: 0, reservadas: 0, m2: 0, kg: 0, valor: 0 }), [resumen]);
 
   const tocar = (fn) => {
     setRetazos((prev) => {
@@ -143,7 +144,7 @@ export function VistaStock() {
       </Aviso>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi titulo="Unidades disponibles" valor={num(total.unidades, 0)} detalle="retazos identificados" />
+        <Kpi titulo="Unidades disponibles" valor={num(total.unidades, 0)} detalle={`${num(total.reservadas, 0)} reservadas por OT`} />
         <Kpi titulo="Superficie útil" valor={`${num(total.m2, 2)} m²`} detalle="sin contar descartados" />
         <Kpi titulo="Peso en deposito" valor={`${num(total.kg, 1)} kg`} detalle="material recuperable" />
         <Kpi titulo="Valor de referencia" valor={money(total.valor, sim, 0)} detalle="a precio de compra actual" />
@@ -183,7 +184,7 @@ export function VistaStock() {
                     return <tr key={r.id} className="border-b border-borde/60 last:border-0 hover:bg-panel-alto">
                       <td className="px-3 py-2"><div className="font-semibold">{m?.nombre || r.materialId}</div><div className="text-[10.5px] text-tenue">{r.ubicacion || 'Sin ubicacion'}{r.lote ? ` · ${r.lote}` : ''}</div></td>
                       <td className="px-3 py-2 font-mono text-suave">{r.w} × {r.h} · {r.espesor} mm</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{r.cantidad}</td>
+                      <td className="px-3 py-2 text-right tabular-nums"><div>{r.cantidad}</div><div className="text-[10px] text-tenue">{unidadesDisponibles(r)} libres{cantidadReservada(r) ? ` · ${cantidadReservada(r)} reservadas` : ''}</div></td>
                       <td className="px-3 py-2 text-right tabular-nums">{num(superficieRetazoM2(r) / Math.max(1, r.cantidad), 2)} m²/u</td>
                       <td className="px-3 py-2 text-right tabular-nums">{num(pesoRetazoKg(r, m), 1)} kg</td>
                       <td className="px-3 py-2 text-right tabular-nums">{money(valorRetazo(r, m), sim, 0)}</td>

@@ -22,15 +22,22 @@ import { z } from 'zod';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DB, fusionarProfundo } from './src/server/db.js';
+import { DB, fusionarProfundo, nuevoId } from './src/server/db.js';
+import {
+  asignacionesRetazoDeItems,
+  consumirRetazos,
+  liberarRetazos,
+  normalizarRetazo,
+  reservarRetazos,
+} from './src/core/retazos.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUERTO = Number(process.env.PORT) || 4321;
 const RAIZ = __dirname;
 const EN_VERCEL = process.env.VERCEL === '1';
-const DIR_DATOS = EN_VERCEL ? path.join('/tmp', 'kort-data') : path.join(RAIZ, 'data');
-const DIR_SALIDAS = EN_VERCEL ? path.join('/tmp', 'kort-salidas') : path.join(RAIZ, 'salidas');
+const DIR_DATOS = EN_VERCEL ? path.join('/tmp', 'kort-data') : (process.env.KORT_DATA_DIR || path.join(RAIZ, 'data'));
+const DIR_SALIDAS = EN_VERCEL ? path.join('/tmp', 'kort-salidas') : (process.env.KORT_SALIDAS_DIR || path.join(RAIZ, 'salidas'));
 const DIR_WEB = path.join(RAIZ, 'web-dist');
 
 const db = new DB(DIR_DATOS);
@@ -63,6 +70,10 @@ const esquemaRestaurar = z.object({
 });
 
 const esquemaRespaldo = z.record(z.string(), z.unknown());
+
+const esquemaAprobar = z.object({
+  presupuestoId: z.string().min(1),
+});
 
 const esquemaEntero = (def, max) =>
   z.coerce.number().int().positive().max(max).catch(def).default(def);
@@ -181,6 +192,38 @@ app.use((req, _res, siguiente) => {
 
 const api = express.Router();
 
+function validarEdicionRetazos(lista) {
+  const normalizados = lista.map(normalizarRetazo);
+  const ids = new Set();
+  const actuales = new Map((db.leer('retazos') || []).map((r) => [r.id, normalizarRetazo(r)]));
+  const errores = [];
+  const reservadas = (r) => r.reservas.reduce((total, x) => total + x.cantidad, 0);
+
+  for (const r of normalizados) {
+    if (!r.id) errores.push('Hay un retazo sin id.');
+    if (ids.has(r.id)) errores.push(`El id de retazo ${r.id} está repetido.`);
+    ids.add(r.id);
+    if (reservadas(r) > r.cantidad) errores.push(`El retazo ${r.id} tiene más unidades reservadas que físicas.`);
+    if (r.estado === 'descartado' && r.reservas.length) errores.push(`El retazo ${r.id} no puede descartarse mientras una OT lo reserva.`);
+
+    const anterior = actuales.get(r.id);
+    if (!anterior?.reservas.length) continue;
+    const nuevasPorOrden = new Map(r.reservas.map((x) => [x.ordenId, x.cantidad]));
+    for (const reserva of anterior.reservas) {
+      if ((nuevasPorOrden.get(reserva.ordenId) || 0) < reserva.cantidad) {
+        errores.push(`No se puede quitar la reserva de la orden ${reserva.ordenId} desde Stock.`);
+      }
+    }
+    if (r.materialId !== anterior.materialId || r.espesor !== anterior.espesor || r.w !== anterior.w || r.h !== anterior.h) {
+      errores.push(`No se pueden cambiar medidas o material del retazo ${r.id} mientras está reservado.`);
+    }
+  }
+  for (const anterior of actuales.values()) {
+    if (anterior.reservas.length && !ids.has(anterior.id)) errores.push(`No se puede borrar el retazo ${anterior.id} mientras está reservado.`);
+  }
+  return errores.length ? { ok: false, motivo: errores.join(' ') } : { ok: true };
+}
+
 // --- Documentos únicos (config, materiales, máquinas)
 api.get('/:recurso', (req, res, siguiente) => {
   const { recurso } = req.params;
@@ -214,6 +257,10 @@ api.put('/:recurso', (req, res, siguiente) => {
     const sinId = cuerpo.filter((x) => !x || typeof x !== 'object' || !x.id);
     if (sinId.length) {
       return res.status(400).json({ error: `Hay ${sinId.length} ${recurso} sin id. No se guardó nada.` });
+    }
+    if (recurso === 'retazos') {
+      const control = validarEdicionRetazos(cuerpo);
+      if (!control.ok) return res.status(409).json({ error: control.motivo });
     }
     if (recurso === 'materiales') {
       const sinProcesos = cuerpo.filter((m) => !m.procesos || !Object.keys(m.procesos).length);
@@ -255,6 +302,84 @@ api.get('/:recurso/:id', (req, res, siguiente) => {
   res.json(o);
 });
 
+function asignacionesDeOrden(orden) {
+  if (Array.isArray(orden?.retazos) && orden.retazos.length) {
+    return orden.retazos
+      .filter((x) => x.estado !== 'liberado' && x.estado !== 'consumido')
+      .map((x) => ({ retazoId: x.retazoId || x.id, cantidad: x.cantidad }));
+  }
+  return asignacionesRetazoDeItems(orden?.items || []);
+}
+
+function marcasRetazoOrden(asignaciones, estado) {
+  const fecha = new Date().toISOString();
+  return (asignaciones || []).map((x) => ({
+    retazoId: x.retazoId || x.id,
+    cantidad: x.cantidad,
+    estado,
+    fecha,
+  }));
+}
+
+/**
+ * Aprueba un presupuesto y crea su OT en una sola transaccion. El cliente no
+ * decide el numero de OT ni escribe el stock: ambos salen de la base.
+ */
+api.post('/ordenes/aprobar', (req, res) => {
+  const { presupuestoId } = validar(esquemaAprobar, req.body);
+  const presupuesto = db.obtener('presupuestos', presupuestoId);
+  if (!presupuesto) return res.status(404).json({ error: 'El presupuesto no existe.' });
+
+  const existente = db.lista('ordenes').find((x) => x.presupuestoId === presupuestoId);
+  if (existente) {
+    return res.json({ orden: existente, repetido: true, reservadas: (existente.retazos || []).filter((x) => x.estado === 'reservado').reduce((a, x) => a + Number(x.cantidad || 0), 0) });
+  }
+
+  const id = nuevoId();
+  const asignaciones = asignacionesRetazoDeItems(presupuesto.items || []);
+  const orden = {
+    id,
+    presupuestoId: presupuesto.id,
+    cliente: presupuesto.cliente,
+    items: (presupuesto.items || []).map((item) => ({
+      nombre: item.nombre,
+      cantidad: item.cantidad,
+      materialId: item.materialId,
+      espesor: item.espesor,
+      materialCliente: item.materialCliente === true,
+      retazoId: item.retazoId || null,
+    })),
+    resumen: presupuesto.resumen,
+    retazos: marcasRetazoOrden(asignaciones, 'reservado'),
+    estado: 'pendiente',
+    fechaEntrega: '',
+    prioridad: 'normal',
+  };
+
+  try {
+    const salida = db.transaccion(() => {
+      const reserva = reservarRetazos(db.leer('retazos') || [], asignaciones, {
+        ordenId: id,
+        presupuestoId: presupuesto.id,
+      });
+      if (!reserva.ok) {
+        const error = new Error(reserva.motivo);
+        error.status = 409;
+        throw error;
+      }
+      orden.numero = db.siguienteNumero('OT');
+      db.escribir('retazos', reserva.retazos, req.operario);
+      const creada = db.crear('ordenes', orden, req.operario);
+      db.actualizar('presupuestos', presupuesto.id, { estado: 'aprobado' }, req.operario);
+      return { orden: creada, reservadas: reserva.reservadas };
+    });
+    res.status(201).json(salida);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    throw error;
+  }
+});
+
 api.post('/:recurso', (req, res, siguiente) => {
   const { recurso } = req.params;
   if (!COLECCIONES.includes(recurso)) return siguiente();
@@ -264,12 +389,104 @@ api.post('/:recurso', (req, res, siguiente) => {
   res.status(201).json(db.crear(recurso, body, req.operario));
 });
 
+/** Cambios de etapa con movimiento real del retazero. */
+api.put('/ordenes/:id', (req, res, siguiente) => {
+  const { id } = req.params;
+  const actual = db.obtener('ordenes', id);
+  if (!actual) return siguiente();
+  const nuevoEstado = req.body?.estado;
+  if (!nuevoEstado || nuevoEstado === actual.estado) {
+    return res.json(db.actualizar('ordenes', id, req.body, req.operario));
+  }
+  if (actual.estado === 'cancelado' && nuevoEstado !== 'cancelado') {
+    return res.status(409).json({ error: 'Una orden cancelada no vuelve a producción. Creá una nueva OT.' });
+  }
+
+  try {
+    const salida = db.transaccion(() => {
+      let retazos = db.leer('retazos') || [];
+      let cambios = { ...req.body };
+      const asignaciones = asignacionesDeOrden(actual);
+
+      if (nuevoEstado === 'corte' && actual.estado !== 'corte') {
+        // Las OTs antiguas no tienen la marca de reserva. Se intenta reservar
+        // antes de consumirlas para que nunca se descuente stock sin respaldo.
+        const reserva = reservarRetazos(retazos, asignaciones, {
+          ordenId: id,
+          presupuestoId: actual.presupuestoId,
+        });
+        if (!reserva.ok) {
+          const error = new Error(reserva.motivo);
+          error.status = 409;
+          throw error;
+        }
+        retazos = reserva.retazos;
+        const consumo = consumirRetazos(retazos, id);
+        if (!consumo.ok) {
+          const error = new Error(consumo.motivo);
+          error.status = 409;
+          throw error;
+        }
+        if (consumo.consumidas > 0) {
+          retazos = consumo.retazos;
+          cambios.retazos = marcasRetazoOrden(asignaciones, 'consumido');
+        }
+        if (consumo.consumidas > 0 || reserva.reservadas > 0) db.escribir('retazos', retazos, req.operario);
+      }
+
+      if (nuevoEstado === 'cancelado') {
+        const liberacion = liberarRetazos(retazos, id);
+        if (!liberacion.ok) {
+          const error = new Error(liberacion.motivo);
+          error.status = 409;
+          throw error;
+        }
+        if (liberacion.liberadas > 0) {
+          db.escribir('retazos', liberacion.retazos, req.operario);
+          cambios.retazos = marcasRetazoOrden(asignaciones, 'liberado');
+        }
+      }
+
+      return db.actualizar('ordenes', id, cambios, req.operario);
+    });
+    res.json(salida);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    throw error;
+  }
+});
+
+// Una aprobacion sin OT dejaria el presupuesto vendido pero sin material
+// reservado. La unica entrada valida es "Pasar a produccion".
+api.put('/presupuestos/:id', (req, res, siguiente) => {
+  const actual = db.obtener('presupuestos', req.params.id);
+  if (!actual) return siguiente();
+  if (req.body?.estado === 'aprobado' && actual.estado !== 'aprobado') {
+    const tieneOrden = db.lista('ordenes').some((x) => x.presupuestoId === actual.id);
+    if (!tieneOrden) return res.status(409).json({ error: 'Aprobá desde "Pasar a producción" para crear la OT y reservar el material.' });
+  }
+  res.json(db.actualizar('presupuestos', actual.id, req.body, req.operario));
+});
+
 api.put('/:recurso/:id', (req, res, siguiente) => {
   const { recurso, id } = req.params;
   if (!COLECCIONES.includes(recurso)) return siguiente();
   const o = db.actualizar(recurso, id, req.body, req.operario);
   if (!o) return res.status(404).json({ error: 'No existe' });
   res.json(o);
+});
+
+/** Borrar una OT tambien libera lo que seguia reservado. */
+api.delete('/ordenes/:id', (req, res, siguiente) => {
+  const { id } = req.params;
+  const actual = db.obtener('ordenes', id);
+  if (!actual) return siguiente();
+  const salida = db.transaccion(() => {
+    const liberacion = liberarRetazos(db.leer('retazos') || [], id);
+    if (liberacion.ok && liberacion.liberadas > 0) db.escribir('retazos', liberacion.retazos, req.operario);
+    return { ok: db.borrar('ordenes', id, req.operario), liberadas: liberacion.liberadas || 0 };
+  });
+  res.json(salida);
 });
 
 api.delete('/:recurso/:id', (req, res, siguiente) => {

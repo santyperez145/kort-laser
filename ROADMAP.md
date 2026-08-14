@@ -397,8 +397,11 @@ Hecho el 2026-08-14. `listaDeCompra()` sigue informando el retazo que queda en
 cada programa, y ahora el stock persistente permite darlo de alta, editarlo,
 seleccionarlo y buscar candidatos por material, espesor y rectángulo envolvente.
 El cotizador puede seleccionar un retazo compatible y calcula el material por
-el área consumida, sin compartirlo automáticamente con otro programa. La
-reserva física queda para el paso de aprobación de la orden.
+el área consumida, sin compartirlo automáticamente con otro programa. Al
+aprobar la orden, la API reserva por orden y cantidad dentro de una transacción
+SQLite idempotente; una chapa de varias unidades puede reservar sólo las que
+necesita ese trabajo. Al pasar la OT a `corte`, esas unidades se consumen y el
+sobrante queda trazable; cancelar o borrar una OT libera sólo la reserva propia.
 
 El ABM vive en `Stock de chapa`, con ubicación, lote, estado, cantidad, peso y
 valor de referencia. La preselección es conservadora: el nesting sigue siendo

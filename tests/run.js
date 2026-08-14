@@ -41,7 +41,18 @@ import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, red
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
-import { candidatosRetazo, consumirRetazo, pesoRetazoKg, resumenStockRetazos, superficieRetazoM2 } from '../src/core/retazos.js';
+import {
+  asignacionesRetazoDeItems,
+  candidatosRetazo,
+  consumirRetazo,
+  consumirRetazos,
+  liberarRetazos,
+  pesoRetazoKg,
+  reservarRetazos,
+  resumenStockRetazos,
+  superficieRetazoM2,
+  unidadesDisponibles,
+} from '../src/core/retazos.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } from '../src/core/agenda.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
@@ -1285,6 +1296,36 @@ test('una cotizacion puede reservar un retazo y lo imputa por area', () => {
   assert.equal(r.costos.modoMaterial, 'Retazo del stock');
   assert.equal(r.nesting.chapa.w, 500);
   assert.ok(r.costos.material > 0);
+});
+
+test('las reservas de retazo son parciales e idempotentes', () => {
+  const base = [{ id: 'r1', materialId: 'acero-sae1010', espesor: 3, w: 500, h: 400, cantidad: 2 }];
+  const asignaciones = asignacionesRetazoDeItems([
+    { retazoId: 'r1', cantidad: 1 },
+    { retazoId: 'r1', cantidad: 1 },
+  ]);
+  assert.deepEqual(asignaciones, [{ retazoId: 'r1', cantidad: 2 }]);
+
+  const primera = reservarRetazos(base, [{ retazoId: 'r1', cantidad: 1 }], { ordenId: 'ot-1', presupuestoId: 'p-1' });
+  assert.equal(primera.ok, true);
+  assert.equal(unidadesDisponibles(primera.retazos[0]), 1);
+  const repetida = reservarRetazos(primera.retazos, [{ retazoId: 'r1', cantidad: 1 }], { ordenId: 'ot-1', presupuestoId: 'p-1' });
+  assert.equal(repetida.ok, true);
+  assert.equal(unidadesDisponibles(repetida.retazos[0]), 1, 'reintentar no duplica la reserva');
+  const ocupada = reservarRetazos(repetida.retazos, [{ retazoId: 'r1', cantidad: 2 }], { ordenId: 'ot-2' });
+  assert.equal(ocupada.ok, false, 'no se pueden prometer unidades ya reservadas');
+});
+
+test('cancelar libera y entrar en corte consume la reserva', () => {
+  const base = [{ id: 'r1', materialId: 'acero-sae1010', espesor: 3, w: 500, h: 400, cantidad: 2 }];
+  const reserva = reservarRetazos(base, [{ retazoId: 'r1', cantidad: 1 }], { ordenId: 'ot-1' });
+  const liberada = liberarRetazos(reserva.retazos, 'ot-1');
+  assert.equal(unidadesDisponibles(liberada.retazos[0]), 2);
+  const segunda = reservarRetazos(liberada.retazos, [{ retazoId: 'r1', cantidad: 1 }], { ordenId: 'ot-2' });
+  const consumida = consumirRetazos(segunda.retazos, 'ot-2');
+  assert.equal(consumida.consumidas, 1);
+  assert.equal(consumida.retazos[0].cantidad, 1);
+  assert.equal(unidadesDisponibles(consumida.retazos[0]), 1);
 });
 
 /* ================================================================== */

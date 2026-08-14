@@ -19,7 +19,7 @@ npm install        # sólo la primera vez
 npm run build      # compila la interfaz a web-dist/  (hace falta tras tocar app/)
 npm start          # arranca en http://localhost:4321
 npm run dev        # servidor + Vite con recarga en vivo (front en :5173)
-npm test           # 291 verificaciones del núcleo (ejecutado 2026-08-14)
+npm test           # 293 verificaciones del núcleo (ejecutado 2026-08-14)
 ```
 
 En Windows, `INICIAR.bat` hace todo con doble clic: instala si falta, compila
@@ -52,7 +52,7 @@ código.
   deliberada. `app/` va con React, Tailwind, Radix, Recharts, Konva y
   react-three-fiber. `src/core/` —corte, plegado, nesting, DXF, PDF, precios—
   **no importa nada de fuera** y sigue así: es lo que hace que corra igual en
-  Node y en el navegador, y lo que permite que las 291 verificaciones corran sin
+  Node y en el navegador, y lo que permite que las 293 verificaciones corran sin
   levantar un navegador.
 - **Nada de CDN: todo se sirve desde la máquina del taller**, que puede estar
   sin internet. Las dependencias se empaquetan en `web-dist/` y se sirven desde

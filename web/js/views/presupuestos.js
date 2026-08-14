@@ -89,6 +89,10 @@ export async function render(cont) {
         h('option', { value: k, selected: (p.estado || 'borrador') === k }, v.txt))
     );
     s.onchange = async () => {
+      if (s.value === 'aprobado' && p.estado !== 'aprobado') {
+        s.value = p.estado || 'borrador';
+        return aProduccion(p);
+      }
       await api.put('presupuestos/' + p.id, { estado: s.value });
       p.estado = s.value;
       toast('Estado actualizado', 'ok');
@@ -102,23 +106,16 @@ export async function render(cont) {
   }
 
   async function aProduccion(p) {
-    const existentes = await api.get('ordenes');
-    if (existentes.some((o) => o.presupuestoId === p.id)) {
-      return toast('Ese presupuesto ya tiene una orden de trabajo');
+    try {
+      const salida = await api.post('ordenes/aprobar', { presupuestoId: p.id });
+      const ot = salida.orden || salida;
+      p.estado = 'aprobado';
+      const detalle = salida.reservadas ? ` · ${salida.reservadas} unidad${salida.reservadas === 1 ? '' : 'es'} de retazo reservada${salida.reservadas === 1 ? '' : 's'}` : '';
+      toast(`Orden ${ot.numero} creada${detalle}`, 'ok');
+      pintarTabla();
+    } catch (e) {
+      toast('No se pudo aprobar: ' + e.message, 'error');
     }
-    const ot = await api.post('ordenes', {
-      presupuestoId: p.id,
-      cliente: p.cliente,
-      items: (p.items || []).map((i) => ({ nombre: i.nombre, cantidad: i.cantidad, materialId: i.materialId, espesor: i.espesor })),
-      resumen: p.resumen,
-      estado: 'pendiente',
-      fechaEntrega: '',
-      prioridad: 'normal',
-    });
-    await api.put('presupuestos/' + p.id, { estado: 'aprobado' });
-    p.estado = 'aprobado';
-    toast(`Orden ${ot.numero} creada`, 'ok');
-    pintarTabla();
   }
 
   function borrar(p) {

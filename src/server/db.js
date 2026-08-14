@@ -205,6 +205,19 @@ export class DB {
 
   /* ---------------- Ajustes (config, materiales, máquinas) ---------------- */
 
+  /** Ejecuta varios cambios relacionados como una sola operación SQLite. */
+  transaccion(fn) {
+    this.db.run('BEGIN IMMEDIATE');
+    try {
+      const resultado = fn();
+      this.db.run('COMMIT');
+      return resultado;
+    } catch (error) {
+      try { this.db.run('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
   leer(clave, porDefecto = null) {
     const f = this.db.get('SELECT valor FROM ajustes WHERE clave = ?', [clave]);
     if (!f) {

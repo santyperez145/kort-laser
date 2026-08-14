@@ -16,6 +16,15 @@ const positivo = (valor, defecto = 0) => Math.max(0, n(valor, defecto));
 
 export const ESTADOS_RETAZO = ['disponible', 'reservado', 'descartado'];
 
+function normalizarReserva(reserva = {}) {
+  return {
+    ordenId: String(reserva.ordenId || reserva.orden_id || '').trim(),
+    presupuestoId: String(reserva.presupuestoId || reserva.presupuesto_id || '').trim(),
+    cantidad: Math.max(0, Math.round(n(reserva.cantidad, 0))),
+    fecha: reserva.fecha || null,
+  };
+}
+
 export function normalizarRetazo(retazo = {}) {
   const estado = ESTADOS_RETAZO.includes(retazo.estado) ? retazo.estado : 'disponible';
   return {
@@ -30,9 +39,27 @@ export function normalizarRetazo(retazo = {}) {
     lote: String(retazo.lote || '').trim(),
     origen: String(retazo.origen || 'corte').trim(),
     notas: String(retazo.notas || '').trim(),
+    reservas: (Array.isArray(retazo.reservas) ? retazo.reservas : [])
+      .map(normalizarReserva)
+      .filter((x) => x.ordenId && x.cantidad > 0),
     creado: retazo.creado || null,
     modificado: retazo.modificado || null,
   };
+}
+
+/** Un estado `reservado` manual bloquea todas las unidades del retazo. */
+export function cantidadReservada(retazo, excluirOrdenId = '') {
+  const r = normalizarRetazo(retazo);
+  if (r.estado === 'reservado') return r.cantidad;
+  return r.reservas
+    .filter((x) => !excluirOrdenId || x.ordenId !== excluirOrdenId)
+    .reduce((total, x) => total + x.cantidad, 0);
+}
+
+export function unidadesDisponibles(retazo, excluirOrdenId = '') {
+  const r = normalizarRetazo(retazo);
+  if (r.estado !== 'disponible') return 0;
+  return Math.max(0, r.cantidad - cantidadReservada(r, excluirOrdenId));
 }
 
 export function superficieRetazoM2(retazo) {
@@ -76,16 +103,20 @@ export function resumenStockRetazos(retazos = [], materiales = []) {
         pesoKg: 0,
         valor: 0,
         retazos: 0,
+        superficieDisponibleM2: 0,
       });
     }
     const g = grupos.get(clave);
     g.retazos += 1;
     g.unidades += r.cantidad;
-    if (r.estado === 'disponible') g.disponibles += r.cantidad;
-    if (r.estado === 'reservado') g.reservadas += r.cantidad;
+    const disponibles = unidadesDisponibles(r);
+    const reservadas = cantidadReservada(r);
+    g.disponibles += disponibles;
+    g.reservadas += reservadas;
     if (r.estado === 'descartado') g.descartadas += r.cantidad;
     if (r.estado !== 'descartado') {
       g.superficieM2 += superficieRetazoM2(r);
+      g.superficieDisponibleM2 += (r.w * r.h * disponibles) / 1e6;
       g.pesoKg += pesoRetazoKg(r, material);
       g.valor += valorRetazo(r, material);
     }
@@ -116,7 +147,7 @@ export function candidatosRetazo(retazos = [], requisito = {}, opciones = {}) {
 
   return (retazos || [])
     .map(normalizarRetazo)
-    .filter((r) => r.estado === 'disponible' && r.cantidad >= cantidad)
+    .filter((r) => unidadesDisponibles(r) >= cantidad)
     .filter((r) => r.materialId === materialId && Math.abs(r.espesor - espesor) <= tolerancia)
     .map((r) => {
       const orientacion = orientacionQueEntra(w + margen * 2, h + margen * 2, r.w, r.h);
@@ -126,6 +157,7 @@ export function candidatosRetazo(retazos = [], requisito = {}, opciones = {}) {
       return {
         ...r,
         cantidadSolicitada: cantidad,
+        disponibles: unidadesDisponibles(r),
         rotacion: orientacion.rotacion,
         areaNecesariaM2: areaNecesaria,
         desperdicioM2: Math.max(0, areaRetazo - areaNecesaria),
@@ -134,6 +166,127 @@ export function candidatosRetazo(retazos = [], requisito = {}, opciones = {}) {
     })
     .filter(Boolean)
     .sort((a, b) => a.desperdicioM2 - b.desperdicioM2 || a.w * a.h - b.w * b.h);
+}
+
+/** Agrupa las unidades de retazo elegidas por los items de una orden. */
+export function asignacionesRetazoDeItems(items = []) {
+  const porId = new Map();
+  for (const item of items || []) {
+    const id = String(item?.retazoId || '').trim();
+    const cantidad = Math.max(0, Math.round(n(item?.cantidad, 0)));
+    if (!id || cantidad <= 0) continue;
+    porId.set(id, (porId.get(id) || 0) + cantidad);
+  }
+  return [...porId.entries()].map(([retazoId, cantidad]) => ({ retazoId, cantidad }));
+}
+
+function normalizarAsignaciones(asignaciones = []) {
+  const porId = new Map();
+  for (const item of asignaciones || []) {
+    const retazoId = String(item?.retazoId || item?.id || '').trim();
+    const cantidad = Math.max(0, Math.round(n(item?.cantidad, 0)));
+    if (!retazoId || cantidad <= 0) continue;
+    porId.set(retazoId, (porId.get(retazoId) || 0) + cantidad);
+  }
+  return porId;
+}
+
+/**
+ * Reserva unidades para una orden. La operación es idempotente: repetirla
+ * para la misma orden reemplaza su reserva anterior en vez de sumarla.
+ */
+export function reservarRetazos(retazos = [], asignaciones = [], opciones = {}) {
+  const ordenId = String(opciones.ordenId || '').trim();
+  const presupuestoId = String(opciones.presupuestoId || '').trim();
+  if (!ordenId) return { ok: false, motivo: 'Falta el identificador de la orden.' };
+
+  const porId = normalizarAsignaciones(asignaciones);
+  const originales = (retazos || []).map(normalizarRetazo);
+  const porRetazo = new Map(originales.map((r) => [r.id, r]));
+
+  for (const [retazoId, cantidad] of porId) {
+    const r = porRetazo.get(retazoId);
+    if (!r) return { ok: false, motivo: `El retazo ${retazoId} ya no existe en el stock.` };
+    if (r.estado !== 'disponible') {
+      return { ok: false, motivo: `El retazo ${retazoId} no está disponible.` };
+    }
+    const libres = unidadesDisponibles(r, ordenId);
+    if (libres < cantidad) {
+      return {
+        ok: false,
+        motivo: `El retazo ${retazoId} tiene ${libres} unidad${libres === 1 ? '' : 'es'} libre${libres === 1 ? '' : 's'} y la orden necesita ${cantidad}.`,
+      };
+    }
+  }
+
+  const fecha = opciones.fecha || new Date().toISOString();
+  const salida = originales.map((r) => {
+    const reservas = r.reservas.filter((x) => x.ordenId !== ordenId);
+    const cantidad = porId.get(r.id) || 0;
+    if (cantidad > 0) reservas.push({ ordenId, presupuestoId, cantidad, fecha });
+    return { ...r, reservas, modificado: fecha };
+  });
+  return {
+    ok: true,
+    retazos: salida,
+    reservadas: [...porId.values()].reduce((total, cantidad) => total + cantidad, 0),
+    asignaciones: [...porId.entries()].map(([retazoId, cantidad]) => ({ retazoId, cantidad })),
+  };
+}
+
+/** Libera sólo las reservas de una orden; repetir la operación no falla. */
+export function liberarRetazos(retazos = [], ordenId) {
+  const dueño = String(ordenId || '').trim();
+  if (!dueño) return { ok: false, motivo: 'Falta el identificador de la orden.' };
+  let liberadas = 0;
+  const fecha = new Date().toISOString();
+  const salida = (retazos || []).map((original) => {
+    const r = normalizarRetazo(original);
+    const propias = r.reservas.filter((x) => x.ordenId === dueño);
+    liberadas += propias.reduce((total, x) => total + x.cantidad, 0);
+    if (!propias.length) return r;
+    return { ...r, reservas: r.reservas.filter((x) => x.ordenId !== dueño), modificado: fecha };
+  });
+  return { ok: true, retazos: salida, liberadas };
+}
+
+/** Consume la reserva al entrar en corte, manteniendo el sobrante trazable. */
+export function consumirRetazos(retazos = [], ordenId) {
+  const dueño = String(ordenId || '').trim();
+  if (!dueño) return { ok: false, motivo: 'Falta el identificador de la orden.' };
+  const originales = (retazos || []).map(normalizarRetazo);
+  const propias = originales.flatMap((r) => r.reservas
+    .filter((x) => x.ordenId === dueño)
+    .map((x) => ({ retazoId: r.id, cantidad: x.cantidad })));
+  if (!propias.length) return { ok: true, retazos: originales, consumidas: 0 };
+
+  for (const { retazoId, cantidad } of propias) {
+    const r = originales.find((x) => x.id === retazoId);
+    if (!r || r.cantidad < cantidad) {
+      return { ok: false, motivo: `El retazo ${retazoId} no tiene unidades suficientes para consumir la reserva.` };
+    }
+  }
+
+  const fecha = new Date().toISOString();
+  const porId = new Map();
+  for (const reserva of propias) porId.set(reserva.retazoId, (porId.get(reserva.retazoId) || 0) + reserva.cantidad);
+  const salida = originales.map((r) => {
+    const cantidad = porId.get(r.id) || 0;
+    if (!cantidad) return r;
+    const restante = r.cantidad - cantidad;
+    return {
+      ...r,
+      cantidad: restante,
+      estado: restante > 0 ? 'disponible' : 'descartado',
+      reservas: r.reservas.filter((x) => x.ordenId !== dueño),
+      modificado: fecha,
+    };
+  });
+  return {
+    ok: true,
+    retazos: salida,
+    consumidas: propias.reduce((total, x) => total + x.cantidad, 0),
+  };
 }
 
 /** Decrementa unidades de un retazo sin inventar cortes del sobrante. */

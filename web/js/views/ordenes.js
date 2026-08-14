@@ -3,7 +3,7 @@
 import { h, vaciar, toast, confirmar, modal, cerrarModal, money, num, fecha, badge, ESTADOS_OT } from '../ui.js';
 import { api, simbolo } from '../api.js';
 
-const COLUMNAS = ['pendiente', 'material', 'corte', 'plegado', 'terminado', 'entregado'];
+const COLUMNAS = ['pendiente', 'material', 'corte', 'plegado', 'terminado', 'entregado', 'cancelado'];
 
 export async function render(cont) {
   let [ordenes, agenda] = await Promise.all([api.get('ordenes'), api.get('agenda').catch(() => null)]);
@@ -148,7 +148,7 @@ export async function render(cont) {
     }, '⏱ ¿Cuánto tardó?');
   }
 
-  async function mover(o, delta) {
+  async function moverAnterior(o, delta) {
     const i = COLUMNAS.indexOf(o.estado || 'pendiente');
     const nuevo = COLUMNAS[Math.max(0, Math.min(COLUMNAS.length - 1, i + delta))];
     o.estado = nuevo;
@@ -223,12 +223,47 @@ export async function render(cont) {
     });
   }
 
+  async function mover(o, delta) {
+    const i = COLUMNAS.indexOf(o.estado || 'pendiente');
+    const nuevo = COLUMNAS[Math.max(0, Math.min(COLUMNAS.length - 2, i + delta))];
+    try {
+      const actualizado = await api.put('ordenes/' + o.id, { estado: nuevo });
+      Object.assign(o, actualizado);
+      if (nuevo === 'entregado' && o.presupuestoId) {
+        await api.put('presupuestos/' + o.presupuestoId, { estado: 'facturado' }).catch(() => {});
+      }
+      agenda = await api.get('agenda').catch(() => agenda);
+      pintar();
+      if (nuevo === 'corte' && (o.retazos || []).some((x) => x.estado === 'consumido')) {
+        toast('Retazo consumido y sobrante actualizado', 'ok');
+      }
+      if (nuevo === 'terminado' && !o.real?.segundos) pedirTiempoReal(o);
+    } catch (e) {
+      toast('No se pudo mover la orden: ' + e.message, 'error');
+    }
+  }
+
+  function cancelar(o) {
+    confirmar('Cancelar orden', `Se va a cancelar la orden ${o.numero}. La reserva de retazos pendiente se libera.`, async () => {
+      try {
+        const actualizado = await api.put('ordenes/' + o.id, { estado: 'cancelado' });
+        Object.assign(o, actualizado);
+        agenda = await api.get('agenda').catch(() => agenda);
+        pintar();
+        toast('Orden cancelada y stock liberado', 'ok');
+      } catch (e) {
+        toast('No se pudo cancelar: ' + e.message, 'error');
+      }
+    }, 'Cancelar orden');
+  }
+
   const fmtMin = (s) => {
     const m = Math.round(s / 60);
     return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
   };
 
   function borrar(o) {
+    if (!['entregado', 'cancelado'].includes(o.estado)) return cancelar(o);
     confirmar('Eliminar orden', `Se va a borrar la orden ${o.numero}.`, async () => {
       await api.del('ordenes/' + o.id);
       ordenes = ordenes.filter((x) => x.id !== o.id);
