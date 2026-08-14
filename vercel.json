@@ -4,7 +4,7 @@
   "outputDirectory": "web-dist",
   "functions": {
     "api/index.js": {
-      "includeFiles": "{web/**,src/core/**,node_modules/three/build/three.module.min.js,node_modules/three/build/three.core.min.js,node_modules/three/examples/jsm/controls/OrbitControls.js,node_modules/chart.js/dist/chart.umd.js}",
+      "includeFiles": "{web/**,src/core/**,node_modules/node-sqlite3-wasm/dist/**,node_modules/three/build/three.module.min.js,node_modules/three/build/three.core.min.js,node_modules/three/examples/jsm/controls/OrbitControls.js,node_modules/chart.js/dist/chart.umd.js}",
       "maxDuration": 30
     }
   },
