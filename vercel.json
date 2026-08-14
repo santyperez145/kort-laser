@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "web-dist",
+  "functions": {
+    "api/index.js": {
+      "includeFiles": [
+        "web/**",
+        "src/core/**",
+        "node_modules/three/build/three.module.min.js",
+        "node_modules/three/build/three.core.min.js",
+        "node_modules/three/examples/jsm/controls/OrbitControls.js",
+        "node_modules/chart.js/dist/chart.umd.js"
+      ],
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/salidas/(.*)", "destination": "/api/index.js" },
+    { "source": "/legacy", "destination": "/api/index.js" },
+    { "source": "/legacy/(.*)", "destination": "/api/index.js" },
+    { "source": "/web/(.*)", "destination": "/api/index.js" },
+    { "source": "/lib/(.*)", "destination": "/api/index.js" },
+    { "source": "/src/core/(.*)", "destination": "/api/index.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

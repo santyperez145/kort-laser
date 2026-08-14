@@ -24,11 +24,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DB, fusionarProfundo } from './src/server/db.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const PUERTO = Number(process.env.PORT) || 4321;
 const RAIZ = __dirname;
-const DIR_DATOS = path.join(RAIZ, 'data');
-const DIR_SALIDAS = path.join(RAIZ, 'salidas');
+const EN_VERCEL = process.env.VERCEL === '1';
+const DIR_DATOS = EN_VERCEL ? path.join('/tmp', 'kort-data') : path.join(RAIZ, 'data');
+const DIR_SALIDAS = EN_VERCEL ? path.join('/tmp', 'kort-salidas') : path.join(RAIZ, 'salidas');
 const DIR_WEB = path.join(RAIZ, 'web-dist');
 
 const db = new DB(DIR_DATOS);
@@ -443,28 +445,36 @@ app.use((err, _req, res, _siguiente) => {
 
 /* ------------------------------------------------------------------ */
 
-const servidor = app.listen(PUERTO, () => {
-  const linea = '─'.repeat(52);
-  console.log(`\n┌${linea}┐`);
-  console.log('│  KORT · Sistema de corte láser y plegado CNC       │');
-  console.log(`├${linea}┤`);
-  console.log(`│  Abrí en el navegador:  http://localhost:${PUERTO}${' '.repeat(Math.max(0, 9 - String(PUERTO).length))}│`);
-  console.log(`│  Datos:    ./data                                 │`);
-  console.log(`│  Salidas:  ./salidas  (PDF y DXF generados)        │`);
-  if (!hayBundle) {
+export function iniciarServidor() {
+  const servidor = app.listen(PUERTO, () => {
+    const linea = '─'.repeat(52);
+    console.log(`\n┌${linea}┐`);
+    console.log('│  KORT · Sistema de corte láser y plegado CNC       │');
     console.log(`├${linea}┤`);
-    console.log('│  ⚠  Front sin compilar — corré:  npm run build     │');
-  }
-  console.log(`├${linea}┤`);
-  console.log('│  Para cerrar: Ctrl+C                              │');
-  console.log(`└${linea}┘\n`);
-});
+    console.log(`│  Abrí en el navegador:  http://localhost:${PUERTO}${' '.repeat(Math.max(0, 9 - String(PUERTO).length))}│`);
+    console.log(`│  Datos:    ./data                                 │`);
+    console.log(`│  Salidas:  ./salidas  (PDF y DXF generados)        │`);
+    if (!hayBundle) {
+      console.log(`├${linea}┤`);
+      console.log('│  ⚠  Front sin compilar — corré:  npm run build     │');
+    }
+    console.log(`├${linea}┤`);
+    console.log('│  Para cerrar: Ctrl+C                              │');
+    console.log(`└${linea}┘\n`);
+  });
 
-servidor.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') {
-    console.error(`\n  El puerto ${PUERTO} ya está en uso.`);
-    console.error(`  Puede que el sistema ya esté abierto en http://localhost:${PUERTO}`);
-    console.error(`  O arrancalo en otro puerto:  set PORT=4322 && node server.js\n`);
-  } else console.error(e);
-  process.exit(1);
-});
+  servidor.on('error', (e) => {
+    if (e.code === 'EADDRINUSE') {
+      console.error(`\n  El puerto ${PUERTO} ya está en uso.`);
+      console.error(`  Puede que el sistema ya esté abierto en http://localhost:${PUERTO}`);
+      console.error(`  O arrancalo en otro puerto:  set PORT=4322 && node server.js\n`);
+    } else console.error(e);
+    process.exit(1);
+  });
+
+  return servidor;
+}
+
+if (path.resolve(process.argv[1] || '') === __filename) iniciarServidor();
+
+export default app;

@@ -57,6 +57,16 @@ html, body {
 }
 .brand { display: flex; align-items: center; gap: 10px; color: #fff; }
 .brand .logo { width: 30px; height: 30px; border-radius: 7px; }
+.brand .logo-real {
+  display: grid;
+  place-items: center;
+  width: 108px;
+  height: 34px;
+  padding: 3px 8px;
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .25);
+}
+.brand .logo-real img { width: 100%; height: 100%; object-fit: contain; }
 .brand strong { display: block; font-size: 16px; letter-spacing: .5px; line-height: 1.1; }
 .brand span { display: block; font-size: 10.5px; color: #a9c0d6; }
 

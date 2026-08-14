@@ -52,3 +52,5 @@ desktop.ini
 *.swp
 .vscode/
 .idea/
+
+.vercel

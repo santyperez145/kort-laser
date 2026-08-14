@@ -36,10 +36,9 @@ export const RUTAS = [
 
 function Logo() {
   return (
-    <svg viewBox="0 0 100 100" className="size-[30px] rounded-[7px] shrink-0">
-      <rect width="100" height="100" rx="18" fill="#1b3a5c" />
-      <path d="M24 22h14v24l20-24h17L52 48l24 30H58L38 52v26H24z" fill="#e4572e" />
-    </svg>
+    <div className="flex h-9 w-[124px] shrink-0 items-center justify-center rounded-md bg-white px-2 shadow-sm ring-1 ring-white/20">
+      <img src="/kort-logo.png" alt="KORT" className="h-full w-full object-contain" />
+    </div>
   );
 }
 
