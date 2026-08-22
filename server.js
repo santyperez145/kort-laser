@@ -413,6 +413,27 @@ api.put('/ordenes/:id/taller', (req, res, siguiente) => {
       const actual = db.obtener('ordenes', id);
       const evento = { ...req.body, operario: req.operario || req.body?.operario || '' };
       const actualizado = aplicarEventoTaller(actual, evento);
+      if (evento.tipo === 'confirmar-chapa') {
+        const confirmada = actualizado.taller?.corte?.programas?.[evento.programaId]?.chapas?.[Number(evento.chapaIndice)];
+        if (confirmada?.guardarRetazo && confirmada.retazo?.util) {
+          const origen = `OT:${id}:${evento.programaId}:${Number(evento.chapaIndice)}`;
+          const retazos = db.leer('retazos') || [];
+          // La clave de origen vuelve idempotente el alta aunque la respuesta
+          // HTTP se pierda después de haber confirmado la transacción.
+          if (!retazos.some((r) => r.origen === origen)) {
+            const programa = actualizado.planProduccion.programas.find((p) => p.id === evento.programaId);
+            retazos.push(normalizarRetazo({
+              id: nuevoId(), materialId: programa.materialId, espesor: programa.espesor,
+              w: confirmada.retazo.w, h: confirmada.retazo.h, cantidad: 1,
+              estado: 'disponible', ubicacion: confirmada.ubicacion,
+              lote: confirmada.lote, origen,
+              notas: `Franja intacta recuperada de OT ${actualizado.numero || id}, chapa ${Number(evento.chapaIndice) + 1}`,
+              creado: new Date().toISOString(),
+            }));
+            db.escribir('retazos', retazos, req.operario);
+          }
+        }
+      }
       return db.actualizar('ordenes', id, { taller: actualizado.taller }, req.operario);
     });
     res.json(salida);

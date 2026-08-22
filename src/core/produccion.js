@@ -22,6 +22,8 @@ export function crearPlanProduccion(cotizacion, itemsOriginales = []) {
         largoPliegue: r.plegado.largoPliegue || original.plegado?.largoPliegue || 0,
         segundos: r.plegado.tTotal || 0, matrizV: r.datosPliegue?.V || original.plegado?.matrizV || null,
         fuerzaKNm: r.datosPliegue?.fuerzaKNm || null, angulo: original.plegado?.angulo || 90,
+        secuencia: copiar(original.meta?.secuencia || []),
+        perfil: copiar(original.meta?.perfil || null),
       } : null,
     });
     if (!n?.layout?.length || procesoCorte !== 'laser') continue;
@@ -30,6 +32,7 @@ export function crearPlanProduccion(cotizacion, itemsOriginales = []) {
       id: clave, materialId: r.material?.id || original.materialId || '', material: r.material?.nombre || '',
       espesor: r.espesor, gas: r.corte?.gasTipo || r.gas || null, chapa: copiar(n.chapa),
       metodo: n.metodo || '', aprovechamiento: n.aprovechamiento || 0, layout: copiar(n.layout), items: [],
+      retazoId: r.retazo?.id || null,
     });
     programas.get(clave).items.push({
       itemIndice: indice, idEnLayout: n.idEnLayout || 'p',
@@ -41,6 +44,21 @@ export function crearPlanProduccion(cotizacion, itemsOriginales = []) {
 
 const programaDe = (orden, id) => (orden?.planProduccion?.programas || []).find((p) => p.id === id);
 const piezaDe = (programa, ci, pi) => programa?.layout?.[ci]?.piezas?.[pi] || null;
+
+/** Franja rectangular intacta; el esqueleto entre piezas no se promete como stock. */
+export function retazoSeguroDePrograma(programa, chapaIndice, medidas = {}, opciones = {}) {
+  const layout = programa?.layout?.[Number(chapaIndice)];
+  if (!layout) throw new Error('La chapa no existe en el programa guardado.');
+  const w = Number(medidas.w || layout.w);
+  const h = Number(medidas.h || layout.h);
+  if (w + 1e-6 < layout.w || h + 1e-6 < layout.h) throw new Error('La chapa física es menor que la usada por el nesting.');
+  const separacion = Math.max(0, Number(opciones.separacion ?? 5));
+  const alto = Math.max(0, h - Number(layout.alturaOcupada || h) - separacion);
+  const minLado = Math.max(1, Number(opciones.minLado ?? 100));
+  const minAreaMM2 = Math.max(0, Number(opciones.minAreaM2 ?? 0.05) * 1e6);
+  const util = w >= minLado && alto >= minLado && w * alto >= minAreaMM2;
+  return { util, w, h: alto, areaM2: (w * alto) / 1e6, motivo: util ? null : 'La franja intacta es demasiado chica para volver al stock.' };
+}
 
 /** El servidor aplica y persiste una acción por transacción para no pisar otra tablet. */
 export function aplicarEventoTaller(orden, evento, fecha = new Date().toISOString()) {
@@ -62,6 +80,31 @@ export function aplicarEventoTaller(orden, evento, fecha = new Date().toISOStrin
     const clave = `${ci}:${pi}`;
     if (evento.estado === 'pendiente') delete ep.piezas[clave];
     else ep.piezas[clave] = { estado: evento.estado, fecha, operario: String(evento.operario || '').slice(0, 80), motivo: String(evento.motivo || '').slice(0, 240) };
+  } else if (evento.tipo === 'confirmar-chapa') {
+    const programa = programaDe(siguiente, evento.programaId);
+    if (!programa) throw new Error('El programa de corte no existe en esta OT.');
+    const ci = Number(evento.chapaIndice);
+    if (!Number.isInteger(ci) || !programa.layout?.[ci]) throw new Error('La chapa no existe en el programa guardado.');
+    if (!['chapa-nueva', 'retazo', 'cliente'].includes(evento.origen)) throw new Error('Origen de chapa inválido.');
+    const ep = siguiente.taller.corte.programas[evento.programaId] ||= { piezas: {} };
+    ep.chapas ||= {};
+    const medidas = { w: Number(evento.w || programa.layout[ci].w), h: Number(evento.h || programa.layout[ci].h) };
+    const retazo = retazoSeguroDePrograma(programa, ci, medidas, { separacion: evento.separacion });
+    const existente = ep.chapas[ci];
+    if (existente) {
+      const repetido = existente.origen === evento.origen && existente.lote === String(evento.lote || '').slice(0, 100) &&
+        existente.ubicacion === String(evento.ubicacion || '').slice(0, 100) &&
+        existente.medidas.w === medidas.w && existente.medidas.h === medidas.h &&
+        existente.guardarRetazo === (evento.guardarRetazo === true && retazo.util);
+      if (repetido) return siguiente;
+      throw new Error('Esta chapa física ya fue confirmada y no se puede reemplazar en silencio.');
+    }
+    ep.chapas[ci] = {
+      origen: evento.origen, lote: String(evento.lote || '').slice(0, 100),
+      ubicacion: String(evento.ubicacion || '').slice(0, 100), medidas,
+      guardarRetazo: evento.guardarRetazo === true && retazo.util,
+      retazo, fecha, operario: String(evento.operario || '').slice(0, 80),
+    };
   } else if (evento.tipo === 'avance-plegado') {
     const indice = Number(evento.itemIndice);
     const op = siguiente.planProduccion?.operaciones?.find((x) => x.itemIndice === indice && x.plegado);

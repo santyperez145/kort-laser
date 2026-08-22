@@ -696,7 +696,7 @@ y calidad real: disponibilidad sola no se presenta con un nombre más grande.
 versión de software, IP/red industrial, y disponibilidad/licencia de OPC UA,
 MTConnect o API oficial. El adaptador será una pieza reemplazable.
 
-### 🟡 6.2 Puesto de taller y clasificación visual
+### ✅ 6.2 Puesto de taller y clasificación visual
 
 Convertir Producción a React con una ficha de OT por operación. Para corte:
 nesting coloreado por OT/cliente, piezas pendientes/retiradas/rechazadas,
@@ -713,9 +713,15 @@ herramienta y primera pieza. El presupuesto guarda un `planProduccion`
 inmutable y la OT lo hereda: nunca se recalcula en planta con parámetros que
 cambiaron después de vender.
 
-Falta para cerrar la fase: elegir la chapa física por lote, dar de alta el
-retazo real que vuelve al stock e incorporar secuencia gráfica de plegado. El
-tiempo real se sigue pidiendo al cerrar y alimenta la calibración existente.
+Cerrado el 2026-08-22: cada chapa del programa se confirma por origen, medida,
+lote y ubicación. La franja rectangular intacta vuelve al Stock en la misma
+transacción, con vínculo a OT/programa/chapa; el esqueleto irregular no se
+ofrece como material porque no garantiza encastre. Repetir la misma operación
+no duplica stock y una confirmación distinta se rechaza en vez de pisarla.
+
+El plegado muestra además la secuencia vendida por pasos, sentido, ángulo y
+ala, y mantiene herramienta, aprobación de primera pieza y avance del lote. El
+tiempo real se pide al cerrar y alimenta la calibración existente.
 
 ### 📋 6.3 Adaptador del láser KORT
 

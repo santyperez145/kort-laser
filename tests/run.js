@@ -58,7 +58,7 @@ import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } fro
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
-import { crearPlanProduccion, aplicarEventoTaller, resumenTaller } from '../src/core/produccion.js';
+import { crearPlanProduccion, aplicarEventoTaller, resumenTaller, retazoSeguroDePrograma } from '../src/core/produccion.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -3706,6 +3706,41 @@ test('el avance de plegado se limita a la cantidad vendida', () => {
   );
   assert.equal(orden.taller.plegado.items[0].cantidadHecha, 2);
   assert.equal(orden.taller.plegado.items[0].primeraPiezaAprobada, true);
+});
+
+test('sólo registra como retazo la franja rectangular intacta', () => {
+  const programa = crearPlanProduccion(nestingPrueba).programas[0];
+  programa.layout[0].alturaOcupada = 120;
+  const r = retazoSeguroDePrograma(programa, 0, { w: 1000, h: 500 }, { separacion: 5 });
+  assert.equal(r.util, true);
+  assert.equal(r.w, 1000);
+  assert.equal(r.h, 375);
+  assert.equal(r.areaM2, 0.375);
+});
+
+test('no acepta una chapa física menor que el nesting vendido', () => {
+  const programa = crearPlanProduccion(nestingPrueba).programas[0];
+  assert.throws(() => retazoSeguroDePrograma(programa, 0, { w: 900, h: 500 }), /menor/);
+});
+
+test('la chapa física se confirma una sola vez y conserva su trazabilidad', () => {
+  const planProduccion = crearPlanProduccion(nestingPrueba);
+  planProduccion.programas[0].layout[0].alturaOcupada = 120;
+  const orden = aplicarEventoTaller({ id: 'ot-3', planProduccion }, {
+    tipo: 'confirmar-chapa', programaId: 'item:0', chapaIndice: 0,
+    origen: 'chapa-nueva', lote: 'COLADA-88', ubicacion: 'Rack A', guardarRetazo: true,
+  }, '2026-08-22T16:00:00Z');
+  const fisica = orden.taller.corte.programas['item:0'].chapas[0];
+  assert.equal(fisica.lote, 'COLADA-88');
+  assert.equal(fisica.retazo.h, 375);
+  const repetida = aplicarEventoTaller(orden, {
+    tipo: 'confirmar-chapa', programaId: 'item:0', chapaIndice: 0,
+    origen: 'chapa-nueva', lote: 'COLADA-88', ubicacion: 'Rack A', guardarRetazo: true,
+  });
+  assert.equal(repetida.taller.corte.programas['item:0'].chapas[0].lote, 'COLADA-88', 'reintentar la misma confirmación es idempotente');
+  assert.throws(() => aplicarEventoTaller(orden, {
+    tipo: 'confirmar-chapa', programaId: 'item:0', chapaIndice: 0, origen: 'cliente',
+  }), /ya fue confirmada/);
 });
 
 if (dbt) {

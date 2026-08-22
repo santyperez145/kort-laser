@@ -131,7 +131,7 @@ export function VistaPlegado() {
     // no se recalcula desde una pieza de la biblioteca paramétrica.
     origen: 'dxf',
     shape: calc.shape,
-    meta: { modelo3D: calc.modelo3D, perfil: { ...perfil } },
+    meta: { modelo3D: calc.modelo3D, perfil: { ...perfil }, secuencia: calc.secuencia },
     materialId: perfil.materialId,
     espesor: calc.espesor,
     gas: null,

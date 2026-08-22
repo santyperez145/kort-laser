@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Factory, TriangleAlert, Wrench } from 'lucide-react';
+import { Check, Factory, Layers3, TriangleAlert, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
@@ -10,7 +10,8 @@ import { Boton } from '@/componentes/ui/boton';
 import { Insignia, InsigniaEstado } from '@/componentes/ui/insignia';
 import { Aviso, Barra } from '@/componentes/ui/varios';
 import { VisorNesting } from '@/componentes/visores/VisorNesting';
-import { resumenTaller } from '@core/produccion.js';
+import { Campo, Entrada, Selector, Opcion } from '@/componentes/ui/campos';
+import { resumenTaller, retazoSeguroDePrograma } from '@core/produccion.js';
 
 const FLUJO = ['pendiente', 'material', 'corte', 'plegado', 'terminado', 'entregado'];
 
@@ -21,6 +22,30 @@ function TarjetaOrden({ orden, activa, alElegir }) {
     <div className="mt-1 truncate text-xs text-suave">{orden.cliente?.nombre || 'Sin cliente'} · {piezas} piezas</div>
     <div className="mt-1 text-[11px] text-tenue">Entrega {fecha(orden.fechaEntrega)}</div>
   </button>;
+}
+
+function ConfirmacionChapa({ orden, programa, chapa, guardarEvento }) {
+  const layout = programa.layout[chapa];
+  const confirmada = orden.taller?.corte?.programas?.[programa.id]?.chapas?.[chapa];
+  const [form, setForm] = useState({ origen: programa.retazoId ? 'retazo' : 'chapa-nueva', lote:'', ubicacion:'', w:layout.w, h:layout.h, guardarRetazo:true });
+  useEffect(() => setForm({ origen: programa.retazoId ? 'retazo' : 'chapa-nueva', lote:programa.retazoId || '', ubicacion:'', w:layout.w, h:layout.h, guardarRetazo:true }), [programa.id, chapa, layout.w, layout.h, programa.retazoId]);
+  let sobrante;
+  try { sobrante = retazoSeguroDePrograma(programa, chapa, form, { separacion:5 }); } catch (e) { sobrante = { util:false, motivo:e.message, w:0, h:0, areaM2:0 }; }
+  if (confirmada) return <Aviso nivel="info"><b>Chapa física confirmada.</b> {confirmada.origen === 'chapa-nueva' ? 'Chapa nueva' : confirmada.origen === 'retazo' ? 'Retazo del stock' : 'Material del cliente'} · {confirmada.medidas.w} × {confirmada.medidas.h} mm{confirmada.lote ? ` · lote ${confirmada.lote}` : ''}. {confirmada.guardarRetazo ? `Se dio de alta una franja de ${Math.round(confirmada.retazo.w)} × ${Math.round(confirmada.retazo.h)} mm.` : 'Sin retazo reutilizable.'}</Aviso>;
+  return <div className="rounded-xl border border-borde bg-panel-alto/35 p-3">
+    <div className="mb-3 flex items-center gap-2"><Layers3 className="size-4 text-corte-500"/><b className="text-sm">Confirmar chapa física antes de cortar</b></div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <Campo etiqueta="Origen"><Selector valor={form.origen} alCambiar={(v)=>setForm({...form,origen:v})}><Opcion valor="chapa-nueva">Chapa nueva</Opcion><Opcion valor="retazo">Retazo del stock</Opcion><Opcion valor="cliente">Material del cliente</Opcion></Selector></Campo>
+      <Campo etiqueta="Ancho real"><Entrada type="number" min={layout.w} unidad="mm" value={form.w} onChange={(e)=>setForm({...form,w:Number(e.target.value)})}/></Campo>
+      <Campo etiqueta="Alto real"><Entrada type="number" min={layout.h} unidad="mm" value={form.h} onChange={(e)=>setForm({...form,h:Number(e.target.value)})}/></Campo>
+      <Campo etiqueta="Lote / colada"><Entrada value={form.lote} onChange={(e)=>setForm({...form,lote:e.target.value})} placeholder="Opcional"/></Campo>
+      <Campo etiqueta="Ubicación retazo"><Entrada value={form.ubicacion} onChange={(e)=>setForm({...form,ubicacion:e.target.value})} placeholder="Ej. Rack A"/></Campo>
+    </div>
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+      <label className="flex items-center gap-2 text-xs text-suave"><input type="checkbox" checked={form.guardarRetazo && sobrante.util} disabled={!sobrante.util || form.origen === 'cliente'} onChange={(e)=>setForm({...form,guardarRetazo:e.target.checked})}/>{sobrante.util ? `Guardar franja intacta ${Math.round(sobrante.w)} × ${Math.round(sobrante.h)} mm (${sobrante.areaM2.toFixed(2)} m²)` : sobrante.motivo}</label>
+      <Boton tono="corte" tam="sm" disabled={!sobrante.util && (form.w < layout.w || form.h < layout.h)} onClick={()=>guardarEvento({ tipo:'confirmar-chapa', programaId:programa.id, chapaIndice:chapa, ...form, guardarRetazo:form.origen !== 'cliente' && form.guardarRetazo })}><Check/> Confirmar chapa</Boton>
+    </div>
+  </div>;
 }
 
 function Clasificador({ orden, guardarEvento }) {
@@ -46,6 +71,7 @@ function Clasificador({ orden, guardarEvento }) {
       <Insignia tono="gris">{resumen.pendientes} pendientes</Insignia><Insignia tono="verde">{resumen.retiradas} retiradas</Insignia><Insignia tono="rojo">{resumen.rechazadas} rechazadas</Insignia><Insignia tono="amarillo">{resumen.reposiciones} a recortar</Insignia>
     </div>
     <VisorNesting nesting={{ layout: programa.layout }} indiceChapa={chapa} estados={estados} alPieza={alPieza} alto={440} />
+    <ConfirmacionChapa orden={orden} programa={programa} chapa={chapa} guardarEvento={guardarEvento}/>
     <p className="text-xs text-tenue">Tocá una pieza: pendiente → retirada → rechazada → pendiente. Los rechazos entran automáticamente en la cola de recorte.</p>
   </div>;
 }
@@ -59,6 +85,7 @@ function Plegados({ orden, guardarEvento }) {
     return <div key={op.itemIndice} className="rounded-xl border border-borde p-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><b className="text-sm">{op.nombre}</b><span className="text-xs text-suave">V{op.plegado.matrizV || '—'} · {op.plegado.pliegues} pliegues · {op.plegado.angulo}°</span></div>
       <Barra valor={op.cantidad ? hechas / op.cantidad * 100 : 0} className="my-3" tono="verde" />
+      {op.plegado.secuencia?.length ? <div className="mb-3 flex gap-2 overflow-x-auto pb-1">{op.plegado.secuencia.map((s)=><div key={s.paso} className="min-w-36 rounded-lg border border-borde bg-panel-alto p-2"><span className="text-[10px] font-bold uppercase text-corte-500">Paso {s.paso}</span><div className="text-xs font-semibold">Línea {s.pliegue} · {s.grados}°</div><div className="text-[11px] text-tenue">{s.sentido === 'arriba' ? '↑ plegar arriba' : '↓ plegar abajo'} · ala {Math.round(s.voladizo)} mm</div></div>)}</div> : <p className="mb-3 text-xs text-tenue">Esta OT no trae una secuencia geométrica guardada; verificá el orden con el plano antes de plegar.</p>}
       <div className="flex flex-wrap items-center gap-2">
         <Boton tam="sm" tono={e.herramientaConfirmada ? 'verde' : 'neutro'} onClick={() => guardarEvento({ tipo:'avance-plegado', itemIndice:op.itemIndice, cantidadHecha:hechas, herramientaConfirmada:!e.herramientaConfirmada, primeraPiezaAprobada:!!e.primeraPiezaAprobada })}><Wrench/> Herramienta</Boton>
         <Boton tam="sm" tono={e.primeraPiezaAprobada ? 'verde' : 'neutro'} onClick={() => guardarEvento({ tipo:'avance-plegado', itemIndice:op.itemIndice, cantidadHecha:hechas, herramientaConfirmada:!!e.herramientaConfirmada, primeraPiezaAprobada:!e.primeraPiezaAprobada })}><Check/> Primera pieza</Boton>

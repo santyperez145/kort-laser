@@ -146,6 +146,13 @@ transacción. No mandar el objeto entero desde una tablet: dos puestos abiertos
 se pisarían. Las piezas se identifican por `programa + chapaIndice +
 piezaIndice`; el rechazo deriva la cola de reposición y no se duplica.
 
+Confirmar una chapa física también es una acción de taller. El único retazo
+que se da de alta automáticamente es la franja rectangular intacta por encima
+de `layout.alturaOcupada`, menos la separación. El esqueleto entre piezas no
+es stock confiable. La clave `OT:id:programa:chapa` evita duplicados si se
+reintenta una respuesta perdida; una confirmación diferente exige corrección
+explícita y nunca reemplaza trazabilidad en silencio.
+
 ## Invariantes que no se pueden romper
 
 Estas cuatro cosas, si se rompen, hacen que el sistema cotice mal en silencio.
