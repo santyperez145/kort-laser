@@ -31,6 +31,7 @@ import {
   reservarRetazos,
 } from './src/core/retazos.js';
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from './src/core/telemetria.js';
+import { aplicarEventoTaller } from './src/core/produccion.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -369,6 +370,7 @@ api.post('/ordenes/aprobar', (req, res) => {
       retazoId: item.retazoId || null,
     })),
     resumen: presupuesto.resumen,
+    planProduccion: presupuesto.planProduccion || null,
     // Queda congelado al aprobar: producción necesita lo que pidió ese
     // nesting, aunque después cambien precios o medidas predeterminadas.
     requerimientosChapa: presupuesto.requerimientosChapa || [],
@@ -399,6 +401,23 @@ api.post('/ordenes/aprobar', (req, res) => {
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
     throw error;
+  }
+});
+
+/** Una acción por transacción: dos tablets no se pisan el estado completo. */
+api.put('/ordenes/:id/taller', (req, res, siguiente) => {
+  const { id } = req.params;
+  if (!db.obtener('ordenes', id)) return siguiente();
+  try {
+    const salida = db.transaccion(() => {
+      const actual = db.obtener('ordenes', id);
+      const evento = { ...req.body, operario: req.operario || req.body?.operario || '' };
+      const actualizado = aplicarEventoTaller(actual, evento);
+      return db.actualizar('ordenes', id, { taller: actualizado.taller }, req.operario);
+    });
+    res.json(salida);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
 });
 

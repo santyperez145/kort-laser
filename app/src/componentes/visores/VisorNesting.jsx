@@ -22,14 +22,16 @@ const MARGEN = 26;
  * Naranja el ítem que se está mirando, gris el resto. Si la chapa no es
  * compartida, `idResaltado` viene vacío y todo va en naranja como siempre.
  */
-function colorDe(idPieza, idResaltado) {
+function colorDe(idPieza, idResaltado, estado) {
+  if (estado === 'retirada') return { relleno: 'rgba(34,197,94,.48)', borde: '#16a34a' };
+  if (estado === 'rechazada') return { relleno: 'rgba(239,68,68,.48)', borde: '#dc2626' };
   if (!idResaltado || idPieza === idResaltado) {
     return { relleno: 'rgba(228,87,46,.34)', borde: '#e4572e' };
   }
   return { relleno: 'rgba(120,140,165,.22)', borde: '#7a8ea5' };
 }
 
-export function VisorNesting({ nesting, alto = 400, indiceChapa = 0, idResaltado = null }) {
+export function VisorNesting({ nesting, alto = 400, indiceChapa = 0, idResaltado = null, estados = {}, alPieza = null }) {
   const oscuro = usarTema((s) => s.oscuro);
   const caja = useRef(null);
   const [ancho, setAncho] = useState(600);
@@ -88,7 +90,7 @@ export function VisorNesting({ nesting, alto = 400, indiceChapa = 0, idResaltado
         </div>
       ) : (
       <Stage width={ancho} height={alto}>
-        <Layer listening={false}>
+        <Layer listening={Boolean(alPieza)}>
           <Rect x={0} y={0} width={ancho} height={alto} fill={col.lienzo} />
 
           {/* La chapa */}
@@ -101,7 +103,9 @@ export function VisorNesting({ nesting, alto = 400, indiceChapa = 0, idResaltado
 
           {/* Las piezas anidadas */}
           {layout.piezas.map((p, i) => {
-            const c = colorDe(p.id, idResaltado);
+            const clave = `${indiceChapa}:${i}`;
+            const c = colorDe(p.id, idResaltado, estados[clave]?.estado);
+            const interaccion = alPieza ? { onClick: () => alPieza(p, i, clave), onTap: () => alPieza(p, i, clave) } : {};
             if (p.poly && p.poly.length > 2) {
               // Anidado de forma real: se dibuja el contorno tal cual quedó
               const pts = p.poly.flatMap(([x, y]) => [X(x), Y(y)]);
@@ -109,6 +113,7 @@ export function VisorNesting({ nesting, alto = 400, indiceChapa = 0, idResaltado
                 <Line
                   key={i} points={pts} closed
                   fill={c.relleno} stroke={c.borde} strokeWidth={1}
+                  {...interaccion}
                 />
               );
             }
@@ -121,6 +126,7 @@ export function VisorNesting({ nesting, alto = 400, indiceChapa = 0, idResaltado
                 x={X(p.x)} y={oy + (layout.h - p.y - (rot90 ? p.w : p.h)) * esc}
                 width={w} height={h}
                 fill={c.relleno} stroke={c.borde} strokeWidth={1}
+                {...interaccion}
               />
             );
           })}

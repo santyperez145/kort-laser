@@ -17,6 +17,7 @@ import { FilePlus2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
 import { requerimientosDeCotizacion } from '@core/reposicion.js';
+import { crearPlanProduccion } from '@core/produccion.js';
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
 import { Campo, Entrada, Selector, Opcion } from '@/componentes/ui/campos';
@@ -290,6 +291,9 @@ export function VistaCotizador() {
       ...doc,
       resumen: coti.resumen,
       requerimientosChapa: requerimientosDeCotizacion(coti),
+      // Es una fotografía del programa vendido. Producción no debe recalcular
+      // el nesting con precios, chapas o algoritmos que cambien más adelante.
+      planProduccion: crearPlanProduccion(coti, doc.items),
       items: doc.items.map((it, i) => {
         const r = coti.items[i];
         return {

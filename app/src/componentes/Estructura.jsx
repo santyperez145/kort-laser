@@ -28,7 +28,7 @@ export const RUTAS = [
   { a: '/plegado', txt: 'Plegado', Icono: FoldVertical, nuevo: true },
   { a: '/tarifario', txt: 'Tarifario', Icono: Tags, nuevo: true },
   { a: '/presupuestos', txt: 'Presupuestos', Icono: FileText },
-  { a: '/ordenes', txt: 'Producción', Icono: Factory },
+  { a: '/ordenes', txt: 'Producción', Icono: Factory, nuevo: true },
   { a: '/clientes', txt: 'Clientes', Icono: Users },
   { a: '/materiales', txt: 'Materiales', Icono: Layers, nuevo: true },
   { a: '/stock', txt: 'Stock chapa', Icono: Archive, nuevo: true },

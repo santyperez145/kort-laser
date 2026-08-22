@@ -696,7 +696,7 @@ y calidad real: disponibilidad sola no se presenta con un nombre más grande.
 versión de software, IP/red industrial, y disponibilidad/licencia de OPC UA,
 MTConnect o API oficial. El adaptador será una pieza reemplazable.
 
-### 🔜 6.2 Puesto de taller y clasificación visual
+### 🟡 6.2 Puesto de taller y clasificación visual
 
 Convertir Producción a React con una ficha de OT por operación. Para corte:
 nesting coloreado por OT/cliente, piezas pendientes/retiradas/rechazadas,
@@ -705,6 +705,17 @@ Para plegado: herramienta, secuencia, primera pieza y avance por lote.
 
 **Aceptación:** una persona puede terminar y clasificar un nesting desde una
 tablet sin papel ni entrar a pantallas comerciales.
+
+Avance del 2026-08-22: Producción ya es React y tiene ficha persistente de OT,
+nesting táctil por chapa, clasificación pendiente/retirada/rechazada, cola de
+reposición derivada del rechazo y avance de plegado con confirmación de
+herramienta y primera pieza. El presupuesto guarda un `planProduccion`
+inmutable y la OT lo hereda: nunca se recalcula en planta con parámetros que
+cambiaron después de vender.
+
+Falta para cerrar la fase: elegir la chapa física por lote, dar de alta el
+retazo real que vuelve al stock e incorporar secuencia gráfica de plegado. El
+tiempo real se sigue pidiendo al cerrar y alimenta la calibración existente.
 
 ### 📋 6.3 Adaptador del láser KORT
 

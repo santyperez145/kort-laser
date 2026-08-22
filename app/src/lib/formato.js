@@ -24,7 +24,14 @@ export function pct(v, d = 1) {
 
 export function fecha(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('es-AR', {
+  // `YYYY-MM-DD` es una fecha civil, no un instante UTC. Construirla con
+  // `new Date(texto)` la corre al día anterior en Argentina (UTC−3), justo
+  // lo contrario de lo que tiene que pasar con una fecha de entrega.
+  const soloDia = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
+  const valor = soloDia
+    ? new Date(Number(soloDia[1]), Number(soloDia[2]) - 1, Number(soloDia[3]))
+    : new Date(iso);
+  return valor.toLocaleDateString('es-AR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
   });
 }

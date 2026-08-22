@@ -115,8 +115,8 @@ escribe. En un mostrador, esperar una vuelta de red por cada tecla se nota.
 
 ### Las dos interfaces conviven, y el iframe no es pereza
 
-Panel, Cotizador, Plegado, Tarifario y Materiales están rehechos en React. Las
-otras seis vistas (Presupuestos, Producción, Clientes, Máquinas, Costos,
+Panel, Cotizador, Plegado, Tarifario, Producción y Materiales están rehechos en React. Las
+otras cinco vistas (Presupuestos, Clientes, Máquinas, Costos,
 Configuración) siguen siendo las de antes y se muestran **dentro de un
 iframe** apuntando a `/legacy`.
 
@@ -132,6 +132,19 @@ Para migrar una vista: escribirla en `app/src/vistas/`, cambiar su `<Route>` en
 `app/src/App.jsx` y marcarla `nuevo: true` en `RUTAS` de `Estructura.jsx`. No
 hay nada más que desarmar. Cuando no quede ninguna, se borran `web/`, la
 excepción de CSP del legado y el prefijo `--k-` deja de hacer falta.
+
+### La OT no recalcula el trabajo vendido
+
+`src/core/produccion.js` crea `planProduccion` al guardar el presupuesto. Es
+una fotografía sin costos ni margen del nesting, los programas y las
+operaciones. Al aprobar, el servidor la copia a la OT. Cambiar después una
+chapa predeterminada o mejorar el algoritmo no puede mover las piezas de una
+orden que ya se vendió.
+
+La clasificación se guarda con `PUT /api/ordenes/:id/taller`, una acción por
+transacción. No mandar el objeto entero desde una tablet: dos puestos abiertos
+se pisarían. Las piezas se identifican por `programa + chapaIndice +
+piezaIndice`; el rechazo deriva la cola de reposición y no se duplica.
 
 ## Invariantes que no se pueden romper
 

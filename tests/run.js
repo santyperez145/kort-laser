@@ -58,6 +58,7 @@ import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } fro
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
+import { crearPlanProduccion, aplicarEventoTaller, resumenTaller } from '../src/core/produccion.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -3664,6 +3665,47 @@ test('SQLite persiste y recupera las muestras de máquina', () => {
   assert.equal(leidas.length, 1);
   assert.equal(leidas[0].programa, 'NEST-42');
   assert.ok(dbt.exportarTodo().telemetria.length >= 1, 'el respaldo incluye una ventana de telemetría');
+});
+
+grupo('Producción y clasificación de taller');
+
+const nestingPrueba = {
+  items: [{
+    nombre: 'Ménsula', cantidad: 2, material: { id: 'acero', nombre: 'Acero' }, espesor: 2,
+    corte: { gasTipo: 'O2', tTotal: 80 }, costos: { proceso: 'laser' },
+    nesting: { compartido: false, chapa: { w: 1000, h: 500 }, metodo: 'perfil', aprovechamiento: 0.42,
+      layout: [{ w: 1000, h: 500, piezas: [{ id: 'p', x: 0, y: 0, w: 100, h: 60 }, { id: 'p', x: 105, y: 0, w: 100, h: 60 }] }] },
+    plegado: { nPliegues: 2, largoPliegue: 100, tTotal: 45 }, datosPliegue: { V: 16, fuerzaKNm: 70 },
+  }],
+};
+
+test('el plan de producción guarda geometría operativa pero no costos ni ganancia', () => {
+  const plan = crearPlanProduccion(nestingPrueba, [{ nombre: 'Ménsula', plegado: { angulo: 90 } }]);
+  assert.equal(plan.programas.length, 1);
+  assert.equal(plan.programas[0].layout[0].piezas.length, 2);
+  assert.equal(plan.operaciones[0].plegado.matrizV, 16);
+  const texto = JSON.stringify(plan).toLowerCase();
+  assert.ok(!texto.includes('costo'));
+  assert.ok(!texto.includes('margen'));
+  assert.ok(!texto.includes('ganancia'));
+});
+
+test('clasificar una pieza es persistente, reversible y genera reposición', () => {
+  const planProduccion = crearPlanProduccion(nestingPrueba);
+  let orden = { id: 'ot-1', planProduccion };
+  orden = aplicarEventoTaller(orden, { tipo: 'clasificar', programaId: 'item:0', chapaIndice: 0, piezaIndice: 1, estado: 'rechazada' }, '2026-08-22T15:00:00Z');
+  assert.deepEqual(resumenTaller(orden), { total: 2, retiradas: 0, rechazadas: 1, pendientes: 1, reposiciones: 1 });
+  orden = aplicarEventoTaller(orden, { tipo: 'clasificar', programaId: 'item:0', chapaIndice: 0, piezaIndice: 1, estado: 'pendiente' });
+  assert.equal(resumenTaller(orden).rechazadas, 0);
+});
+
+test('el avance de plegado se limita a la cantidad vendida', () => {
+  const orden = aplicarEventoTaller(
+    { id: 'ot-2', planProduccion: crearPlanProduccion(nestingPrueba) },
+    { tipo: 'avance-plegado', itemIndice: 0, cantidadHecha: 99, primeraPiezaAprobada: true, herramientaConfirmada: true }
+  );
+  assert.equal(orden.taller.plegado.items[0].cantidadHecha, 2);
+  assert.equal(orden.taller.plegado.items[0].primeraPiezaAprobada, true);
 });
 
 if (dbt) {
