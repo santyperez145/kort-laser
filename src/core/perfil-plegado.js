@@ -115,11 +115,23 @@ export function calcularPerfil(perfil, material, plegadora) {
   if (seccion.colisiones.length) {
     for (const c of seccion.colisiones) {
       avisos.push({
-        nivel: 'aviso',
-        msg: `Los tramos ${c.a} y ${c.b} quedan muy cerca o se cruzan al plegar (${c.distancia.toFixed(1)} mm). Puede que el punzón no entre.`,
+        nivel: 'error',
+        msg: `Los tramos ${c.a} y ${c.b} se cruzan o no dejan espesor suficiente (${c.distancia.toFixed(1)} mm). La pieza no puede llegar a esa forma.`,
       });
     }
   }
+
+  const planSecuencia = optimizarSecuencia(tramos, pliegues, t, Ri);
+  if (!planSecuencia.valida && pliegues.length && !seccion.colisiones.length) {
+    avisos.push({
+      nivel: 'error',
+      msg: 'No se encontró un orden de plegado sin que la propia pieza se atraviese durante un paso. Rediseñá el perfil o dividilo en piezas soldadas.',
+    });
+  }
+  avisos.push({
+    nivel: 'info',
+    msg: 'Se verificaron desarrollo, ala mínima, tonelaje, largo y colisiones de la chapa. La colisión exacta con punzón, matriz, tope y bastidor requiere cargar la geometría real de esos herramentales.',
+  });
 
   return {
     tramos,
@@ -153,7 +165,14 @@ export function calcularPerfil(perfil, material, plegadora) {
       angulos: pliegues.map((p) => p.grados * SENTIDO[p.sentido]),
       ancho,
     },
-    secuencia: secuenciaSugerida(tramos, pliegues),
+    secuencia: planSecuencia.pasos,
+    secuenciaValida: planSecuencia.valida,
+    factibilidad: {
+      geometria: seccion.colisiones.length === 0,
+      secuencia: planSecuencia.valida,
+      maquina: avisos.every((a) => a.nivel !== 'error'),
+      herramental3D: false,
+    },
   };
 }
 
@@ -290,6 +309,61 @@ export function secuenciaSugerida(tramos, pliegues) {
     voladizo: it.voladizo,
     nota: n === 0 ? 'Empezar por acá: es el ala más corta' : null,
   }));
+}
+
+/**
+ * Busca un orden que sea fabricable, no sólo cómodo.
+ *
+ * Hasta ocho pliegues se exploran permutaciones con poda: cada rama se corta
+ * apenas la forma intermedia se auto-intersecta. Para perfiles mayores se usa
+ * la heurística de alas cortas, porque 9! ya no responde instantáneamente en
+ * el diseñador. La simulación es de la chapa; punzón y bastidor se validarán
+ * cuando sus contornos reales estén cargados.
+ */
+export function optimizarSecuencia(tramos, pliegues, t = 1, Ri = 1) {
+  if (!pliegues.length) return { valida: true, pasos: [], intentos: 0 };
+  const base = secuenciaSugerida(tramos, pliegues);
+  const porIndice = new Map(base.map((x) => [x.pliegue, x]));
+  const candidatos = base.map((x) => x.pliegue);
+  let intentos = 0;
+
+  const simular = (orden) => {
+    const hechos = new Set(orden);
+    const parciales = pliegues.map((p) => ({ ...p, grados: hechos.has(p.indice) ? p.grados : 0 }));
+    const seccion = trazarSeccion(tramos, parciales, t, Ri);
+    return { ...seccion, seccion, tramos, pliegues: parciales, espesor: t };
+  };
+
+  let ganadora = null;
+  if (pliegues.length <= 8) {
+    const buscar = (orden, restantes) => {
+      if (ganadora) return;
+      if (!restantes.length) { ganadora = orden; return; }
+      const ordenados = [...restantes].sort((a, b) => porIndice.get(a).voladizo - porIndice.get(b).voladizo || a - b);
+      for (const p of ordenados) {
+        intentos++;
+        const prueba = [...orden, p];
+        if (simular(prueba).colisiones.length) continue;
+        buscar(prueba, restantes.filter((x) => x !== p));
+        if (ganadora) return;
+      }
+    };
+    buscar([], candidatos);
+  } else {
+    intentos = 1;
+    ganadora = candidatos;
+    for (let i = 1; i <= ganadora.length; i++) {
+      if (simular(ganadora.slice(0, i)).colisiones.length) { ganadora = null; break; }
+    }
+  }
+
+  const orden = ganadora || candidatos;
+  const pasos = orden.map((pliegue, i) => {
+    const info = porIndice.get(pliegue);
+    const estado = simular(orden.slice(0, i + 1));
+    return { ...info, paso: i + 1, estado, colisiones: estado.colisiones };
+  });
+  return { valida: Boolean(ganadora), pasos, intentos };
 }
 
 /* ------------------------------------------------------------------ */

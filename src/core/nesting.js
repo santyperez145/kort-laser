@@ -721,7 +721,8 @@ export function nest(items, chapa, opts = {}) {
    * se corre con ese juego de ángulos y compite contra los demás. Si gana, es
    * porque metió más piezas de verdad.
    */
-  const pasoFino = opts.pasoAngular ?? 15;
+  const calidad = opts.calidad || 'equilibrada';
+  const pasoFino = opts.pasoAngular ?? (calidad === 'maxima' ? 7.5 : 15);
   const anguloFino = [];
   for (let g = 0; g < 360; g += pasoFino) anguloFino.push(g);
   const fina = { ...libre, orden: 'lado', rotaciones: anguloFino };
@@ -743,6 +744,20 @@ export function nest(items, chapa, opts = {}) {
       { ...libre, orden: 'alto' },
       fina,
     ];
+  }
+
+  /* Calidad máxima imita el enfoque de los motores industriales por tiempo:
+     no confía en un único orden goloso, compite con más corridas completas.
+     Agregar candidatos no puede empeorar el resultado porque `mejorDe`
+     conserva siempre la variante conservadora. Se limita por cantidad para
+     que 500 piezas no congelen el cotizador. */
+  if (calidad === 'maxima' && !opts.orden && !opts.pesos) {
+    variantes.push(
+      { ...libre, orden: 'ancho' },
+      { ...libre, orden: 'alto', pesos: { y: 1, hueco: 0.7, alto: 0.14 } },
+      { ...libre, orden: 'area', pesos: { y: 1, hueco: 0.25, alto: 0.18 } },
+    );
+    if (totalPiezas <= 180) variantes.push({ ...fina, orden: 'area' });
   }
 
   /**
@@ -807,6 +822,8 @@ export function nest(items, chapa, opts = {}) {
     areaChapa,
     areaConsumidaTotal: areaUsadaTotal,
     piezasPedidas: totalPedidas,
+    calidad,
+    intentos: variantes.length,
   };
 
   /**

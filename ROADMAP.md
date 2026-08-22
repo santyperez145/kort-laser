@@ -272,6 +272,23 @@ canto rebatido), todas verificadas como plegables de verdad.
 Detecta lo que arruina una pieza en la plegadora: alas por debajo del mínimo,
 piezas más largas que la máquina y **tramos que se cruzan al cerrarse**.
 
+Mejorado el 2026-08-22: explora órdenes alternativos hasta 8 pliegues, poda los
+que hacen que la chapa se atraviese en un estado intermedio y muestra un gráfico
+de la forma después de cada paso. La interfaz distingue geometría verificada de
+colisión de herramental pendiente; para esta última faltan contornos reales de
+punzón, matriz, tope y bastidor.
+
+### ✅ 1.10 Optimización máxima al liberar el nesting
+
+La vista previa permanece inmediata, pero al guardar un presupuesto se vuelve a
+anidar con más multi-arranques, criterios de compactación y giro fino de 7,5°.
+La variante conservadora siempre compite: máxima no puede usar más chapas ni
+dejar peor última chapa que equilibrada. El plan ganador se congela con la OT.
+
+Siguiente salto medible: línea común segura, estabilidad térmica y recorrido NC.
+No se mezclan con el encastre porque ahorrar milímetros de corte puede empeorar
+la descarga o levantar una pieza; se implementarán como capa validada aparte.
+
 ### 📋 1.2 Corte en línea común
 
 Dos piezas rectangulares pegadas comparten el corte del medio: se corta una vez

@@ -1876,6 +1876,7 @@ grupo('Diseñador de plegado');
 const {
   perfilNuevo, calcularPerfil, PLANTILLAS, desdePlantilla,
   agregarTramo, quitarTramo, invertirPliegue, secuenciaSugerida,
+  optimizarSecuencia,
 } = await import('../src/core/perfil-plegado.js');
 
 const PLEG = DEFAULT_PLEGADORA;
@@ -1967,7 +1968,7 @@ test('detecta tramos que se cruzan al plegar', () => {
     angulos: [{ grados: 150, sentido: 'arriba' }, { grados: 150, sentido: 'arriba' }] };
   const r = calcularPerfil(cerrada, acero, PLEG);
   assert.ok(r.seccion.colisiones.length > 0, 'con pliegues de 150° las alas se cruzan');
-  assert.ok(r.avisos.some((a) => /cerca o se cruzan/i.test(a.msg)));
+  assert.ok(r.avisos.some((a) => a.nivel === 'error' && /se cruzan/i.test(a.msg)));
 });
 
 test('todas las plantillas se pliegan sin error en 1,5 y 2 mm', () => {
@@ -1994,6 +1995,22 @@ test('la secuencia empieza por el lado que menos sobresale', () => {
   // Tramos muy desparejos: el ala corta tiene que plegarse primero
   const s = secuenciaSugerida([20, 300, 400], [{ indice: 1 }, { indice: 2 }]);
   assert.equal(s[0].pliegue, 1, 'primero el pliegue del lado corto');
+});
+
+test('cada paso sugerido conserva una geometría intermedia sin cruces', () => {
+  const perfil = { ...perfilNuevo(), tramos: [30, 120, 80, 25], angulos: [
+    { grados: 90, sentido: 'arriba' }, { grados: 90, sentido: 'abajo' }, { grados: 90, sentido: 'arriba' },
+  ], espesor: 2, ancho: 500 };
+  const r = calcularPerfil(perfil, acero, PLEG);
+  assert.equal(r.secuenciaValida, true);
+  assert.equal(r.secuencia.length, 3);
+  assert.ok(r.secuencia.every((p) => p.estado?.pts?.length > 1 && p.colisiones.length === 0));
+});
+
+test('la factibilidad no promete colisión de herramental sin su geometría 3D', () => {
+  const r = calcularPerfil({ ...perfilNuevo(), tramos: [40, 100, 40] }, acero, PLEG);
+  assert.equal(r.factibilidad.herramental3D, false);
+  assert.ok(r.avisos.some((a) => /geometría real.*herramental/i.test(a.msg)));
 });
 
 test('agregar y quitar tramos mantiene la coherencia', () => {
@@ -2184,6 +2201,21 @@ test('el multi-arranque deja la última chapa lo más vacía posible', () => {
     `el multi-arranque metió ${multi.chapas[0].piezas.length} y el conservador ${conservador.chapas[0].piezas.length}: nunca puede ser menos`
   );
   assert.ok(multi.cantidadChapas <= conservador.cantidadChapas, 'ni usar más chapas');
+});
+
+test('la calidad máxima nunca queda peor que la equilibrada', () => {
+  const sh = makeShape(polyline([[0, 0], [260, 0], [210, 80], [90, 190], [0, 130]], true));
+  const bb = shapeBBox(sh);
+  const items = [{ id:'p', nombre:'irregular', w:bb.w, h:bb.h, cantidad:72, shape:sh }];
+  const chapa = { w:1500, h:1000 };
+  const opts = { separacion:4, margen:10, formaReal:true };
+  const equilibrada = nest(items, chapa, { ...opts, calidad:'equilibrada' });
+  const maxima = nest(items, chapa, { ...opts, calidad:'maxima' });
+  assert.ok(maxima.cantidadChapas <= equilibrada.cantidadChapas);
+  if (maxima.cantidadChapas === equilibrada.cantidadChapas) {
+    assert.ok(maxima.aprovechamientoUltima <= equilibrada.aprovechamientoUltima + 1e-9);
+  }
+  assert.ok(maxima.intentos > equilibrada.intentos);
 });
 
 test('el anidado nunca queda peor que el motor anterior', () => {

@@ -370,6 +370,18 @@ exactamente como estaba. Hay un test que lo fija.
   ayudar. Como variante gana donde importa — en una pieza tipo gota, de 2
   chapas a 1.
 
+- **Vista previa y liberación tienen presupuestos distintos.** Al escribir se
+  usa nesting `equilibrada`; al guardar, Cotizador recalcula precio y layout
+  juntos con `maxima` (más órdenes, pesos y giro de 7,5°). Nunca guardar el
+  precio de la vista previa con el layout máximo: serían dos consumos de chapa
+  distintos. La conservadora sigue dentro de ambas para impedir regresiones.
+
+- **Plegado no certifica herramientas que no conoce.** El motor puede probar
+  autocruce final e intermedio, tonelaje, ala y largo. No puede afirmar que no
+  chocará contra punzón, matriz, tope o bastidor hasta cargar sus contornos
+  reales. La UI debe decir “geometría apta · validar herramienta”, no “sin
+  problemas”.
+
 - **Anidar adentro de un agujero: NUNCA prometer un encaje que no existe.**
   `huecos.js` rasteriza el agujero, le achica el borde por la separación de
   corte y busca el mayor rectángulo INSCRIPTO. Se anida dentro de ese

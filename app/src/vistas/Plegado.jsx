@@ -62,6 +62,7 @@ export function VistaPlegado() {
     return perfilNuevo();
   });
   const [sel, setSel] = useState(0);
+  const [pasoVista, setPasoVista] = useState(0);
   const [guardadas, setGuardadas] = useState([]);
 
   const recargarGuardadas = useCallback(async () => {
@@ -85,6 +86,10 @@ export function VistaPlegado() {
       return { error: e.message };
     }
   }, [perfil, material, plegadora]);
+
+  useEffect(() => {
+    setPasoVista((p) => Math.min(p, Math.max(0, (calc?.secuencia?.length || 1) - 1)));
+  }, [calc?.secuencia?.length]);
 
   const mesh = useMemo(() => {
     if (!calc || calc.error) return null;
@@ -429,10 +434,10 @@ export function VistaPlegado() {
         <div className="grid gap-4 lg:grid-cols-2">
           <Panel>
             <PanelCab>
-              <PanelTitulo>Se puede plegar</PanelTitulo>
+              <PanelTitulo>Factibilidad de plegado</PanelTitulo>
               {errores.length
                 ? <Insignia tono="rojo">{errores.length} problema{errores.length > 1 ? 's' : ''}</Insignia>
-                : <Insignia tono="verde">Sin problemas</Insignia>}
+                : <Insignia tono="amarillo">Geometría apta · validar herramienta</Insignia>}
             </PanelCab>
             <PanelCuerpo className="space-y-2">
               {calc.avisos.length === 0 && (
@@ -449,14 +454,15 @@ export function VistaPlegado() {
           </Panel>
 
           <Panel>
-            <PanelCab><PanelTitulo>Orden de plegado sugerido</PanelTitulo></PanelCab>
+            <PanelCab><PanelTitulo>Simulación del orden de plegado</PanelTitulo></PanelCab>
             <PanelCuerpo>
               {calc.secuencia.length === 0
                 ? <p className="text-sm text-muted-foreground">Sin pliegues.</p>
                 : (
-                  <ol className="space-y-2">
+                  <ol className="grid gap-2 sm:grid-cols-2">
                     {calc.secuencia.map((s) => (
-                      <li key={s.paso} className="flex items-center gap-3 text-sm">
+                      <li key={s.paso}>
+                        <button type="button" onClick={() => setPasoVista(s.paso - 1)} className={`flex w-full items-center gap-3 rounded-lg border p-2 text-left text-sm transition-colors ${pasoVista === s.paso - 1 ? 'border-corte-500 bg-corte-500/8' : 'border-borde hover:bg-panel-alto'}`}>
                         <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
                           {s.paso}
                         </span>
@@ -465,13 +471,23 @@ export function VistaPlegado() {
                           Pliegue <strong>P{s.pliegue}</strong> · {s.grados}° hacia {s.sentido}
                         </span>
                         {s.nota && <span className="text-[11px] text-muted-foreground">— {s.nota}</span>}
+                        </button>
                       </li>
                     ))}
                   </ol>
                 )}
+              {calc.secuencia[pasoVista]?.estado && (
+                <div className="mt-3 overflow-hidden rounded-lg border border-borde">
+                  <div className="flex items-center justify-between bg-panel-alto px-3 py-2 text-xs">
+                    <b>Forma después del paso {pasoVista + 1}</b>
+                    <span className="text-tenue">P{calc.secuencia[pasoVista].pliegue} · {calc.secuencia[pasoVista].grados}° {calc.secuencia[pasoVista].sentido === 'arriba' ? '↑' : '↓'}</span>
+                  </div>
+                  <VisorSeccion perfil={calc.secuencia[pasoVista].estado} alto={220} />
+                </div>
+              )}
               <p className="mt-3 text-[11px] text-muted-foreground">
-                Se pliega primero lo que menos sobresale, para que la parte ya doblada no choque
-                contra el puente de la máquina.
+                Se prueban órdenes alternativos y se descarta cada rama donde la chapa se atraviesa.
+                La colisión con la máquina requiere los contornos reales del punzón, matriz y bastidor.
               </p>
             </PanelCuerpo>
           </Panel>

@@ -29,6 +29,8 @@ Si una función no deja trazabilidad en esa cadena, está incompleta.
 | Paperless Parts | análisis de archivos, cotización configurable, revisión de requisitos e IA con aprobación humana | Bandeja de RFQ, extracción asistida y guardas determinísticas antes de cotizar |
 | ProShop ERP | OT, inventario, calidad, mantenimiento, herramientas y costo real en una sola plataforma | ERP/MES integrado, instrucciones visuales, QMS y mantenimiento preventivo |
 | OPC UA Machine Tools | estado, trabajos, tiempos, alarmas, KPI y modelo específico de láser | Contrato canónico y adaptadores de telemetría de sólo lectura |
+| SigmaNEST TrueShape/SuperNest | multi-arranque por presupuesto de tiempo, línea común, estabilidad y secuencias NC | Vista previa rápida y optimización máxima reproducible al liberar; material y operación se miden por separado |
+| TRUMPF TecZone Bend | secuencia automática, herramienta y control de colisiones en tiempo real sobre 2D/3D | Simulación paso a paso y niveles de certeza; nunca certificar colisión de máquina sin geometría real |
 
 Fuentes oficiales:
 
@@ -43,9 +45,35 @@ Fuentes oficiales:
 - [ProShop ERP industrial](https://proshoperp.com/product/)
 - [OPC UA Machine Tools — monitoring y jobs](https://reference.opcfoundation.org/specs/OPC-40501-1/4.2.3.3)
 - [OPC UA Companion Specifications](https://opcfoundation.org/about/opc-technologies/opc-ua/ua-companion-specifications/)
+- [SigmaNEST — TrueShape, SuperNest y estrategias NC](https://www.sigmanest.com/en/sigmanest)
+- [TRUMPF TecZone Bend — secuencia y colisiones](https://www.trumpf.com/en_US/products/machines-systems/bending-machines/trubend-series-7000/)
 
 Las afirmaciones comerciales de fabricantes son referencias funcionales, no
 evidencia de retorno para KORT. Cada mejora propia se mide con casos del taller.
+
+### Qué significa “mejor nesting”
+
+No es sólo el porcentaje de chapa. El orden de prioridades de KORT es: que todo
+quepa sin interferencias, menos chapas, un remanente grande y recuperable,
+estabilidad térmica/mecánica y recién después menos recorrido y perforaciones.
+La vista previa usa un presupuesto equilibrado; al guardar compiten más órdenes,
+pesos y giros de 7,5°. La estrategia conservadora siempre participa, por lo que
+agregar búsqueda nunca puede empeorar el resultado conocido.
+
+Línea común, chain/bridge cutting y reordenamiento NC son una segunda capa:
+pueden ahorrar corte y perforaciones, pero también elevar piezas o concentrar
+calor. No se activan sólo porque dos bordes coinciden; requieren reglas por
+material, espesor, extracción de piezas y aprobación del postprocesador.
+
+### Niveles de certeza en plegado
+
+- **Determinístico:** desarrollo, radio, ala mínima, tonelaje, largo útil,
+  autocruce final y autocruce de cada estado intermedio.
+- **Condicional:** orden sugerido y manipulación; el operario puede invertir o
+  voltear la pieza y debe confirmar la primera unidad.
+- **Pendiente de modelo:** colisión con punzón, matriz, tope y bastidor. Sólo se
+  habilita cuando sus contornos reales estén cargados; una silueta genérica no
+  puede certificar una pieza real.
 
 ## Arquitectura objetivo
 

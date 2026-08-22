@@ -18,7 +18,7 @@ const COL = {
 export function VisorSeccion({ perfil, seleccion, onSeleccionar, alto = 300 }) {
   const ref = useRef(null);
   const cont = useRef(null);
-  const tema = usarTema((s) => s.tema);
+  const oscuro = usarTema((s) => s.oscuro);
   const [tam, setTam] = useState({ w: 600, h: alto });
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export function VisorSeccion({ perfil, seleccion, onSeleccionar, alto = 300 }) {
     cv.style.height = tam.h + 'px';
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const col = tema === 'oscuro' ? COL.oscuro : COL.claro;
+    const col = oscuro ? COL.oscuro : COL.claro;
     c.fillStyle = col.fondo;
     c.fillRect(0, 0, tam.w, tam.h);
 
@@ -148,7 +148,7 @@ export function VisorSeccion({ perfil, seleccion, onSeleccionar, alto = 300 }) {
       c.fillStyle = col.sel;
       c.fillText(`${p.grados}°`, X(tr.hasta[0]) + 14, Y(tr.hasta[1]) - 14);
     });
-  }, [geometria, perfil, seleccion, tam, tema]);
+  }, [geometria, perfil, seleccion, tam, oscuro]);
 
   /** Clic sobre un tramo: se elige el más cercano al punto. */
   const alHacerClic = (ev) => {

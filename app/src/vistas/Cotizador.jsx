@@ -285,17 +285,27 @@ export function VistaCotizador() {
   const guardar = useCallback(async () => {
     if (!coti) return toast.error('No hay nada para guardar');
 
+    // Mientras se escribe usamos calidad equilibrada para responder en cada
+    // tecla. Guardar es el punto deliberado donde sí vale esperar: se compite
+    // con más órdenes, pesos y giros de 7,5° y esa fotografía queda congelada
+    // en la OT. Precio y nesting se guardan juntos desde el mismo resultado.
+    const contexto = ctx();
+    const definitiva = cotizarPresupuesto(
+      { items: resueltos.filter((i) => i.shape), descuentoGlobal: doc.descuentoGlobal },
+      { ...contexto, config: { ...contexto.config, produccion: { ...contexto.config?.produccion, nestingCalidad: 'maxima' } } }
+    );
+
     // Se guardan además, desnormalizados, los valores que la base indexa para
     // poder consultarlos por SQL (facturación por material, kg consumidos…).
     const cuerpo = {
       ...doc,
-      resumen: coti.resumen,
-      requerimientosChapa: requerimientosDeCotizacion(coti),
+      resumen: definitiva.resumen,
+      requerimientosChapa: requerimientosDeCotizacion(definitiva),
       // Es una fotografía del programa vendido. Producción no debe recalcular
       // el nesting con precios, chapas o algoritmos que cambien más adelante.
-      planProduccion: crearPlanProduccion(coti, doc.items),
+      planProduccion: crearPlanProduccion(definitiva, doc.items),
       items: doc.items.map((it, i) => {
-        const r = coti.items[i];
+        const r = definitiva.items[i];
         return {
           ...it,
           /* Se guarda la geometría SALVO que se pueda reconstruir.
@@ -344,7 +354,7 @@ export function VistaCotizador() {
     } catch (e) {
       toast.error('No se pudo guardar: ' + e.message);
     }
-  }, [doc, coti, clientes, recargarClientes, actualizarDoc]);
+  }, [doc, coti, resueltos, ctx, clientes, recargarClientes, actualizarDoc]);
 
   const valor = useMemo(
     () => ({

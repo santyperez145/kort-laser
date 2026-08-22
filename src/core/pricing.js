@@ -119,6 +119,7 @@ export const DEFAULT_CONFIG = {
     separacionPiezas: 5, // mm entre piezas en el nesting
     margenChapa: 10, // mm de borde no utilizable
     nestingFormaReal: true, // anidar por contorno real y no por rectángulo
+    nestingCalidad: 'equilibrada', // vista previa rápida; al guardar se optimiza en máxima
     gases: {
       O2: GASES.O2.costoM3,
       N2: GASES.N2.costoM3,
@@ -200,6 +201,7 @@ export function planificarNesting(itemsCrudos, ctx) {
     separacion: prod.separacionPiezas,
     margen: prod.margenChapa,
     formaReal: prod.nestingFormaReal !== false,
+    calidad: prod.nestingCalidad || 'maxima',
   };
 
   /* --- Agrupar --- */
@@ -345,6 +347,7 @@ export function cotizarItem(item, ctx, planItem = null) {
     separacion: prod.separacionPiezas,
     margen: prod.margenChapa,
     formaReal: prod.nestingFormaReal !== false,
+    calidad: prod.nestingCalidad || 'maxima',
   };
   const cabe = entraEnChapa(bbox, chapa, prod.margenChapa);
 
