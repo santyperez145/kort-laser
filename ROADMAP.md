@@ -674,6 +674,93 @@ las horas se recalculan desde ese hito, sin alterar el historial de órdenes.
 
 ---
 
+## Fase 6 — Planta conectada y MES visual
+
+Lineamiento completo: [`docs/LINEAMIENTOS_PRODUCTO.md`](docs/LINEAMIENTOS_PRODUCTO.md).
+La referencia funcional combina Oseon, Lantek MES, SigmaNEST Shop Floor,
+Paperless Parts y ProShop; no se copia una interfaz ni se ata KORT a una marca.
+
+### ✅ 6.1 Pasarela de telemetría y máquina en vivo
+
+Hecho el 2026-08-22. `src/core/telemetria.js` define el contrato versionado
+`kort.telemetria.v1`; SQLite conserva 180 días de muestras y la vista React
+`Máquina en vivo` actualiza estado, programa, OT, avance, potencia, velocidad,
+gas, alarmas y tiempo por estado cada tres segundos.
+
+La ingestión es local o autenticada con `KORT_MACHINE_TOKEN`, y es estrictamente
+de sólo lectura. El simulador (`npm run simular-maquina`) valida el recorrido
+completo sin conectarse al CNC. No se informa OEE hasta disponer de ciclo ideal
+y calidad real: disponibilidad sola no se presenta con un nombre más grande.
+
+**Para conectar el equipo real falta relevar:** fabricante y modelo del CNC,
+versión de software, IP/red industrial, y disponibilidad/licencia de OPC UA,
+MTConnect o API oficial. El adaptador será una pieza reemplazable.
+
+### 🔜 6.2 Puesto de taller y clasificación visual
+
+Convertir Producción a React con una ficha de OT por operación. Para corte:
+nesting coloreado por OT/cliente, piezas pendientes/retiradas/rechazadas,
+reposición automática del rechazo, selección de chapa real y alta del retazo.
+Para plegado: herramienta, secuencia, primera pieza y avance por lote.
+
+**Aceptación:** una persona puede terminar y clasificar un nesting desde una
+tablet sin papel ni entrar a pantallas comerciales.
+
+### 📋 6.3 Adaptador del láser KORT
+
+Implementar OPC UA Machine Tools/Laser Systems como primera opción y API del
+fabricante como alternativa. Mapear estados y alarmas con archivos capturados
+del equipo, probar reconexión y reloj, y desplegar el puente en la PC del taller.
+No enviar programas en esta fase.
+
+### 📋 6.4 Calidad y retrabajo
+
+Inspección de primera pieza, mediciones por característica, fotos, motivo de
+rechazo, cantidad a recortar y no conformidad con causa/acción. El rechazo del
+puesto de clasificación vuelve a planificación sin perder el vínculo con OT,
+chapa y programa.
+
+### 📋 6.5 Mantenimiento conectado
+
+Unificar consumibles por horas de arco con alarmas, incidentes, preventivos,
+repuestos y tiempo detenido. La predicción sólo se habilita cuando exista
+historial suficiente; antes son reglas transparentes por horas/ciclos.
+
+---
+
+## Fase 7 — Ingeniería, PDM e IA supervisada
+
+### 📋 7.1 Bandeja de pedidos y revisión de requisitos
+
+Ingreso de RFQ con todos sus adjuntos, revisiones y conversación. Extracción
+asistida de material, espesor, cantidad, tolerancias, acabados y fechas, siempre
+con fuente/página, confianza y confirmación humana.
+
+### 📋 7.2 Revisiones, BOM y conjuntos
+
+Una pieza no es un archivo: tiene versión aprobada, adjuntos, sustituciones y
+uso en conjuntos. Incorporar BOM multinivel y alerta si una OT usa una revisión
+vieja.
+
+### 📋 7.3 Evaluación de IA propia
+
+Armar un set anonimizado de planos reales con respuesta esperada. Medir por
+campo, guardar correcciones y bloquear modelos que empeoren. La IA sugiere;
+los validadores determinísticos deciden si una geometría es cotizable/cortable.
+
+---
+
+## Fase 8 — ERP metalúrgico completo
+
+- 📋 Seguimiento de presupuestos, tareas y reajuste por vigencia.
+- 📋 Compras, recepción, proveedores, lotes y costo puesto en La Rioja.
+- 📋 Remitos, embalaje y enlace con facturación ARCA cuando se justifique.
+- 📋 Costeo real completo por OT: material, máquina, mano de obra y externos.
+- 📋 QMS, mantenimiento, calibraciones y trazabilidad documental.
+- 📋 Roles/permisos cuando haya terminales de taller o acceso externo.
+
+---
+
 ## Migración de la interfaz
 
 La interfaz pasó a React + Vite + Tailwind + Radix, con Recharts para los

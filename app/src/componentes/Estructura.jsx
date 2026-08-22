@@ -14,6 +14,7 @@ import {
   LayoutDashboard, Calculator, FileText, Factory, Users,
   Layers, Cpu, Wallet, Settings, Moon, Sun, Wifi, WifiOff, FoldVertical, Tags,
   UserRound, Archive,
+  RadioTower, MoreHorizontal,
 } from 'lucide-react';
 import { usarEstado, usarOperario, usarTema } from '@/lib/estado';
 import { Boton } from '@/componentes/ui/boton';
@@ -31,10 +32,18 @@ export const RUTAS = [
   { a: '/clientes', txt: 'Clientes', Icono: Users },
   { a: '/materiales', txt: 'Materiales', Icono: Layers, nuevo: true },
   { a: '/stock', txt: 'Stock chapa', Icono: Archive, nuevo: true },
+  { a: '/maquina-en-vivo', txt: 'Máquina en vivo', Icono: RadioTower, nuevo: true },
   { a: '/maquinas', txt: 'Máquinas', Icono: Cpu },
   { a: '/costos', txt: 'Costos', Icono: Wallet },
   { a: '/config', txt: 'Configuración', Icono: Settings },
 ];
+
+const PRINCIPALES = new Set(['/', '/cotizador', '/ordenes', '/plegado', '/maquina-en-vivo', '/stock']);
+const RUTAS_PRINCIPALES = RUTAS.filter((r) => PRINCIPALES.has(r.a));
+const RUTAS_MAS = RUTAS.filter((r) => !PRINCIPALES.has(r.a));
+const MOVIL_FIJAS = new Set(['/', '/cotizador', '/ordenes']);
+const RUTAS_MOVIL = RUTAS.filter((r) => MOVIL_FIJAS.has(r.a));
+const RUTAS_MOVIL_MAS = RUTAS.filter((r) => !MOVIL_FIJAS.has(r.a));
 
 function Logo() {
   return (
@@ -69,6 +78,19 @@ function Enlace({ ruta, activo }) {
       {!ruta.nuevo && <span className="relative size-1 rounded-full bg-current opacity-40" />}
     </NavLink>
   );
+}
+
+function MenuMas({ pathname, rutas = RUTAS_MAS }) {
+  const activo = rutas.some((r) => pathname.startsWith(r.a));
+  return <details className="group relative shrink-0">
+    <summary className={cn(
+      'flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors [&::-webkit-details-marker]:hidden',
+      activo ? 'bg-corte-500 font-semibold text-white' : 'text-acero-200/75 hover:bg-white/10 hover:text-white'
+    )}><MoreHorizontal className="size-[15px]" /><span>Más</span></summary>
+    <div className="absolute right-0 top-[calc(100%+8px)] z-[80] grid min-w-[220px] gap-1 rounded-xl border border-white/10 bg-acero-900 p-2 shadow-2xl shadow-black/45 dark:bg-acero-950">
+      {rutas.map((r) => <NavLink key={r.a} to={r.a} onClick={(e) => e.currentTarget.closest('details')?.removeAttribute('open')} className={({ isActive }) => cn('flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] text-acero-200 hover:bg-white/10 hover:text-white', isActive && 'bg-corte-500 text-white')}><r.Icono className="size-3.5" /><span className="flex-1">{r.txt}</span>{!r.nuevo ? <span className="size-1 rounded-full bg-current opacity-40" /> : null}</NavLink>)}
+    </div>
+  </details>;
 }
 
 function ChipConexion() {
@@ -130,20 +152,15 @@ export function Estructura({ children }) {
           </div>
         </div>
 
-        {/* Los nueve ítems entran justos en 1280 px: el espaciado está medido
-            para eso. Por debajo desborda con scroll horizontal y sin barra
-            visible, que ahí comería alto útil. */}
+        {/* Las acciones diarias quedan siempre visibles. Administración y
+            consultas secundarias van en Más: un scroll horizontal escondía
+            justamente la máquina en vivo en monitores de 1280 px. */}
         <nav
           ref={nav}
           className="flex min-w-0 flex-1 items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {RUTAS.map((r) => (
-            <Enlace
-              key={r.a}
-              ruta={r}
-              activo={r.a === '/' ? pathname === '/' : pathname.startsWith(r.a)}
-            />
-          ))}
+          <div className="hidden lg:flex min-w-0 items-center"><>{RUTAS_PRINCIPALES.map((r) => <Enlace key={r.a} ruta={r} activo={r.a === '/' ? pathname === '/' : pathname.startsWith(r.a)} />)}</><MenuMas pathname={pathname} /></div>
+          <div className="flex min-w-0 items-center lg:hidden"><>{RUTAS_MOVIL.map((r) => <Enlace key={r.a} ruta={r} activo={r.a === '/' ? pathname === '/' : pathname.startsWith(r.a)} />)}</><MenuMas pathname={pathname} rutas={RUTAS_MOVIL_MAS} /></div>
         </nav>
 
         <div className="flex shrink-0 items-center gap-2">

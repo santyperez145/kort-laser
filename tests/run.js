@@ -57,6 +57,7 @@ import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/co
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } from '../src/core/agenda.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
+import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -3611,6 +3612,58 @@ test('la reposición cubre órdenes abiertas más seguridad y descuenta stock li
   assert.equal(r.seguridad, 1, '9 chapas en 90 días requieren una de colchón para 10 días');
   assert.equal(r.comprar, 0);
   assert.equal(r.explicacion, '3 comprometidas + 1 de seguridad - 4 disponibles = 0 a comprar');
+});
+
+/* ================================================================== */
+grupo('Telemetría de máquina');
+
+test('normaliza el dialecto del adaptador sin aceptar valores imposibles', () => {
+  const m = normalizarMuestra({
+    maquina_id: 'laser-3kw', estado: 'produciendo', progreso: 130,
+    potencia_pct: -4, velocidad_mm_min: 7200, piezas_buenas: 8,
+  }, new Date('2026-08-22T12:00:00Z'));
+  assert.equal(m.maquinaId, 'laser-3kw');
+  assert.equal(m.progreso, 100);
+  assert.equal(m.potenciaPct, 0);
+  assert.equal(m.velocidadMMMin, 7200);
+  assert.equal(m.piezasBuenas, 8);
+});
+
+test('la disponibilidad se pondera por tiempo y no inventa OEE', () => {
+  const muestras = [
+    { fecha: '2026-08-22T12:00:00Z', estado: 'preparando' },
+    { fecha: '2026-08-22T12:00:10Z', estado: 'produciendo' },
+    { fecha: '2026-08-22T12:00:30Z', estado: 'inactiva' },
+  ];
+  const r = resumirTelemetria(muestras, new Date('2026-08-22T12:00:40Z'));
+  cerca(r.disponibilidad, 0.5, 1e-9, '20 s produciendo sobre 40 s planificados');
+  assert.equal(r.oee, null, 'sin ciclo ideal no hay rendimiento ni OEE');
+  assert.equal(r.conectada, true);
+});
+
+test('una muestra vieja marca la pasarela desconectada', () => {
+  const r = resumirTelemetria([{ fecha: '2026-08-22T12:00:00Z', estado: 'produciendo' }], new Date('2026-08-22T12:01:00Z'));
+  assert.equal(r.conectada, false);
+  assert.equal(r.segundosPorEstado.produciendo, 15, 'el silencio no se cuenta como producción eterna');
+});
+
+test('la serie larga se reduce sin perder el último estado', () => {
+  const muestras = Array.from({ length: 1000 }, (_, i) => ({
+    fecha: new Date(Date.UTC(2026, 7, 22, 12, 0, i)).toISOString(),
+    estado: 'produciendo', potenciaPct: i % 100, progreso: i / 10,
+  }));
+  const serie = serieTelemetria(muestras, 100);
+  assert.ok(serie.length <= 100);
+  assert.equal(serie.at(-1).fecha, muestras.at(-1).fecha);
+});
+
+test('SQLite persiste y recupera las muestras de máquina', () => {
+  const m = normalizarMuestra({ maquinaId: 'laser-3kw', fecha: '2026-08-22T12:00:00Z', estado: 'produciendo', programa: 'NEST-42' });
+  dbt.registrarTelemetria(m);
+  const leidas = dbt.telemetria('laser-3kw', '2026-08-22T11:59:00Z', 10);
+  assert.equal(leidas.length, 1);
+  assert.equal(leidas[0].programa, 'NEST-42');
+  assert.ok(dbt.exportarTodo().telemetria.length >= 1, 'el respaldo incluye una ventana de telemetría');
 });
 
 if (dbt) {

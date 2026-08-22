@@ -479,6 +479,13 @@ el precio del inox), gastos de estructura, precios de aluminio y cobre.
 
 ## Qué sigue
 
-Ver [ROADMAP.md](ROADMAP.md). La limitación más importante hoy es que **el
-nesting es por ítem y no por presupuesto**: está documentada ahí con su
-impacto medido.
+Ver [ROADMAP.md](ROADMAP.md) y
+[docs/LINEAMIENTOS_PRODUCTO.md](docs/LINEAMIENTOS_PRODUCTO.md). Toda función
+nueva se contrasta con el flujo integral comercial → ingeniería → material →
+producción → calidad → entrega, y con referentes industriales oficiales.
+
+La conexión de máquina es **sólo lectura** hasta tener controlador y protocolo
+confirmados. `telemetria.js` es el contrato canónico; ningún adaptador mete su
+dialecto en la UI. No llamar OEE a disponibilidad: faltan rendimiento contra
+ciclo ideal y calidad medida. La IA sugiere con fuente/confianza y siempre pasa
+por validadores determinísticos antes de afectar precio o fabricación.

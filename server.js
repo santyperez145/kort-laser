@@ -30,6 +30,7 @@ import {
   normalizarRetazo,
   reservarRetazos,
 } from './src/core/retazos.js';
+import { normalizarMuestra, resumirTelemetria, serieTelemetria } from './src/core/telemetria.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +42,7 @@ const DIR_SALIDAS = EN_VERCEL ? path.join('/tmp', 'kort-salidas') : (process.env
 const DIR_WEB = path.join(RAIZ, 'web-dist');
 
 const db = new DB(DIR_DATOS);
+db.limpiarTelemetria(new Date(Date.now() - 180 * 86400000).toISOString());
 fs.mkdirSync(DIR_SALIDAS, { recursive: true });
 
 const hayBundle = fs.existsSync(path.join(DIR_WEB, 'index.html'));
@@ -73,6 +75,23 @@ const esquemaRespaldo = z.record(z.string(), z.unknown());
 
 const esquemaAprobar = z.object({
   presupuestoId: z.string().min(1),
+});
+
+const esquemaTelemetria = z.object({
+  maquinaId: z.string().min(1).max(80).optional(),
+  fecha: z.string().datetime().optional(),
+  estado: z.enum(['apagada', 'inactiva', 'preparando', 'produciendo', 'pausada', 'alarma']),
+  modo: z.string().max(60).optional(),
+  programa: z.string().max(180).optional(),
+  ordenId: z.string().max(80).optional(),
+  progreso: z.coerce.number().min(0).max(100).optional(),
+  potenciaPct: z.coerce.number().min(0).max(100).optional(),
+  velocidadMMMin: z.coerce.number().min(0).max(200000).optional(),
+  gas: z.string().max(16).optional(),
+  alarma: z.string().max(500).optional(),
+  piezasBuenas: z.coerce.number().int().nonnegative().optional(),
+  piezasRechazadas: z.coerce.number().int().nonnegative().optional(),
+  fuente: z.string().max(60).optional(),
 });
 
 const esquemaEntero = (def, max) =>
@@ -600,6 +619,35 @@ api.get('/estructura', async (_req, res) => {
 api.get('/agenda', async (_req, res) => {
   const { agendaProduccion } = await import('./src/core/agenda.js');
   res.json(agendaProduccion(db.lista('ordenes'), db.leer('config') || {}));
+});
+
+// --- Máquina en vivo ----------------------------------------------------
+
+api.get('/telemetria', (req, res) => {
+  const maquinaId = String(req.query.maquina || 'laser-3kw').slice(0, 80);
+  const horas = Math.max(0.1, Math.min(168, Number(req.query.horas) || 8));
+  const desde = new Date(Date.now() - horas * 3600000).toISOString();
+  const muestras = db.telemetria(maquinaId, desde, 12000);
+  res.json({
+    maquinaId, desde, muestras: serieTelemetria(muestras),
+    resumen: resumirTelemetria(muestras),
+    contrato: 'kort.telemetria.v1',
+  });
+});
+
+api.post('/telemetria', (req, res) => {
+  const tokenConfigurado = process.env.KORT_MACHINE_TOKEN || '';
+  const tokenRecibido = String(req.get('X-KORT-Machine-Token') || '');
+  const ip = String(req.socket.remoteAddress || '');
+  const esLocal = ip === '127.0.0.1' || ip === '::1' || ip.endsWith('::ffff:127.0.0.1');
+  // Sin token sólo escucha al puente instalado en esta PC. Abrir una entrada
+  // anónima en la LAN permitiría falsificar alarmas y métricas de producción.
+  if ((tokenConfigurado && tokenRecibido !== tokenConfigurado) || (!tokenConfigurado && !esLocal)) {
+    return res.status(403).json({ error: 'Origen de telemetría no autorizado.' });
+  }
+  const muestra = normalizarMuestra(validar(esquemaTelemetria, req.body));
+  db.registrarTelemetria(muestra);
+  res.status(201).json(muestra);
 });
 
 api.use((req, res) => {

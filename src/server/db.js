@@ -154,6 +154,26 @@ const ESQUEMA = [
   `
   ALTER TABLE bitacora ADD COLUMN operario TEXT;
   `,
+
+  /* v4 - historial de máquina para el tablero MES ----------------------- */
+  `
+  CREATE TABLE IF NOT EXISTS telemetria_maquina (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    maquina_id TEXT NOT NULL,
+    fecha TEXT NOT NULL,
+    estado TEXT NOT NULL,
+    programa TEXT,
+    orden_id TEXT,
+    progreso REAL DEFAULT 0,
+    potencia_pct REAL DEFAULT 0,
+    velocidad_mm_min REAL DEFAULT 0,
+    gas TEXT,
+    alarma TEXT,
+    datos TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS ix_telemetria_maquina_fecha
+    ON telemetria_maquina(maquina_id, fecha DESC);
+  `,
 ];
 
 const COLECCIONES = {
@@ -482,6 +502,34 @@ export class DB {
     return this.db.all('SELECT * FROM bitacora ORDER BY id DESC LIMIT ?', [limite]);
   }
 
+  /* ---------------- Telemetría de máquina ---------------- */
+
+  registrarTelemetria(muestra) {
+    this.db.run(
+      `INSERT INTO telemetria_maquina
+       (maquina_id, fecha, estado, programa, orden_id, progreso, potencia_pct,
+        velocidad_mm_min, gas, alarma, datos)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [muestra.maquinaId, muestra.fecha, muestra.estado, muestra.programa || null,
+       muestra.ordenId || null, muestra.progreso, muestra.potenciaPct,
+       muestra.velocidadMMMin, muestra.gas || null, muestra.alarma || null,
+       JSON.stringify(muestra)]
+    );
+    return muestra;
+  }
+
+  telemetria(maquinaId, desde, limite = 5000) {
+    return this.db.all(
+      `SELECT datos FROM telemetria_maquina
+       WHERE maquina_id = ? AND fecha >= ? ORDER BY fecha ASC LIMIT ?`,
+      [maquinaId, desde, limite]
+    ).map((r) => JSON.parse(r.datos));
+  }
+
+  limpiarTelemetria(antesDe) {
+    this.db.run('DELETE FROM telemetria_maquina WHERE fecha < ?', [antesDe]);
+  }
+
   /* ---------------- Consultas de negocio ---------------- */
 
   /** Facturación y margen por mes. */
@@ -672,13 +720,16 @@ export class DB {
       piezas: this.lista('piezas'),
       contadores: Object.fromEntries(this.db.all('SELECT clave, valor FROM contadores').map((r) => [r.clave, r.valor])),
       historialPrecios: this.historialPrecios(null, 5000),
+      // Se limita el respaldo para que años de lecturas por segundo no hagan
+      // inmanejable el archivo JSON. La base diaria sigue siendo la autoridad.
+      telemetria: this.db.all('SELECT datos FROM telemetria_maquina ORDER BY id DESC LIMIT 10000').map((r) => JSON.parse(r.datos)).reverse(),
     };
   }
 
   importarTodo(data) {
     this.db.run('BEGIN');
     try {
-      for (const t of ['presupuesto_items', 'presupuestos', 'ordenes', 'piezas', 'clientes', 'busqueda']) {
+      for (const t of ['presupuesto_items', 'presupuestos', 'ordenes', 'piezas', 'clientes', 'busqueda', 'telemetria_maquina']) {
         this.db.run(`DELETE FROM ${t}`);
       }
       for (const doc of ['config', 'materiales', 'maquinas', 'retazos']) {
@@ -703,6 +754,7 @@ export class DB {
           [h.material_id, h.nombre, h.precio_kg, h.tipo_cambio, h.precio_usd, h.motivo, h.fecha]
         );
       }
+      for (const muestra of data.telemetria || []) this.registrarTelemetria(muestra);
       this.db.run('COMMIT');
       this.log('restauración', 'respaldo', null, 'importado un respaldo completo');
       return true;
