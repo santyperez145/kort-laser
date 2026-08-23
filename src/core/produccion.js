@@ -17,6 +17,7 @@ export function crearPlanProduccion(cotizacion, itemsOriginales = []) {
       segundosCorte: procesoCorte === 'guillotina'
         ? (r.costos?.tPreparacion || 0) + (r.costos?.golpesGuillotina || 0)
         : (r.corte?.tTotal || 0),
+      geometria: r.geometria ? { ancho:r.geometria.ancho, alto:r.geometria.alto, espesor:r.espesor } : null,
       plegado: r.plegado ? {
         pliegues: r.plegado.nPliegues || original.plegado?.pliegues || 0,
         largoPliegue: r.plegado.largoPliegue || original.plegado?.largoPliegue || 0,

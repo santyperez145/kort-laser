@@ -747,12 +747,21 @@ fabricante como alternativa. Mapear estados y alarmas con archivos capturados
 del equipo, probar reconexión y reloj, y desplegar el puente en la PC del taller.
 No enviar programas en esta fase.
 
-### 📋 6.4 Calidad y retrabajo
+### ✅ 6.4 Calidad y retrabajo
 
-Inspección de primera pieza, mediciones por característica, fotos, motivo de
-rechazo, cantidad a recortar y no conformidad con causa/acción. El rechazo del
-puesto de clasificación vuelve a planificación sin perder el vínculo con OT,
-chapa y programa.
+La pantalla de Producción ya tiene un plan dimensional por ítem: nominal,
+tolerancia superior/inferior y unidad salen del plano; cada medición calcula
+sus límites, desviación y conformidad. Un lote sólo se libera cuando la última
+medición de todas las características requeridas está dentro de tolerancia.
+
+Los rechazos del nesting exigen causa y acción, y se guardan atómicamente con
+la no conformidad: OT, programa, chapa, posición e ítem no se pueden separar
+por una caída de red. Las acciones de recorte alimentan la reposición mientras
+la NC está abierta; el cierre conserva el historial y la resolución.
+
+La evidencia fotográfica JPG/PNG/WebP se guarda en la carpeta de salida de la
+OT y la NC conserva sólo la ruta: no se infla SQLite con imágenes base64. El
+servidor y la interfaz limitan cada archivo a 8 MB.
 
 ### 📋 6.5 Mantenimiento conectado
 

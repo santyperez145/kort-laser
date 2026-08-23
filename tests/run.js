@@ -59,6 +59,7 @@ import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '..
 import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
 import { crearPlanProduccion, aplicarEventoTaller, resumenTaller, retazoSeguroDePrograma } from '../src/core/produccion.js';
+import { aplicarEventoCalidad, evaluarMedicion, resumenCalidad } from '../src/core/calidad.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -3773,6 +3774,34 @@ test('la chapa física se confirma una sola vez y conserva su trazabilidad', () 
   assert.throws(() => aplicarEventoTaller(orden, {
     tipo: 'confirmar-chapa', programaId: 'item:0', chapaIndice: 0, origen: 'cliente',
   }), /ya fue confirmada/);
+});
+
+test('calidad evalúa tolerancias asimétricas e incluye sus límites', () => {
+  assert.equal(evaluarMedicion({ nominal:100, toleranciaMas:0.2, toleranciaMenos:0.5, valor:99.5 }).estado, 'conforme');
+  assert.equal(evaluarMedicion({ nominal:100, toleranciaMas:0.2, toleranciaMenos:0.5, valor:100.2 }).estado, 'conforme');
+  assert.equal(evaluarMedicion({ nominal:100, toleranciaMas:0.2, toleranciaMenos:0.5, valor:99.49 }).estado, 'fuera');
+  assert.throws(() => evaluarMedicion({ nominal:100, toleranciaMas:-1, toleranciaMenos:0.5, valor:100 }), /positivas/);
+});
+
+test('un lote sólo se libera con todas las cotas requeridas conformes', () => {
+  let orden = { id:'ot-calidad', planProduccion:crearPlanProduccion(nestingPrueba) };
+  orden = aplicarEventoCalidad(orden, { tipo:'definir-caracteristica', itemIndice:0, id:'ancho', nombre:'Ancho', nominal:100, toleranciaMas:0.2, toleranciaMenos:0.2 });
+  assert.throws(() => aplicarEventoCalidad(orden, { tipo:'liberar-lote', itemIndice:0 }), /Falta medir/);
+  orden = aplicarEventoCalidad(orden, { tipo:'registrar-medicion', itemIndice:0, caracteristicaId:'ancho', valor:100.3 });
+  assert.throws(() => aplicarEventoCalidad(orden, { tipo:'liberar-lote', itemIndice:0 }), /fuera/);
+  orden = aplicarEventoCalidad(orden, { tipo:'registrar-medicion', itemIndice:0, caracteristicaId:'ancho', valor:100.1 });
+  orden = aplicarEventoCalidad(orden, { tipo:'liberar-lote', itemIndice:0 }, '2026-08-22T18:00:00Z');
+  assert.equal(orden.calidad.items[0].liberacion.estado, 'liberado');
+});
+
+test('una no conformidad conserva el origen y alimenta la reposición', () => {
+  let orden = { id:'ot-nc', planProduccion:crearPlanProduccion(nestingPrueba) };
+  orden = aplicarEventoCalidad(orden, { tipo:'abrir-no-conformidad', id:'nc-1', itemIndice:0,
+    programaId:'item:0', chapaIndice:0, piezaIndice:1, causa:'rebaba', accion:'recortar', cantidad:2, detalle:'Canto inferior' });
+  assert.equal(orden.calidad.noConformidades['nc-1'].piezaIndice, 1);
+  assert.equal(resumenCalidad(orden).reposiciones, 2);
+  orden = aplicarEventoCalidad(orden, { tipo:'cerrar-no-conformidad', id:'nc-1', resolucion:'Recortadas y controladas' });
+  assert.equal(resumenCalidad(orden).reposiciones, 0);
 });
 
 if (dbt) {

@@ -490,6 +490,16 @@ exactamente como estaba. Hay un test que lo fija.
   las `speeds` viejas. Sin eso, actualizar deja el motor de corte con datos
   obsoletos y precios mal, en silencio.
 
+- **Calidad no inventa tolerancias.** El ancho calculado por la geometría sirve
+  como referencia operativa, pero la aceptación sale del plano aprobado. Toda
+  característica requerida necesita nominal y tolerancias superior/inferior;
+  el lote sólo se libera si la última medición de cada una es conforme.
+
+- **Rechazar y abrir la no conformidad es una sola transacción.** Separarlas
+  deja una pieza roja sin causa si se corta la red entre las dos llamadas. El
+  endpoint de calidad aplica también la clasificación cuando recibe programa,
+  chapa y posición, y persiste ambos estados juntos.
+
 ## Datos: qué está verificado y qué no
 
 `docs/PRECIOS.md` clasifica cada número en 🟢 verificado / 🟡 estimado /

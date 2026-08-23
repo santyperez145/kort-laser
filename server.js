@@ -32,6 +32,7 @@ import {
 } from './src/core/retazos.js';
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from './src/core/telemetria.js';
 import { aplicarEventoTaller } from './src/core/produccion.js';
+import { aplicarEventoCalidad } from './src/core/calidad.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,7 +65,9 @@ const DOCUMENTOS = ['config', 'materiales', 'maquinas', 'retazos'];
 const esquemaArchivo = z.object({
   nombre: z.string().min(1).max(180).default('archivo.bin'),
   carpeta: z.string().max(120).default(''),
-  base64: z.string().optional(),
+  // 8 MiB binarios ≈ 10,7 MiB base64. El límite evita que una foto enorme
+  // bloquee la PC del taller al parsear JSON, sin guardar la imagen en SQLite.
+  base64: z.string().max(11_200_000).optional(),
   texto: z.string().optional(),
 });
 
@@ -440,6 +443,31 @@ api.put('/ordenes/:id/taller', (req, res, siguiente) => {
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
+});
+
+/** Calidad también se guarda como evento: una medición nunca pisa otra tablet. */
+api.put('/ordenes/:id/calidad', (req, res, siguiente) => {
+  const { id } = req.params;
+  if (!db.obtener('ordenes', id)) return siguiente();
+  try {
+    const salida = db.transaccion(() => {
+      const actual = db.obtener('ordenes', id);
+      const evento = { ...req.body, operario:req.operario || req.body?.operario || '' };
+      // Un rechazo visual y su NC son una sola decisión de taller: si se
+      // guardaran por separado, una caída entre ambos dejaría una reposición
+      // sin causa o una NC cuya pieza todavía figura conforme.
+      const conClasificacion = evento.tipo === 'abrir-no-conformidad' && evento.programaId &&
+        Number.isInteger(Number(evento.chapaIndice)) && Number.isInteger(Number(evento.piezaIndice))
+        ? aplicarEventoTaller(actual, { tipo:'clasificar', programaId:evento.programaId,
+            chapaIndice:evento.chapaIndice, piezaIndice:evento.piezaIndice, estado:'rechazada',
+            motivo:evento.detalle || evento.causa, operario:evento.operario })
+        : actual;
+      const actualizado = aplicarEventoCalidad(conClasificacion, evento);
+      return db.actualizar('ordenes', id, { calidad:actualizado.calidad,
+        ...(actualizado.taller ? { taller:actualizado.taller } : {}) }, req.operario);
+    });
+    res.json(salida);
+  } catch (error) { res.status(400).json({ error:error.message }); }
 });
 
 api.post('/:recurso', (req, res, siguiente) => {

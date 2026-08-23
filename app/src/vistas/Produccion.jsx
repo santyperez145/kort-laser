@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Factory, Layers3, TriangleAlert, Wrench } from 'lucide-react';
+import { Check, ClipboardCheck, Factory, Layers3, Plus, TriangleAlert, Wrench, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
@@ -12,6 +12,7 @@ import { Aviso, Barra } from '@/componentes/ui/varios';
 import { VisorNesting } from '@/componentes/visores/VisorNesting';
 import { Campo, Entrada, Selector, Opcion } from '@/componentes/ui/campos';
 import { resumenTaller, retazoSeguroDePrograma } from '@core/produccion.js';
+import { ACCIONES_NO_CONFORMIDAD, CAUSAS_NO_CONFORMIDAD, resumenCalidad } from '@core/calidad.js';
 
 const FLUJO = ['pendiente', 'material', 'corte', 'plegado', 'terminado', 'entregado'];
 
@@ -48,9 +49,10 @@ function ConfirmacionChapa({ orden, programa, chapa, guardarEvento }) {
   </div>;
 }
 
-function Clasificador({ orden, guardarEvento }) {
+function Clasificador({ orden, guardarEvento, guardarCalidad }) {
   const [programaId, setProgramaId] = useState(orden.planProduccion?.programas?.[0]?.id || '');
   const [chapa, setChapa] = useState(0);
+  const [rechazo, setRechazo] = useState(null);
   useEffect(() => { setProgramaId(orden.planProduccion?.programas?.[0]?.id || ''); setChapa(0); }, [orden.id]);
   const programas = orden.planProduccion?.programas || [];
   const programa = programas.find((p) => p.id === programaId) || programas[0];
@@ -59,8 +61,19 @@ function Clasificador({ orden, guardarEvento }) {
   if (!programa) return <Aviso nivel="aviso">Esta OT es anterior al plan visual. Podés moverla de etapa, pero no se inventa un nesting recalculado: reabrí y guardá el presupuesto si necesitás clasificar pieza por pieza.</Aviso>;
   const alPieza = (_p, indice, clave) => {
     const actual = estados[clave]?.estado || 'pendiente';
-    const estado = actual === 'pendiente' ? 'retirada' : actual === 'retirada' ? 'rechazada' : 'pendiente';
-    guardarEvento({ tipo: 'clasificar', programaId: programa.id, chapaIndice: chapa, piezaIndice: indice, estado });
+    if (actual === 'retirada') {
+      const pieza = programa.layout[chapa]?.piezas?.[indice];
+      const item = programa.items?.find((x)=>x.idEnLayout === pieza?.id) || programa.items?.[0];
+      setRechazo({ programaId:programa.id, chapaIndice:chapa, piezaIndice:indice,
+        itemIndice:item?.itemIndice ?? 0, causa:'dimension', accion:'recortar', detalle:'' });
+      return;
+    }
+    guardarEvento({ tipo:'clasificar', programaId:programa.id, chapaIndice:chapa, piezaIndice:indice,
+      estado:actual === 'rechazada' ? 'pendiente' : 'retirada' });
+  };
+  const confirmarRechazo = () => {
+    guardarCalidad({ tipo:'abrir-no-conformidad', id:`nc-${Date.now()}`, ...rechazo, cantidad:1 });
+    setRechazo(null);
   };
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-2">
@@ -71,8 +84,14 @@ function Clasificador({ orden, guardarEvento }) {
       <Insignia tono="gris">{resumen.pendientes} pendientes</Insignia><Insignia tono="verde">{resumen.retiradas} retiradas</Insignia><Insignia tono="rojo">{resumen.rechazadas} rechazadas</Insignia><Insignia tono="amarillo">{resumen.reposiciones} a recortar</Insignia>
     </div>
     <VisorNesting nesting={{ layout: programa.layout }} indiceChapa={chapa} estados={estados} alPieza={alPieza} alto={440} />
+    {rechazo && <div className="rounded-xl border border-peligro-500/40 bg-peligro-500/5 p-3">
+      <div className="flex items-center justify-between gap-2"><b className="text-sm">Rechazar pieza · chapa {rechazo.chapaIndice+1}, posición {rechazo.piezaIndice+1}</b><Boton tam="iconoSm" tono="fantasma" onClick={()=>setRechazo(null)}><X/></Boton></div>
+      <p className="mt-1 text-xs text-tenue">La causa queda unida a esta OT, programa, chapa y posición del nesting.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3"><Campo etiqueta="Causa"><Selector valor={rechazo.causa} alCambiar={(v)=>setRechazo({...rechazo,causa:v})}>{CAUSAS_NO_CONFORMIDAD.map(([id,txt])=><Opcion key={id} valor={id}>{txt}</Opcion>)}</Selector></Campo><Campo etiqueta="Acción"><Selector valor={rechazo.accion} alCambiar={(v)=>setRechazo({...rechazo,accion:v})}>{ACCIONES_NO_CONFORMIDAD.map(([id,txt])=><Opcion key={id} valor={id}>{txt}</Opcion>)}</Selector></Campo><Campo etiqueta="Detalle"><Entrada value={rechazo.detalle} onChange={(e)=>setRechazo({...rechazo,detalle:e.target.value})} placeholder="Defecto observado"/></Campo></div>
+      <div className="mt-3 flex justify-end"><Boton tono="peligro" onClick={confirmarRechazo}><TriangleAlert/> Confirmar rechazo</Boton></div>
+    </div>}
     <ConfirmacionChapa orden={orden} programa={programa} chapa={chapa} guardarEvento={guardarEvento}/>
-    <p className="text-xs text-tenue">Tocá una pieza: pendiente → retirada → rechazada → pendiente. Los rechazos entran automáticamente en la cola de recorte.</p>
+    <p className="text-xs text-tenue">Tocá una pieza para retirarla. Si la volvés a tocar, el sistema exige causa y acción antes de rechazarla.</p>
   </div>;
 }
 
@@ -97,6 +116,78 @@ function Plegados({ orden, guardarEvento }) {
   })}</PanelCuerpo></Panel>;
 }
 
+function Calidad({ orden, guardarEvento }) {
+  const operaciones = orden.planProduccion?.operaciones || [];
+  const [itemIndice, setItemIndice] = useState(operaciones[0]?.itemIndice ?? 0);
+  const [cota, setCota] = useState({ nombre:'Ancho', nominal:'', toleranciaMas:'0.5', toleranciaMenos:'0.5', unidad:'mm' });
+  const [valores, setValores] = useState({});
+  const [nc, setNc] = useState({ causa:'dimension', accion:'recortar', cantidad:1, detalle:'' });
+  const [evidencia, setEvidencia] = useState(null);
+  useEffect(() => { setItemIndice(operaciones[0]?.itemIndice ?? 0); }, [orden.id]);
+  const op = operaciones.find((x) => x.itemIndice === itemIndice) || operaciones[0];
+  const estado = orden.calidad?.items?.[op?.itemIndice] || {};
+  const caracteristicas = Object.values(estado.caracteristicas || {});
+  const noConformidades = Object.values(orden.calidad?.noConformidades || {}).filter((x) => x.itemIndice === op?.itemIndice);
+  const resumen = resumenCalidad(orden);
+  if (!op) return null;
+  const agregarCota = () => {
+    guardarEvento({ tipo:'definir-caracteristica', itemIndice:op.itemIndice, id:`cota-${Date.now()}`, ...cota });
+    setCota({ ...cota, nombre:'', nominal:'' });
+  };
+  const registrarNc = async () => {
+    try {
+      let ruta = '';
+      if (evidencia) {
+        if (evidencia.size > 8 * 1024 * 1024) throw new Error('La foto supera 8 MB. Reducila antes de guardarla.');
+        if (!['image/jpeg','image/png','image/webp'].includes(evidencia.type)) throw new Error('La evidencia debe ser JPG, PNG o WebP.');
+        const extension = evidencia.name.split('.').pop()?.toLowerCase() || 'jpg';
+        const guardada = await api.guardarArchivo(`NC-${Date.now()}.${extension}`, new Uint8Array(await evidencia.arrayBuffer()), `OT-${orden.numero || orden.id}-calidad`);
+        ruta = guardada.ruta;
+      }
+      guardarEvento({tipo:'abrir-no-conformidad',itemIndice:op.itemIndice,...nc,id:`nc-${Date.now()}`,evidencia:ruta});
+      setEvidencia(null);
+    } catch (e) { toast.error(e.message); }
+  };
+  return <Panel><PanelCab><ClipboardCheck className="size-4 text-corte-500"/><PanelTitulo>Calidad dimensional y retrabajo</PanelTitulo></PanelCab><PanelCuerpo className="space-y-4">
+    <div className="flex flex-wrap gap-2">{operaciones.map((x)=><Boton key={x.itemIndice} tam="sm" tono={x.itemIndice===op.itemIndice?'corte':'neutro'} onClick={()=>setItemIndice(x.itemIndice)}>{x.nombre}</Boton>)}</div>
+    <div className="grid gap-2 sm:grid-cols-4"><Insignia tono="gris">{resumen.itemsInspeccionados} inspeccionados</Insignia><Insignia tono="verde">{resumen.lotesLiberados} liberados</Insignia><Insignia tono="rojo">{resumen.noConformidadesAbiertas} NC abiertas</Insignia><Insignia tono="amarillo">{resumen.reposiciones} a recortar</Insignia></div>
+    <Aviso nivel="info"><b>La tolerancia sale del plano, no de una suposición del sistema.</b> Cargá nominal y desvíos permitidos; los límites y la conformidad se calculan automáticamente. Los bordes también cuentan como conformes.</Aviso>
+    <div className="rounded-xl border border-borde p-3">
+      <b className="text-sm">Plan de inspección · primera pieza</b>
+      {op.geometria && <p className="mt-1 text-xs text-tenue">Referencia cotizada: {Math.round(op.geometria.ancho)} × {Math.round(op.geometria.alto)} × {op.geometria.espesor} mm. Verificá contra el plano vigente.</p>}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <Campo etiqueta="Característica"><Entrada value={cota.nombre} onChange={(e)=>setCota({...cota,nombre:e.target.value})} placeholder="Ancho, Ø agujero…"/></Campo>
+        <Campo etiqueta="Nominal"><Entrada type="number" value={cota.nominal} unidad={cota.unidad} onChange={(e)=>setCota({...cota,nominal:e.target.value})}/></Campo>
+        <Campo etiqueta="Tolerancia +"><Entrada type="number" min="0" step="0.01" value={cota.toleranciaMas} unidad={cota.unidad} onChange={(e)=>setCota({...cota,toleranciaMas:e.target.value})}/></Campo>
+        <Campo etiqueta="Tolerancia −"><Entrada type="number" min="0" step="0.01" value={cota.toleranciaMenos} unidad={cota.unidad} onChange={(e)=>setCota({...cota,toleranciaMenos:e.target.value})}/></Campo>
+        <Campo etiqueta="Unidad"><Selector valor={cota.unidad} alCambiar={(v)=>setCota({...cota,unidad:v})}><Opcion valor="mm">mm</Opcion><Opcion valor="°">grados</Opcion></Selector></Campo>
+        <div className="flex items-end"><Boton tono="corte" className="w-full" disabled={!cota.nombre || cota.nominal===''} onClick={agregarCota}><Plus/> Agregar</Boton></div>
+      </div>
+      <div className="mt-3 space-y-2">{caracteristicas.map((c)=>{
+        const ultima = [...(estado.mediciones || [])].reverse().find((m)=>m.caracteristicaId===c.id);
+        return <div key={c.id} className="grid items-center gap-2 rounded-lg bg-panel-alto p-2 sm:grid-cols-[minmax(150px,1fr)_180px_auto]">
+          <div><b className="text-xs">{c.nombre}: {c.nominal} {c.unidad}</b><div className="text-[11px] text-tenue">Aceptable: {c.nominal-c.toleranciaMenos} a {c.nominal+c.toleranciaMas} {c.unidad}</div></div>
+          <Entrada type="number" step="0.01" unidad={c.unidad} value={valores[c.id] ?? ''} onChange={(e)=>setValores({...valores,[c.id]:e.target.value})} placeholder="Medición real"/>
+          <div className="flex items-center gap-2"><Boton tam="sm" disabled={valores[c.id]==null || valores[c.id]===''} onClick={()=>guardarEvento({tipo:'registrar-medicion',itemIndice:op.itemIndice,caracteristicaId:c.id,valor:valores[c.id]})}>Medir</Boton>{ultima && <Insignia tono={ultima.estado==='conforme'?'verde':'rojo'}>{ultima.valor} · {ultima.estado==='conforme'?'conforme':'fuera'}</Insignia>}</div>
+        </div>;
+      })}{!caracteristicas.length && <p className="text-xs text-tenue">Todavía no hay cotas de control. Copialas del plano aprobado.</p>}</div>
+      <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs text-suave">Estado: <b>{estado.liberacion?.estado==='liberado'?'lote liberado':'pendiente de medición'}</b></span><Boton tono={estado.liberacion?.estado==='liberado'?'verde':'corte'} disabled={estado.liberacion?.estado==='liberado'} onClick={()=>guardarEvento({tipo:'liberar-lote',itemIndice:op.itemIndice})}><Check/> Liberar primera pieza</Boton></div>
+    </div>
+    <div className="rounded-xl border border-borde p-3">
+      <b className="text-sm">No conformidad y acción</b>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Campo etiqueta="Causa"><Selector valor={nc.causa} alCambiar={(v)=>setNc({...nc,causa:v})}>{CAUSAS_NO_CONFORMIDAD.map(([id,txt])=><Opcion key={id} valor={id}>{txt}</Opcion>)}</Selector></Campo>
+        <Campo etiqueta="Acción"><Selector valor={nc.accion} alCambiar={(v)=>setNc({...nc,accion:v})}>{ACCIONES_NO_CONFORMIDAD.map(([id,txt])=><Opcion key={id} valor={id}>{txt}</Opcion>)}</Selector></Campo>
+        <Campo etiqueta="Cantidad afectada"><Entrada type="number" min="1" max={op.cantidad} value={nc.cantidad} onChange={(e)=>setNc({...nc,cantidad:e.target.value})}/></Campo>
+        <Campo etiqueta="Detalle"><Entrada value={nc.detalle} onChange={(e)=>setNc({...nc,detalle:e.target.value})} placeholder="Qué pasó y dónde"/></Campo>
+        <Campo etiqueta="Foto de evidencia" ayuda="JPG, PNG o WebP · máx. 8 MB"><Entrada type="file" accept="image/jpeg,image/png,image/webp" onChange={(e)=>setEvidencia(e.target.files?.[0] || null)}/></Campo>
+      </div>
+      <div className="mt-3 flex justify-end"><Boton tono="peligro" onClick={registrarNc}><TriangleAlert/> Registrar NC</Boton></div>
+      <div className="mt-3 space-y-2">{noConformidades.map((x)=><div key={x.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-panel-alto p-2 text-xs"><span><b>{CAUSAS_NO_CONFORMIDAD.find(([id])=>id===x.causa)?.[1]}</b> · {x.cantidad} pieza(s) · {ACCIONES_NO_CONFORMIDAD.find(([id])=>id===x.accion)?.[1]}{x.detalle?` · ${x.detalle}`:''}{x.evidencia && <> · <a className="text-corte-500 underline" href={`/${x.evidencia}`} target="_blank" rel="noreferrer">ver foto</a></>}</span>{x.estado==='abierta'?<Boton tam="sm" tono="verde" onClick={()=>guardarEvento({tipo:'cerrar-no-conformidad',id:x.id,resolucion:'Acción completada y verificada'})}><Check/> Cerrar</Boton>:<Insignia tono="verde"><X className="size-3"/> cerrada</Insignia>}</div>)}</div>
+    </div>
+  </PanelCuerpo></Panel>;
+}
+
 export function VistaProduccion() {
   const qc = useQueryClient();
   const recargarCalibracion = usarEstado((s) => s.recargarCalibracion);
@@ -107,6 +198,7 @@ export function VistaProduccion() {
   useEffect(() => { if (!seleccion && orden) setSeleccion(orden.id); }, [seleccion, orden]);
   const mut = useMutation({ mutationFn:({ ruta, cuerpo }) => api.put(ruta, cuerpo), onSuccess:async () => { await qc.invalidateQueries({queryKey:['ordenes']}); recargarCalibracion().catch(()=>{}); }, onError:(e)=>toast.error(e.message) });
   const evento = (cuerpo) => mut.mutate({ ruta:`ordenes/${orden.id}/taller`, cuerpo });
+  const eventoCalidad = (cuerpo) => mut.mutate({ ruta:`ordenes/${orden.id}/calidad`, cuerpo });
   const mover = (estado) => {
     const cuerpo = { estado };
     if (estado === 'terminado' && !orden.real?.segundos) {
@@ -126,9 +218,10 @@ export function VistaProduccion() {
     <Panel><PanelCab><Factory className="size-4 text-corte-500"/><PanelTitulo>Cola de taller · {abiertas.length} activas</PanelTitulo></PanelCab><PanelCuerpo sinPad>{ordenes.length ? ordenes.map((o)=><TarjetaOrden key={o.id} orden={o} activa={o.id===orden?.id} alElegir={()=>setSeleccion(o.id)}/>) : <Vacio titulo="No hay órdenes" detalle="Aprobá un presupuesto para crear la primera OT."/>}</PanelCuerpo></Panel>
     {orden ? <main className="min-w-0 space-y-4">
       <Panel><PanelCuerpo><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><h1 className="text-xl font-bold">OT {orden.numero}</h1><InsigniaEstado mapa={ESTADOS_OT} estado={orden.estado}/></div><p className="text-sm text-suave">{orden.cliente?.nombre || 'Sin cliente'} · entrega {fecha(orden.fechaEntrega)}</p></div><div className="flex flex-wrap gap-1">{FLUJO.map((e)=><Boton key={e} tam="sm" tono={e===orden.estado?'corte':'neutro'} onClick={()=>mover(e)}>{ESTADOS_OT[e].txt}</Boton>)}</div></div></PanelCuerpo></Panel>
-      <Panel><PanelCab><PanelTitulo>Clasificación visual de corte</PanelTitulo></PanelCab><PanelCuerpo><Clasificador orden={orden} guardarEvento={evento}/></PanelCuerpo></Panel>
+      <Panel><PanelCab><PanelTitulo>Clasificación visual de corte</PanelTitulo></PanelCab><PanelCuerpo><Clasificador orden={orden} guardarEvento={evento} guardarCalidad={eventoCalidad}/></PanelCuerpo></Panel>
       {resumenTaller(orden).reposiciones > 0 && <Aviso nivel="aviso"><TriangleAlert className="inline size-4"/> Hay {resumenTaller(orden).reposiciones} pieza(s) rechazadas. La cola de recorte se mantiene hasta reclasificarlas.</Aviso>}
       <Plegados orden={orden} guardarEvento={evento}/>
+      <Calidad orden={orden} guardarEvento={eventoCalidad}/>
     </main> : <Vacio icono={<Factory/>} titulo="No hay una OT para mostrar"/>}
   </div>;
 }
