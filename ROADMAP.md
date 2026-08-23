@@ -120,6 +120,23 @@ segmentos aplana los lados verticales si se mide `ang % 90`; y una línea
 dibujada tiene grosor, así que da DOS contornos que hay que juntar en su línea
 media.
 
+### ✅ 1.0c Auditoría geométrica antes del CAM
+
+`src/core/fabricabilidad.js` es una barrera común para foto, PDF, DXF de
+cliente, DXF de pieza y DXF de nesting. Bloquea contornos abiertos,
+discontinuos, degenerados o autointersectados; agujeros fuera del material o
+superpuestos; partes que se pisan; coordenadas inválidas; y piezas que no
+entran en la mesa 3015 ni giradas.
+
+Los límites que dependen del proceso se advierten sin fingir una certeza que
+no existe: agujero menor a 1,2 × espesor, segmentos que el CAM puede filtrar y
+ligamento menor a `max(1,5 mm; 2 × espesor)`. Una geometría muy compleja se
+manda a revisión en el CAM en vez de congelar el navegador o declararla sana.
+
+El DXF original también queda en `salidas/planos-clientes`, con material y
+espesor heredados del ítem que se estaba cotizando. Así una importación sobre
+inoxidable no vuelve silenciosamente al acero de fábrica.
+
 ### ✅ 1.0 Cada precio muestra de dónde sale
 
 `src/core/explicacion.js`. El cotizador y el tarifario abren la cuenta completa

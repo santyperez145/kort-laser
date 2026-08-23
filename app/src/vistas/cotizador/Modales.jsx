@@ -11,11 +11,13 @@ import { miniatura } from '@/lib/miniatura';
 import { usarEstado } from '@/lib/estado';
 import { num } from '@/lib/formato';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
 
 import { categorias, getPieza, paramsPorDefecto } from '@core/library.js';
 import { catalogo, paramsDeVariante, resumenCatalogo } from '@core/variantes.js';
 import { leerDXF } from '@core/dxf-read.js';
 import { shapeBBox } from '@core/geometry.js';
+import { auditarFabricabilidad } from '@core/fabricabilidad.js';
 
 /* ------------------------------------------------------------------ */
 /* Biblioteca de piezas paramétricas                                   */
@@ -166,22 +168,28 @@ export function Biblioteca({ abierto, alCerrar }) {
 export function ImportarDXF({ abierto, alCerrar }) {
   const { doc, sel, agregarItem } = usarCotizador();
   const materiales = usarEstado((s) => s.materiales);
+  const laser = usarEstado((s) => s.maquinas.find((m)=>m.tipo==='laser') || s.maquinas[0]);
   const entrada = useRef(null);
   const [encima, setEncima] = useState(false);
   const [lectura, setLectura] = useState(null);
   const [nombreArchivo, setNombreArchivo] = useState('');
+  const [textoOriginal, setTextoOriginal] = useState('');
   // Separar es una decisión explícita: por defecto se respeta el diseño.
   // Arranca en lo que sugiere el análisis del dibujo, no siempre en "conjunto":
   // un archivo con doce copias de la misma pieza es un lote, no un cartel.
   const [separar, setSeparar] = useState(false);
 
   const procesar = (file) => {
+    if (!/\.dxf$/i.test(file.name)) return setLectura({ error:'El archivo debe ser DXF.', avisos:[], piezas:[] });
+    if (file.size > 8*1024*1024) return setLectura({ error:'El DXF supera 8 MB. Exportá sólo la geometría de corte necesaria.', avisos:[], piezas:[] });
     const lector = new FileReader();
     lector.onload = () => {
       try {
-        const r = leerDXF(String(lector.result), { espesor: doc.items[sel]?.espesor || 2 });
+        const texto=String(lector.result);
+        const r = leerDXF(texto, { espesor: doc.items[sel]?.espesor || 2 });
         setLectura(r);
         setNombreArchivo(file.name);
+        setTextoOriginal(texto);
         // Se arranca en lo que el análisis del dibujo sugiere. Sigue siendo
         // una propuesta: el selector queda a la vista para cambiarla.
         setSeparar(r.agrupamiento?.sugerencia === 'sueltas');
@@ -192,13 +200,22 @@ export function ImportarDXF({ abierto, alCerrar }) {
     lector.readAsText(file);
   };
 
-  const nuevoItemDXF = (shape, sufijo = '') => {
+  const auditoriaDe = (shape) => auditarFabricabilidad(shape, { espesor:doc.items[sel]?.espesor||2, mesa:laser?.areaTrabajo||{w:3000,h:1500} });
+  const auditoriaConjunto = lectura?.conjunto ? auditoriaDe(lectura.conjunto) : null;
+  const auditoriasPiezas = (lectura?.piezas||[]).map((p)=>auditoriaDe({outer:p.outer,holes:p.holes,pliegues:[]}));
+  const guardarOriginal = async () => {
+    const guardado=await api.guardarArchivo(`${Date.now()}-${nombreArchivo.replace(/[^\w.áéíóúñÁÉÍÓÚÑ-]/g,'_')}`,textoOriginal,'planos-clientes');
+    return guardado.ruta;
+  };
+
+  const nuevoItemDXF = (shape, sufijo = '', rutaOriginal = '') => {
     const it = itemNuevo(materiales, {
       origen: 'dxf',
       nombre: `${nombreArchivo.replace(/\.dxf$/i, '')}${sufijo}`,
       shape,
       archivo: nombreArchivo,
-      meta: { modelo3D: { tipo: 'plano' } },
+      ...(doc.items[sel] ? { materialId:doc.items[sel].materialId, espesor:doc.items[sel].espesor } : {}),
+      meta: { modelo3D: { tipo: 'plano' }, planoImportado:{ tipo:'dxf',archivo:nombreArchivo,rutaOriginal,fecha:new Date().toISOString() } },
     });
     delete it.piezaId;
     delete it.params;
@@ -206,19 +223,22 @@ export function ImportarDXF({ abierto, alCerrar }) {
   };
 
   /** El dibujo tal cual lo mandó el cliente, con sus posiciones relativas. */
-  const agregarConjunto = () => {
-    agregarItem(nuevoItemDXF({ ...lectura.conjunto, pliegues: [] }));
-    cerrar();
-    toast.success('Dibujo importado como una pieza');
+  const agregarConjunto = async () => {
+    if(auditoriaConjunto?.bloqueado)return toast.error(`DXF bloqueado: ${auditoriaConjunto.errores[0].msg}`);
+    try { const ruta=await guardarOriginal(); agregarItem(nuevoItemDXF({ ...lectura.conjunto, pliegues: [] },'',ruta)); cerrar(); toast.success('Dibujo importado como una pieza'); }
+    catch(e){toast.error(`No se guardó el DXF original: ${e.message}`);}
   };
 
-  const agregarParte = (p, n) => {
-    agregarItem(nuevoItemDXF({ outer: p.outer, holes: p.holes, pliegues: [] }, n > 1 ? ' · ' + n : ''));
+  const agregarParte = (p, n, rutaOriginal) => {
+    const shape={ outer:p.outer,holes:p.holes,pliegues:[] };
+    if(auditoriaDe(shape).bloqueado)return false;
+    agregarItem(nuevoItemDXF(shape, n > 1 ? ' · ' + n : '',rutaOriginal)); return true;
   };
 
   const cerrar = () => {
     setLectura(null);
     setNombreArchivo('');
+    setTextoOriginal('');
     setSeparar(false);
     alCerrar();
   };
@@ -299,10 +319,11 @@ export function ImportarDXF({ abierto, alCerrar }) {
                 <p className="mt-2 text-[12px] leading-relaxed text-tenue">
                   Se importa como una sola pieza, respetando las posiciones que dibujó el cliente.
                 </p>
-                <Boton tono="corte" className="mt-3" onClick={agregarConjunto}>
+                <Boton tono="corte" className="mt-3" onClick={agregarConjunto} disabled={auditoriaConjunto?.bloqueado}>
                   <FileUp />
                   Importar el dibujo completo
                 </Boton>
+                {auditoriaConjunto && <div className="mt-3 rounded-lg border border-borde p-2 text-[11px]"><b>Auditoría: {auditoriaConjunto.bloqueado?'bloqueado':auditoriaConjunto.avisos.length?`${auditoriaConjunto.avisos.length} revisión(es)`:'geometría válida'}</b>{[...auditoriaConjunto.errores,...auditoriaConjunto.avisos].map((a,i)=><p key={a.codigo+i} className={i<auditoriaConjunto.errores.length?'text-peligro-500':'text-suave'}>• {a.msg}</p>)}</div>}
               </div>
             </div>
 
@@ -366,15 +387,16 @@ export function ImportarDXF({ abierto, alCerrar }) {
                       {lectura.piezas.map((p, i) => {
                         const sh = { outer: p.outer, holes: p.holes, pliegues: [] };
                         const b = shapeBBox(sh);
+                        const audit = auditoriasPiezas[i];
                         return (
                           <button
                             key={i}
-                            onClick={() => {
-                              agregarParte(p, i + 1);
-                              cerrar();
-                              toast.success('Pieza importada y cotizada');
+                            disabled={audit?.bloqueado}
+                            onClick={async () => {
+                              try { const ruta=await guardarOriginal(); if(!agregarParte(p,i+1,ruta))return toast.error('Esa pieza tiene errores geométricos.'); cerrar(); toast.success('Pieza importada y cotizada'); }
+                              catch(e){toast.error(`No se guardó el DXF original: ${e.message}`);}
                             }}
-                            className="rounded-xl border border-borde bg-panel p-2.5 text-left transition-all cursor-pointer hover:border-corte-500 hover:-translate-y-px"
+                            className="rounded-xl border border-borde bg-panel p-2.5 text-left transition-all cursor-pointer hover:border-corte-500 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <img
                               src={miniatura(sh, 220, 170)} alt=""
@@ -384,6 +406,7 @@ export function ImportarDXF({ abierto, alCerrar }) {
                             <div className="text-[11px] text-suave tabular">
                               {num(b.w, 1)} × {num(b.h, 1)} mm · {p.holes.length} agujeros
                             </div>
+                            {audit?.bloqueado && <div className="mt-1 text-[10px] text-peligro-500">Bloqueada: {audit.errores[0].msg}</div>}
                           </button>
                         );
                       })}
@@ -391,10 +414,10 @@ export function ImportarDXF({ abierto, alCerrar }) {
 
                     <Boton
                       ancho="completo" className="mt-4"
-                      onClick={() => {
-                        lectura.piezas.forEach((p, i) => agregarParte(p, i + 1));
-                        cerrar();
-                        toast.success(`${lectura.piezas.length} piezas importadas por separado`);
+                      disabled={auditoriasPiezas.some((a)=>a.bloqueado)}
+                      onClick={async () => {
+                        try { const ruta=await guardarOriginal(); const n=lectura.piezas.filter((p,i)=>agregarParte(p,i+1,ruta)).length; cerrar(); toast.success(`${n} piezas válidas importadas por separado`); }
+                        catch(e){toast.error(`No se guardó el DXF original: ${e.message}`);}
                       }}
                     >
                       <Scissors />

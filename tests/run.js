@@ -60,6 +60,7 @@ import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposici
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
 import { crearPlanProduccion, aplicarEventoTaller, resumenTaller, retazoSeguroDePrograma } from '../src/core/produccion.js';
 import { aplicarEventoCalidad, evaluarMedicion, resumenCalidad } from '../src/core/calidad.js';
+import { auditarFabricabilidad } from '../src/core/fabricabilidad.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -2689,6 +2690,42 @@ test('una placa lisa que se entrega tal cual sigue yendo al láser', () => {
 });
 
 /* ================================================================== */
+grupo('Auditoría geométrica antes del CAM');
+
+test('una placa válida con agujeros pasa la auditoría', () => {
+  const r = auditarFabricabilidad(makeShape(rect(0,0,300,200),[circle(70,70,10),circle(230,130,10)]),{espesor:2});
+  assert.equal(r.bloqueado,false);
+  assert.equal(r.metricas.agujeros,2);
+});
+
+test('bloquea un contorno que se cruza sobre sí mismo', () => {
+  const moño=polyline([[0,0],[100,100],[0,100],[100,0]]);
+  const r=auditarFabricabilidad(makeShape(moño));
+  assert.ok(r.errores.some((x)=>x.codigo==='autointerseccion'));
+});
+
+test('bloquea agujeros fuera de la pieza y agujeros superpuestos', () => {
+  const r=auditarFabricabilidad(makeShape(rect(0,0,100,100),[circle(95,50,10),circle(50,50,15),circle(60,50,15)]));
+  assert.ok(r.errores.some((x)=>x.codigo==='agujero-fuera'));
+  assert.ok(r.errores.some((x)=>x.codigo==='agujeros-superpuestos'));
+});
+
+test('un agujero menor a 1,2 veces el espesor se advierte pero no se inventa', () => {
+  const r=auditarFabricabilidad(makeShape(rect(0,0,100,100),[circle(50,50,1)]),{espesor:2});
+  assert.equal(r.bloqueado,false);
+  assert.ok(r.avisos.some((x)=>x.codigo==='agujero-chico'));
+});
+
+test('la pieza puede entrar en la mesa girada y se bloquea si no entra de ningún modo', () => {
+  assert.equal(auditarFabricabilidad(makeShape(rect(0,0,1400,2900)),{mesa:{w:3000,h:1500}}).bloqueado,false);
+  assert.ok(auditarFabricabilidad(makeShape(rect(0,0,1600,3100)),{mesa:{w:3000,h:1500}}).errores.some((x)=>x.codigo==='fuera-mesa'));
+});
+
+test('un contorno abierto o discontinuo nunca sale como listo para cortar', () => {
+  const abierto=polyline([[0,0],[100,0],[100,100]],false);
+  assert.ok(auditarFabricabilidad(makeShape(abierto)).errores.some((x)=>x.codigo==='abierto'));
+});
+
 grupo('Planos del cliente: imagen y PDF');
 
 /** Dibuja un plano sintético: placa 400×250 con dos agujeros Ø40. */

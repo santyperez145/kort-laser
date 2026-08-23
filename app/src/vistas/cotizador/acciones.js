@@ -12,6 +12,7 @@ import { api } from '@/lib/api';
 import { descargar } from '@/lib/formato';
 import { miniatura } from '@/lib/miniatura';
 import { generarDXF, generarDXFNesting } from '@core/dxf-write.js';
+import { auditarFabricabilidad } from '@core/fabricabilidad.js';
 import { aplicarMicroUniones } from '@core/micro-uniones.js';
 import { generarPresupuestoPDF, generarOrdenTrabajoPDF, generarEtiquetasPiezasPDF } from '@core/quote-pdf.js';
 import { listaDeCompra } from '@core/compras.js';
@@ -44,6 +45,9 @@ function shapeProduccion(shape, r) {
 
 export function descargarDXFItem(item, resuelto, r = null) {
   if (!resuelto?.shape) return toast.error('Ese ítem no tiene geometría');
+  const auditoria = auditarFabricabilidad(resuelto.shape, { espesor:item.espesor });
+  if (auditoria.bloqueado) return toast.error(`DXF bloqueado: ${auditoria.errores[0].msg}`);
+  if (auditoria.avisos.length) toast.warning(`DXF con ${auditoria.avisos.length} revisión(es) de fabricación pendiente(s).`);
 
   // Las líneas de plegado ya viajan dentro de shape.pliegues: no repetirlas
   // acá, o el CAM recibiría cada una dos veces y las cortaría.
@@ -61,6 +65,8 @@ export function descargarDXFNesting(item, resuelto, r) {
   if (!r?.nesting?.layout?.length || !resuelto?.shape) {
     return toast.error('Sin nesting para exportar');
   }
+  const auditoria = auditarFabricabilidad(resuelto.shape, { espesor:item.espesor, mesa:r.nesting.chapa });
+  if (auditoria.bloqueado) return toast.error(`Nesting bloqueado: ${auditoria.errores[0].msg}`);
   let n = 0;
   const shape = shapeProduccion(resuelto.shape, r);
   for (const chapa of r.nesting.layout) {

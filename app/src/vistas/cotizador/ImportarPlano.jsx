@@ -34,6 +34,7 @@ import { vectorizar, aPieza, escalaDesdeReferencia } from '@core/vectorizar.js';
 import { leerPlanoPDF, planoAPieza } from '@core/pdf-plano.js';
 import { shapeBBox, shapeArea, shapeCutLength } from '@core/geometry.js';
 import { generarDXF } from '@core/dxf-write.js';
+import { auditarFabricabilidad } from '@core/fabricabilidad.js';
 
 /** Lee un archivo de imagen y devuelve sus píxeles. */
 function pixelesDe(file, maxLado = 2200) {
@@ -85,8 +86,9 @@ async function pixelesDePDF(file, pagina = 1, maxLado = 2200) {
 }
 
 export function ImportarPlano({ abierto, alCerrar }) {
-  const { agregarItem } = usarCotizador();
+  const { agregarItem, doc, sel } = usarCotizador();
   const materiales = usarEstado((s) => s.materiales);
+  const laser = usarEstado((s) => s.maquinas.find((m)=>m.tipo==='laser') || s.maquinas[0]);
   const entrada = useRef(null);
   const lienzo = useRef(null);
   const transformacion = useRef({ escala:1 });
@@ -244,9 +246,12 @@ export function ImportarPlano({ abierto, alCerrar }) {
       vistaPrevia = { error: e.message };
     }
   }
+  const auditoria = vistaPrevia?.shape ? auditarFabricabilidad(vistaPrevia.shape, {
+    espesor:doc.items[sel]?.espesor || 2, mesa:laser?.areaTrabajo || {w:3000,h:1500},
+  }) : null;
 
   const usar = async (bajar = false) => {
-    if (!vistaPrevia || vistaPrevia.error) return;
+    if (!vistaPrevia || vistaPrevia.error || auditoria?.bloqueado) return;
     let rutaOriginal = '';
     try {
       if (archivoFuente) {
@@ -265,6 +270,9 @@ export function ImportarPlano({ abierto, alCerrar }) {
       nombre: archivo.replace(/\.[^.]+$/, ''),
       shape: vistaPrevia.shape,
       archivo,
+      // Importar sobre el material que se estaba cotizando evita que una
+      // placa de inox vuelva silenciosamente al acero por defecto.
+      ...(doc.items[sel] ? { materialId:doc.items[sel].materialId, espesor:doc.items[sel].espesor } : {}),
       meta: {
         modelo3D: { tipo: 'plano' },
         planoImportado: {
@@ -273,6 +281,7 @@ export function ImportarPlano({ abierto, alCerrar }) {
           referenciaDetectada:distanciaReferencia || null,
           escalaAplicada:fuente === 'imagen' ? mmPorPx : escalaPDF,
           cotasVerificadas:true, fecha:new Date().toISOString(),
+          auditoria:{ errores:auditoria.errores.length, avisos:auditoria.avisos.length, fecha:new Date().toISOString() },
         },
       },
     });
@@ -439,16 +448,22 @@ export function ImportarPlano({ abierto, alCerrar }) {
                 <span><b className="text-tinta">Verifiqué las cotas críticas contra el plano aprobado.</b><br/>La vectorización reconstruye contornos; no interpreta tolerancias, roscas ni notas técnicas.</span>
               </label>
 
+              {auditoria && <div className="rounded-lg border border-borde p-2 text-xs">
+                <div className="flex items-center justify-between gap-2"><b>Auditoría para corte</b><Insignia tono={auditoria.bloqueado?'rojo':auditoria.avisos.length?'amarillo':'verde'}>{auditoria.bloqueado?'bloqueado':auditoria.avisos.length?`${auditoria.avisos.length} revisión(es)`:'geometría válida'}</Insignia></div>
+                {[...auditoria.errores,...auditoria.avisos].map((a,i)=><p key={`${a.codigo}-${i}`} className={`mt-1 text-[11px] ${i<auditoria.errores.length?'text-peligro-500':'text-suave'}`}>• {a.msg}</p>)}
+                {!auditoria.bloqueado && !auditoria.avisos.length && <p className="mt-1 text-[11px] text-suave">Contornos cerrados, sin cruces y dentro de la mesa {laser?.areaTrabajo?.w||3000} × {laser?.areaTrabajo?.h||1500} mm.</p>}
+              </div>}
+
               <div className="grid grid-cols-2 gap-2">
                 <Boton tam="sm" onClick={limpiar}>Otro archivo</Boton>
                 <Boton
                   tam="sm" tono="neutro" onClick={()=>usar(false)}
-                  disabled={!vistaPrevia || !!vistaPrevia?.error || !verificado}
+                  disabled={!vistaPrevia || !!vistaPrevia?.error || !verificado || auditoria?.bloqueado}
                 >
                   Usar esta pieza
                 </Boton>
                 <Boton tam="sm" tono="corte" className="col-span-2" onClick={()=>usar(true)}
-                  disabled={!vistaPrevia || !!vistaPrevia?.error || !verificado}>
+                  disabled={!vistaPrevia || !!vistaPrevia?.error || !verificado || auditoria?.bloqueado}>
                   <Download/> Usar y generar DXF en tamaño real
                 </Boton>
               </div>

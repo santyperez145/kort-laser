@@ -506,6 +506,17 @@ exactamente como estaba. Hay un test que lo fija.
   y PDF de hasta 8 MB. PDF.js debe quedar en una versión sin vulnerabilidades
   conocidas y cargarse de forma diferida: sólo un PDF escaneado lo necesita.
 
+- **“Se pudo dibujar” no significa “se puede cortar”.** Toda geometría externa
+  pasa por `auditarFabricabilidad()`: abiertos, discontinuidades,
+  autointersecciones, agujeros fuera/superpuestos y fuera de mesa bloquean el
+  DXF. Agujero/ligamento/segmento chico son avisos porque dependen de material,
+  gas y calidad. El auditor nunca repara ni borra entidades en silencio.
+
+- **El auditor tiene un límite de complejidad deliberado.** Cruzar todos los
+  segmentos es cuadrático. Si un contorno supera 1.800 puntos o una pareja
+  supera 1,5 millones de comparaciones, se marca para revisión en CAM; no se
+  congela el mostrador ni se promete que está sano.
+
 - **Rechazar y abrir la no conformidad es una sola transacción.** Separarlas
   deja una pieza roja sin causa si se corta la red entre las dos llamadas. El
   endpoint de calidad aplica también la clasificación cuando recibe programa,
