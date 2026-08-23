@@ -16,7 +16,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Upload, Ruler, ScanLine, Loader2 } from 'lucide-react';
+import { Upload, Ruler, ScanLine, Loader2, Crosshair, Download } from 'lucide-react';
+import trabajadorPDF from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { usarCotizador, itemNuevo } from './contexto';
 import { Dialogo, ContenidoDialogo, Aviso } from '@/componentes/ui/varios';
@@ -26,10 +27,13 @@ import { Insignia } from '@/componentes/ui/insignia';
 import { usarEstado } from '@/lib/estado';
 import { num } from '@/lib/formato';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
+import { descargar } from '@/lib/formato';
 
 import { vectorizar, aPieza, escalaDesdeReferencia } from '@core/vectorizar.js';
 import { leerPlanoPDF, planoAPieza } from '@core/pdf-plano.js';
 import { shapeBBox, shapeArea, shapeCutLength } from '@core/geometry.js';
+import { generarDXF } from '@core/dxf-write.js';
 
 /** Lee un archivo de imagen y devuelve sus píxeles. */
 function pixelesDe(file, maxLado = 2200) {
@@ -59,26 +63,53 @@ function pixelesDe(file, maxLado = 2200) {
   });
 }
 
+/** Un PDF escaneado se rasteriza localmente; no sale de la PC del taller. */
+async function pixelesDePDF(file, pagina = 1, maxLado = 2200) {
+  // Carga diferida: el lector pesa, pero sólo hace falta cuando el PDF es un
+  // escaneo. El cotizador normal no debe pagar ese costo al arrancar.
+  const pdfjs = await import('pdfjs-dist/build/pdf.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = trabajadorPDF;
+  const doc = await pdfjs.getDocument({ data:new Uint8Array(await file.arrayBuffer()) }).promise;
+  const hoja = await doc.getPage(Math.max(1, Math.min(doc.numPages, pagina)));
+  const base = hoja.getViewport({ scale:1 });
+  const escala = Math.min(3, maxLado / Math.max(base.width, base.height));
+  const vista = hoja.getViewport({ scale:escala });
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(vista.width)); c.height = Math.max(1, Math.round(vista.height));
+  const ctx = c.getContext('2d', { willReadFrequently:true });
+  await hoja.render({ canvasContext:ctx, viewport:vista }).promise;
+  const imagen = ctx.getImageData(0, 0, c.width, c.height);
+  const paginas = doc.numPages;
+  await doc.destroy();
+  return { imagen, paginas };
+}
+
 export function ImportarPlano({ abierto, alCerrar }) {
   const { agregarItem } = usarCotizador();
   const materiales = usarEstado((s) => s.materiales);
   const entrada = useRef(null);
   const lienzo = useRef(null);
+  const transformacion = useRef({ escala:1 });
 
   const [encima, setEncima] = useState(false);
   const [trabajando, setTrabajando] = useState(false);
   const [archivo, setArchivo] = useState('');
+  const [archivoFuente, setArchivoFuente] = useState(null);
   const [fuente, setFuente] = useState(null); // 'imagen' | 'pdf'
   const [imagen, setImagen] = useState(null); // ImageData original
   const [res, setRes] = useState(null); // resultado de vectorizar / leerPlanoPDF
   const [sensibilidad, setSensibilidad] = useState(0.14);
   const [minPixeles, setMinPixeles] = useState(40);
   const [medidaMM, setMedidaMM] = useState('');
+  const [puntos, setPuntos] = useState([]);
+  const [tipoArchivo, setTipoArchivo] = useState(null);
+  const [verificado, setVerificado] = useState(false);
   const [error, setError] = useState(null);
 
   const limpiar = () => {
-    setArchivo(''); setFuente(null); setImagen(null); setRes(null);
-    setMedidaMM(''); setError(null); setSensibilidad(0.14); setMinPixeles(40);
+    setArchivo(''); setArchivoFuente(null); setFuente(null); setImagen(null); setRes(null);
+    setMedidaMM(''); setPuntos([]); setTipoArchivo(null); setVerificado(false);
+    setError(null); setSensibilidad(0.14); setMinPixeles(40);
   };
 
   const cerrar = () => { limpiar(); alCerrar(); };
@@ -87,19 +118,30 @@ export function ImportarPlano({ abierto, alCerrar }) {
     setError(null);
     setTrabajando(true);
     try {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      if (!['jpg','jpeg','png','webp','pdf'].includes(extension)) throw new Error('Usá un archivo JPG, PNG, WebP o PDF.');
+      if (file.size > 8 * 1024 * 1024) throw new Error('El plano supera 8 MB. Reducilo o exportá sólo la hoja necesaria.');
       if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
-        const r = await leerPlanoPDF(new Uint8Array(await file.arrayBuffer()));
-        setFuente('pdf');
-        setImagen(null);
-        setRes(r);
-        if (!r.vectorial) setError('El PDF no tiene geometría vectorial.');
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const r = await leerPlanoPDF(bytes);
+        if (r.vectorial) {
+          setFuente('pdf'); setTipoArchivo('pdf-vectorial'); setImagen(null); setRes(r);
+        } else {
+          const raster = await pixelesDePDF(file);
+          setFuente('imagen'); setTipoArchivo('pdf-escaneado'); setImagen(raster.imagen);
+          const vr = vectorizar(raster.imagen, { sensibilidad, minPixeles });
+          vr.avisos.unshift({ nivel:'info', msg:`PDF escaneado: se vectorizó la página 1 de ${raster.paginas}. Marcá dos extremos de una cota para darle tamaño real.` });
+          setRes(vr);
+        }
       } else {
         const img = await pixelesDe(file);
-        setFuente('imagen');
+        setFuente('imagen'); setTipoArchivo('imagen');
         setImagen(img);
         setRes(vectorizar(img, { sensibilidad, minPixeles }));
       }
       setArchivo(file.name);
+      setArchivoFuente(file);
+      setPuntos([]); setVerificado(false);
     } catch (e) {
       setError(e.message);
       setRes(null);
@@ -131,6 +173,7 @@ export function ImportarPlano({ abierto, alCerrar }) {
     const W = fuente === 'imagen' ? res.ancho : Math.max(...cont.flatMap((x) => x.puntos.map((p) => p[0])), 1);
     const H = fuente === 'imagen' ? res.alto : Math.max(...cont.flatMap((x) => x.puntos.map((p) => p[1])), 1);
     const escala = Math.min(520 / W, 340 / H, 1);
+    transformacion.current = { escala };
     c.width = Math.max(1, Math.round(W * escala));
     c.height = Math.max(1, Math.round(H * escala));
     const g = c.getContext('2d');
@@ -160,22 +203,34 @@ export function ImportarPlano({ abierto, alCerrar }) {
       g.closePath();
       g.stroke();
     });
-  }, [res, imagen, fuente]);
+    for (let i = 0; i < puntos.length; i++) {
+      const p = puntos[i];
+      g.fillStyle = '#e4572e'; g.strokeStyle = '#ffffff'; g.lineWidth = 2;
+      g.beginPath(); g.arc(p.x, p.y, 6, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = '#111827'; g.font = 'bold 11px sans-serif'; g.fillText(String(i + 1), p.x + 9, p.y - 7);
+    }
+    if (puntos.length === 2) {
+      g.strokeStyle = '#e4572e'; g.lineWidth = 2; g.setLineDash([5,4]);
+      g.beginPath(); g.moveTo(puntos[0].x,puntos[0].y); g.lineTo(puntos[1].x,puntos[1].y); g.stroke(); g.setLineDash([]);
+    }
+  }, [res, imagen, fuente, puntos]);
 
   /* La escala. En el PDF no hace falta; en la imagen la pone una persona
      diciendo cuánto mide el ancho total de lo que se detectó. */
-  const anchoDetectadoPx = res?.contornos?.[0]?.bbox?.w ?? 0;
-  const mmPorPx =
-    fuente === 'imagen' && medidaMM
-      ? escalaDesdeReferencia(anchoDetectadoPx, parseFloat(medidaMM))
-      : null;
+  const distanciaReferencia = puntos.length === 2
+    ? Math.hypot(puntos[1].x-puntos[0].x, puntos[1].y-puntos[0].y) / transformacion.current.escala
+    : 0;
+  const mmPorPx = fuente === 'imagen' && medidaMM
+    ? escalaDesdeReferencia(distanciaReferencia, parseFloat(medidaMM)) : null;
+  const escalaPDF = fuente === 'pdf' && medidaMM && distanciaReferencia
+    ? parseFloat(medidaMM) / distanciaReferencia : 1;
 
   let vistaPrevia = null;
   if (res?.contornos?.length && (fuente === 'pdf' || mmPorPx)) {
     try {
       const p =
         fuente === 'pdf'
-          ? planoAPieza(res.contornos)
+          ? planoAPieza(res.contornos, { escala:escalaPDF })
           : aPieza(res.contornos, mmPorPx, { altoImagen: res.alto });
       const bb = shapeBBox(p.shape);
       vistaPrevia = {
@@ -190,18 +245,49 @@ export function ImportarPlano({ abierto, alCerrar }) {
     }
   }
 
-  const usar = () => {
+  const usar = async (bajar = false) => {
     if (!vistaPrevia || vistaPrevia.error) return;
+    let rutaOriginal = '';
+    try {
+      if (archivoFuente) {
+        const original = await api.guardarArchivo(
+          `${Date.now()}-${archivo.replace(/[^\w.áéíóúñÁÉÍÓÚÑ-]/g,'_')}`,
+          new Uint8Array(await archivoFuente.arrayBuffer()), 'planos-clientes'
+        );
+        rutaOriginal = original.ruta;
+      }
+    } catch (e) {
+      toast.error(`No se guardó el plano original: ${e.message}`);
+      return;
+    }
     const it = itemNuevo(materiales, {
       origen: 'plano',
       nombre: archivo.replace(/\.[^.]+$/, ''),
       shape: vistaPrevia.shape,
       archivo,
-      meta: { modelo3D: { tipo: 'plano' } },
+      meta: {
+        modelo3D: { tipo: 'plano' },
+        planoImportado: {
+          tipo:tipoArchivo, archivo, rutaOriginal,
+          referenciaMM:medidaMM ? Number(medidaMM) : null,
+          referenciaDetectada:distanciaReferencia || null,
+          escalaAplicada:fuente === 'imagen' ? mmPorPx : escalaPDF,
+          cotasVerificadas:true, fecha:new Date().toISOString(),
+        },
+      },
     });
     delete it.piezaId;
     delete it.params;
     agregarItem(it);
+    if (bajar) {
+      const dxf = generarDXF([{ shape:vistaPrevia.shape }], {
+        titulo:`KORT - ${it.nombre}`, subtitulo:`Reconstruido de ${archivo} · verificar plano aprobado`,
+      });
+      const nombre = `${it.nombre.replace(/[^\w-]/g,'_')}-tamanio-real.dxf`;
+      descargar(nombre, dxf, 'application/dxf');
+      try { await api.guardarArchivo(nombre, dxf, 'dxf-planos'); }
+      catch (e) { toast.warning(`El DXF se descargó, pero no se copió a salidas: ${e.message}`); }
+    }
     toast.success(
       fuente === 'pdf'
         ? 'Plano importado del PDF con medidas exactas'
@@ -218,7 +304,7 @@ export function ImportarPlano({ abierto, alCerrar }) {
         ancho="max-w-4xl"
       >
         <input
-          ref={entrada} type="file" accept="image/*,.pdf,application/pdf" className="hidden"
+          ref={entrada} type="file" accept="image/jpeg,image/png,image/webp,.pdf,application/pdf" className="hidden"
           onChange={(e) => e.target.files?.[0] && procesar(e.target.files[0])}
         />
 
@@ -263,33 +349,37 @@ export function ImportarPlano({ abierto, alCerrar }) {
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-[12.5px] font-semibold">{archivo}</span>
                 <Insignia tono={fuente === 'pdf' ? 'verde' : 'azul'}>
-                  {fuente === 'pdf' ? 'PDF vectorial · medidas exactas' : 'Imagen · hay que calibrar'}
+                  {tipoArchivo === 'pdf-vectorial' ? 'PDF vectorial' : tipoArchivo === 'pdf-escaneado' ? 'PDF escaneado · calibrar' : 'Imagen · calibrar'}
                 </Insignia>
               </div>
               <div className="mt-2 overflow-hidden rounded-lg border border-borde bg-white">
-                <canvas ref={lienzo} className="block max-w-full" />
+                <canvas ref={lienzo} className="block max-w-full cursor-crosshair" onClick={(e)=>{
+                  const c=e.currentTarget, r=c.getBoundingClientRect();
+                  const p={x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height};
+                  setPuntos((ps)=>ps.length>=2?[p]:[...ps,p]); setVerificado(false);
+                }}/>
               </div>
               <p className="mt-1.5 text-[11px] text-tenue">
                 En naranja el contorno exterior de la pieza; en verde los agujeros y las demás
-                partes. Si aparecen las cotas o el membrete, recortá la imagen o subí el tamaño
-                mínimo.
+                partes. Hacé clic en los dos extremos de una cota conocida para calibrar o comprobar la escala.
               </p>
             </div>
 
             <div className="space-y-3">
+              <div className="rounded-lg border border-corte-500/30 bg-corte-500/5 p-3">
+                <div className="flex items-center gap-2 text-xs font-bold"><Crosshair className="size-4 text-corte-500"/> Referencia dimensional</div>
+                <p className="mt-1 text-[11px] text-tenue">{puntos.length < 2 ? `Marcá ${2-puntos.length} punto(s) sobre los extremos de una cota.` : `Distancia detectada: ${num(distanciaReferencia,2)} ${fuente==='pdf'?'mm del PDF':'px'}.`}</p>
+                <Campo etiqueta="Medida real entre los puntos" className="mt-2" ayuda={fuente==='pdf'?'Opcional si el CAD está realmente exportado 1:1; cargarla corrige su escala.':'Obligatoria: una foto sólo contiene píxeles.'}>
+                  <Entrada type="number" min="0.01" step="any" unidad="mm" value={medidaMM}
+                    disabled={puntos.length!==2} onChange={(e)=>{setMedidaMM(e.target.value);setVerificado(false);}}
+                    placeholder={puntos.length===2?'Ej. 250':'Primero marcá dos puntos'}/>
+                </Campo>
+                {puntos.length>0 && <Boton tam="sm" tono="fantasma" className="mt-2" onClick={()=>{setPuntos([]);setMedidaMM('');setVerificado(false);}}>Volver a marcar</Boton>}
+              </div>
+
               {fuente === 'imagen' ? (
                 <>
-                  <Campo
-                    etiqueta="¿Cuánto mide el ancho de la pieza?"
-                    ayuda="Es lo único que el sistema no puede saber solo. Tomá la cota más larga del plano."
-                  >
-                    <Entrada
-                      type="number" step="any" unidad="mm" autoFocus
-                      value={medidaMM}
-                      onChange={(e) => setMedidaMM(e.target.value)}
-                      placeholder={`${num(anchoDetectadoPx, 0)} px detectados`}
-                    />
-                  </Campo>
+                  <Aviso nivel="aviso">Si es una foto, sacala perpendicular al plano y sin perspectiva. Una sola referencia corrige escala, pero no puede corregir una hoja fotografiada en diagonal.</Aviso>
 
                   <Campo etiqueta="Sensibilidad" ayuda="Subila si el dibujo es tenue; bajala si entra el fondo.">
                     <input
@@ -308,11 +398,7 @@ export function ImportarPlano({ abierto, alCerrar }) {
                     />
                   </Campo>
                 </>
-              ) : (
-                <Aviso nivel="ok">
-                  El PDF trae la geometría en unidades reales: no hay nada que calibrar.
-                </Aviso>
-              )}
+              ) : <Aviso nivel="ok">El PDF vectorial conserva unidades. Verificá al menos una cota conocida; si coincide, dejá la corrección vacía.</Aviso>}
 
               <div className="rounded-lg border border-borde px-3 py-2 text-[12px]">
                 <div className="mb-1 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wide text-tenue">
@@ -343,19 +429,27 @@ export function ImportarPlano({ abierto, alCerrar }) {
                 ) : (
                   <p className="mt-1 flex gap-1.5 text-[11px] leading-snug text-suave">
                     <Ruler className="mt-0.5 size-3 shrink-0" />
-                    Cargá la medida de referencia para ver la pieza.
+                    {fuente==='imagen'?'Marcá dos puntos y cargá su medida real.':'La pieza usa la escala 1:1 del PDF.'}
                   </p>
                 )}
               </div>
 
-              <div className="flex gap-2">
+              <label className="flex items-start gap-2 rounded-lg border border-borde p-2 text-[11px] leading-snug text-suave">
+                <input type="checkbox" className="mt-0.5" checked={verificado} onChange={(e)=>setVerificado(e.target.checked)}/>
+                <span><b className="text-tinta">Verifiqué las cotas críticas contra el plano aprobado.</b><br/>La vectorización reconstruye contornos; no interpreta tolerancias, roscas ni notas técnicas.</span>
+              </label>
+
+              <div className="grid grid-cols-2 gap-2">
                 <Boton tam="sm" onClick={limpiar}>Otro archivo</Boton>
                 <Boton
-                  tam="sm" tono="corte" className="flex-1"
-                  onClick={usar}
-                  disabled={!vistaPrevia || !!vistaPrevia?.error}
+                  tam="sm" tono="neutro" onClick={()=>usar(false)}
+                  disabled={!vistaPrevia || !!vistaPrevia?.error || !verificado}
                 >
                   Usar esta pieza
+                </Boton>
+                <Boton tam="sm" tono="corte" className="col-span-2" onClick={()=>usar(true)}
+                  disabled={!vistaPrevia || !!vistaPrevia?.error || !verificado}>
+                  <Download/> Usar y generar DXF en tamaño real
                 </Boton>
               </div>
             </div>

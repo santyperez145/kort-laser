@@ -93,10 +93,21 @@ se redibujaba a mano: media hora por pieza.
 Los dos caminos no son iguales y la interfaz lo dice:
 
 - **PDF vectorial**: la geometría está adentro del archivo en unidades reales.
-  Sale **exacta** y no hay nada que calibrar. Medido: 400,00 × 250,00 mm.
-- **Imagen**: son píxeles. Hay que decir cuánto mide algo del dibujo. El
+  Se usa 1:1, pero se puede marcar una cota y corregir un CAD exportado 1:2 o
+  1:5. Medido: 400,00 × 250,00 mm.
+- **PDF escaneado**: PDF.js 6 lo rasteriza localmente y lo manda al mismo
+  vectorizador, sin obligar a exportar PNG ni subir el plano a internet.
+- **Imagen**: son píxeles. Se marcan dos extremos de cualquier cota conocida y
+  se carga su medida real, en vez de suponer que siempre sirve el ancho. El
   sistema **no lo adivina**, porque adivinarlo sería cotizar una pieza que no
   es la que el cliente pidió, y eso se descubre con la chapa ya cortada.
+
+Antes de habilitar “Usar” o “Generar DXF”, el operador confirma que verificó
+las cotas críticas contra el plano aprobado. Se guarda el original en
+`salidas/planos-clientes`, y el ítem conserva tipo de fuente, referencia,
+escala aplicada, fecha y ruta. El DXF sale además en `salidas/dxf-planos`.
+PDF.js se carga sólo para un escaneo y está en 6.2.108: `npm audit` queda en
+cero vulnerabilidades conocidas.
 
 Medido contra una placa de 400×250 con dos agujeros Ø40, en cinco condiciones
 (limpio, con ruido, foto con sombra lateral, baja resolución y línea gruesa):

@@ -102,7 +102,8 @@ Y cuatro que generan o traen geometría:
   algo del dibujo. Inventarla sería cotizar una pieza que no es la pedida.
 - `pdf-plano.js` — de un PDF exportado del CAD lee la geometría vectorial en
   unidades reales. Ahí la medida sale EXACTA y no hay nada que calibrar. Si el
-  PDF es un escaneo lo dice y manda al camino de la imagen.
+  PDF es un escaneo, la interfaz lo rasteriza localmente con PDF.js y lo manda
+  al camino de la imagen.
 
 Los tres primeros no pueden hacer cuentas propias: si las hicieran, tarde o
 temprano dirían algo distinto de lo que se cobra. Esa es toda la regla.
@@ -494,6 +495,16 @@ exactamente como estaba. Hay un test que lo fija.
   como referencia operativa, pero la aceptación sale del plano aprobado. Toda
   característica requerida necesita nominal y tolerancias superior/inferior;
   el lote sólo se libera si la última medición de cada una es conforme.
+
+- **Una foto no tiene milímetros y una exportación PDF puede no estar 1:1.**
+  La imagen se calibra marcando dos extremos de una cota conocida; el PDF
+  vectorial permite la misma comprobación y aplica la corrección si se carga.
+  Generar DXF exige confirmar cotas críticas. El original se guarda aparte y
+  el ítem conserva fuente, referencia, escala, fecha y ruta para auditoría.
+
+- **No abrir SVG ni HEIC como planos.** La entrada se limita a JPG, PNG, WebP
+  y PDF de hasta 8 MB. PDF.js debe quedar en una versión sin vulnerabilidades
+  conocidas y cargarse de forma diferida: sólo un PDF escaneado lo necesita.
 
 - **Rechazar y abrir la no conformidad es una sola transacción.** Separarlas
   deja una pieza roja sin causa si se corta la red entre las dos llamadas. El
