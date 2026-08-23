@@ -137,6 +137,30 @@ El DXF original también queda en `salidas/planos-clientes`, con material y
 espesor heredados del ítem que se estaba cotizando. Así una importación sobre
 inoxidable no vuelve silenciosamente al acero de fábrica.
 
+### ✅ 1.0d Segmentación supervisada de piezas mayores que la mesa
+
+`src/core/segmentacion.js` divide una pieza plana XXL en paneles que entran en
+la 3015 y reemplaza cada corte recto por una **junta complementaria de
+autoalineación**. Los dos segmentos comparten exactamente el mismo perfil: no
+se inventa solape ni se pierde área. La dirección puede ser automática o
+elegida, la junta se desplaza para no atravesar agujeros y cada panel vuelve a
+pasar por la auditoría de fabricabilidad antes de habilitar sus DXF.
+
+El flujo permite indicar si une KORT o el cliente. Si une KORT, las horas
+totales de armado y soldadura se cobran una sola vez en el grupo, no una vez
+por segmento. Los DXF se guardan todos antes de reemplazar la pieza original:
+si falla un archivo, el presupuesto no queda a medio transformar.
+
+La junta ayuda a posicionar; **no certifica una unión estructural ni elimina
+la distorsión térmica**. La pantalla exige presentar y prensar en mesa plana,
+verificar la medida global y puntear alternadamente desde el centro. Curvas,
+contornos ambiguos, falta de zona libre y desarrollos con líneas de plegado se
+bloquean para rediseño de ingeniería en vez de aproximarse en silencio.
+
+Referencia industrial del concepto de autoalineación: SOLIDWORKS Tab and Slot,
+que documenta el interbloqueo para facilitar soldadura y reducir dispositivos
+de sujeción complejos.
+
 ### ✅ 1.0 Cada precio muestra de dónde sale
 
 `src/core/explicacion.js`. El cotizador y el tarifario abren la cuenta completa

@@ -517,6 +517,23 @@ exactamente como estaba. Hay un test que lo fija.
   supera 1,5 millones de comparaciones, se marca para revisión en CAM; no se
   congela el mostrador ni se promete que está sano.
 
+- **Segmentar una pieza XXL no autoriza a aproximarla.** La segmentación
+  automática trabaja sólo con un contorno exterior lineal, simple y de una
+  parte. Nunca aplana arcos para hacerlos entrar. Los dos paneles vecinos deben
+  usar el mismo perfil de junta en sentidos opuestos, ningún corte puede
+  atravesar un agujero y la suma de áreas debe conservar la original.
+
+- **Una junta de autoalineación no es un cálculo estructural.** Sirve para
+  presentar y fijar la geometría antes de soldar; material, aporte, secuencia,
+  penetración y terminación siguen siendo parte de la hoja de proceso. Un
+  desarrollo con pliegues se bloquea porque segmentarlo cambia apoyo,
+  secuencia y herramental. Si KORT une el conjunto, las horas de soldadura se
+  cargan una sola vez en el primer segmento, nunca en todos.
+
+- **La segmentación se confirma después de persistir todos los DXF.** Si falla
+  cualquier guardado, el cotizador conserva la pieza original y no agrega
+  segmentos parciales. Recién con el lote completo se reemplaza el ítem.
+
 - **Rechazar y abrir la no conformidad es una sola transacción.** Separarlas
   deja una pieza roja sin causa si se corta la red entre las dos llamadas. El
   endpoint de calidad aplica también la clasificación cuando recibe programa,

@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Ruler, Box, Grid3x3, Download, Route, Frame, Grid2x2, Gift, Loader2 } from 'lucide-react';
+import { Ruler, Box, Grid3x3, Download, Route, Frame, Grid2x2, Gift, Loader2, Puzzle } from 'lucide-react';
 
 import { usarCotizador } from './contexto';
 import { descargarDXFItem, descargarDXFNesting } from './acciones';
@@ -27,6 +27,7 @@ import { construirMesh } from '@core/mesh3d.js';
 import { radioInterno, matrizRecomendada, validarPlegado } from '@core/bending.js';
 import { revisarCostoHora } from '@core/costos.js';
 import { shapeBBox } from '@core/geometry.js';
+import { SegmentarGrande } from './SegmentarGrande';
 
 const ALTO = 400;
 
@@ -41,6 +42,7 @@ export function Lienzo() {
   const [ops, setOps] = useState({ grilla: true, cotas: true, recorrido: false });
   const [relleno, setRelleno] = useState(null);
   const [calculandoRelleno, setCalculandoRelleno] = useState(false);
+  const [segmentando,setSegmentando]=useState(false);
 
   // La sugerencia deja de valer apenas cambia el lote: se borra sola.
   useEffect(() => {
@@ -48,6 +50,9 @@ export function Lienzo() {
   }, [r?.nesting?.chapasGrupo, r?.nesting?.aprovechamiento, doc.items.length]);
 
   const material = materiales.find((m) => m.id === item?.materialId) || materiales[0];
+  const bbActual=resuelto?.shape?shapeBBox(resuelto.shape):null;
+  const mesa=laser?.areaTrabajo||{w:3000,h:1500};
+  const fueraMesa=bbActual&&!((bbActual.w<=mesa.w&&bbActual.h<=mesa.h)||(bbActual.h<=mesa.w&&bbActual.w<=mesa.h));
 
   const modelo3D = useMemo(() => {
     if (pestania !== '3d' || !resuelto?.shape || !material) return null;
@@ -81,8 +86,8 @@ export function Lienzo() {
     if (r?.nesting?.error) {
       out.push({ nivel: 'error', msg: r.nesting.error + '. Reducí la medida o cambiá la chapa.' });
     }
-    if (r && r.geometria.ancho > (laser?.areaTrabajo?.w || 3000)) {
-      out.push({ nivel: 'error', msg: 'La pieza excede el área de trabajo de la máquina.' });
+    if (fueraMesa) {
+      out.push({ nivel: 'error', msg: 'La pieza excede el área de trabajo de la máquina. Podés segmentarla con juntas de autoalineación.' });
     }
     if (r?.nesting?.aprovechamientoUltima != null && r.nesting.aprovechamientoUltima < 0.45 && r.nesting.chapas >= 1) {
       out.push({
@@ -97,7 +102,7 @@ export function Lienzo() {
     if (laser && coti?.estructura) out.push(...revisarCostoHora(laser, coti.estructura));
 
     return out;
-  }, [item, resuelto, r, coti, material, plegadora, laser]);
+  }, [item, resuelto, r, coti, material, plegadora, laser, fueraMesa]);
 
   /**
    * "¿Qué más entra en esta chapa sin que aumente el material?"
@@ -167,6 +172,7 @@ export function Lienzo() {
           <PanelCab
             acciones={
               <>
+                {fueraMesa?<Boton tam="sm" tono="corte" onClick={()=>setSegmentando(true)}><Puzzle/> Segmentar</Boton>:null}
                 {pestania === 'nest' && r?.nesting && !r.nesting.error ? (
                   <Boton tam="sm" onClick={calcularRelleno} disabled={calculandoRelleno}>
                     {calculandoRelleno ? <Loader2 className="animate-spin" /> : <Gift />}
@@ -264,6 +270,7 @@ export function Lienzo() {
           </PanelCuerpo>
         </Pestanias>
       </Panel>
+      <SegmentarGrande abierto={segmentando} alCerrar={()=>setSegmentando(false)} item={item} shape={resuelto?.shape} indice={doc.items.indexOf(item)}/>
 
       {/* El material de esa chapa ya está pagado: lo que entre de más sólo
           cuesta tiempo de máquina y gas. Es la oferta con mejor margen que

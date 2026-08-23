@@ -61,6 +61,7 @@ import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/co
 import { crearPlanProduccion, aplicarEventoTaller, resumenTaller, retazoSeguroDePrograma } from '../src/core/produccion.js';
 import { aplicarEventoCalidad, evaluarMedicion, resumenCalidad } from '../src/core/calidad.js';
 import { auditarFabricabilidad } from '../src/core/fabricabilidad.js';
+import { segmentarPieza } from '../src/core/segmentacion.js';
 import { explicarItem, explicarTarifa, explicacionEnTexto } from '../src/core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '../src/core/compras.js';
 import { telefonoWhatsApp, mensajePresupuesto, enlaceWhatsApp, enlaceMail } from '../src/core/envio.js';
@@ -2690,6 +2691,46 @@ test('una placa lisa que se entrega tal cual sigue yendo al láser', () => {
 });
 
 /* ================================================================== */
+grupo('Segmentación de piezas mayores que la mesa');
+
+test('divide una placa XXL en segmentos que entran y conservan el área', () => {
+  const original=makeShape(rect(0,0,6200,1000));
+  const plan=segmentarPieza(original,{espesor:3,mesa:{w:3000,h:1500}});
+  assert.equal(plan.error,null);
+  assert.equal(plan.segmentos.length,3);
+  for(const s of plan.segmentos)assert.equal(auditarFabricabilidad(s,{espesor:3,mesa:{w:3000,h:1500}}).bloqueado,false);
+  cerca(plan.segmentos.reduce((a,s)=>a+shapeArea(s),0),shapeArea(original),1e-4);
+});
+
+test('las dos piezas vecinas comparten exactamente el perfil de junta', () => {
+  const plan=segmentarPieza(makeShape(rect(0,0,4000,1000)),{espesor:2,mesa:{w:3000,h:1500},profundidad:8,paso:80});
+  assert.equal(plan.segmentos.length,2);
+  const x=plan.juntas[0].valor;
+  const sobre=(sh)=>flattenPath(sh.outer,0.05).filter((p)=>Math.abs(p[0]-x)<=8.001).map((p)=>p.map((v)=>Math.round(v*1000)/1000));
+  const a=sobre(plan.segmentos[0]),b=sobre(plan.segmentos[1]);
+  assert.ok(a.length>10&&b.length>10);
+  assert.deepEqual(new Set(a.map(JSON.stringify)),new Set(b.map(JSON.stringify)));
+});
+
+test('mueve la junta para no atravesar un agujero', () => {
+  const original=makeShape(rect(0,0,4000,1000),[circle(2000,500,80)]);
+  const plan=segmentarPieza(original,{espesor:2,mesa:{w:3000,h:1500},seguridad:20});
+  assert.equal(plan.error,null);
+  assert.ok(Math.abs(plan.juntas[0].desplazamiento)>=100,'la junta sale de la zona del agujero');
+});
+
+test('no aproxima una curva grande para poder segmentarla', () => {
+  const plan=segmentarPieza(makeShape(circle(0,0,2000)),{mesa:{w:3000,h:1500}});
+  assert.match(plan.error,/no aproxima curvas/);
+});
+
+test('no segmenta automáticamente un desarrollo que después se pliega', () => {
+  const shape=makeShape(rect(0,0,4000,1000));
+  shape.pliegues=[{x1:2000,y1:0,x2:2000,y2:1000,angulo:90}];
+  const plan=segmentarPieza(shape,{mesa:{w:3000,h:1500}});
+  assert.match(plan.error,/rediseño de ingeniería/);
+});
+
 grupo('Auditoría geométrica antes del CAM');
 
 test('una placa válida con agujeros pasa la auditoría', () => {
