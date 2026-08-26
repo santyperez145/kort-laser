@@ -29,6 +29,7 @@ import { InsigniaEstado } from '@/componentes/ui/insignia';
 import { PALETA, usarColores, ejeMoneda, Globo } from '@/componentes/graficos';
 import { calcularEstructura, calcularCostoHoraMaquina, puntoEquilibrio } from '@core/costos.js';
 import { revisarDatos } from '@core/salud.js';
+import { ArreglarHallazgo } from '@/componentes/ArreglarHallazgo';
 import { CONSUMIBLES_LASER, estadoConsumiblesPorHoras } from '@core/consumibles.js';
 import { Aviso } from '@/componentes/ui/varios';
 import { BotonCalculadorConsumibles } from '@/componentes/CalculadorConsumibles';
@@ -125,9 +126,18 @@ function RevisionDatos() {
         {revision.hallazgos.map((h, i) => (
           <Aviso key={i} nivel={h.nivel}>
             <span className="font-semibold">{h.donde}</span> — {h.msg}
-            {/* Un aviso que sólo señala el problema obliga a ir a buscarlo. El
-                de consumibles trae al lado la herramienta que lo arregla. */}
-            {/consumibles/i.test(h.msg) && laser ? (
+            {/* Un aviso que sólo señala el problema obliga a ir a buscarlo, y el
+                que obliga a ir a buscarlo se termina ignorando. Cada hallazgo
+                que tiene una corrección con valor de referencia la trae al lado.
+
+                El enganche va por `h.arreglo`, que es un dato del hallazgo, y no
+                por un regex sobre el texto: matchear el mensaje hacía que
+                reescribir una palabra apagara el botón sin que nadie se
+                enterara. El de consumibles sigue siendo un caso aparte porque
+                no propone un número — abre la calculadora para que el taller
+                saque el suyo con sus propias piezas. */}
+            {h.arreglo ? <ArreglarHallazgo arreglo={h.arreglo} /> : null}
+            {h.area === 'maquinas' && /consumible/i.test(h.msg) && laser ? (
               <div className="mt-2">
                 <BotonCalculadorConsumibles maquina={laser}>
                   Calcularlo con piezas reales

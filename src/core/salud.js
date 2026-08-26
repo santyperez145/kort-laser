@@ -27,9 +27,38 @@ const n = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
 const DENSIDAD_MIN = 0.5;
 const DENSIDAD_MAX = 25;
 
-function hallazgo(nivel, area, donde, msg) {
-  return { nivel, area, donde, msg };
+/**
+ * Un hallazgo puede traer `arreglo`: la corrección concreta, en datos y no en
+ * prosa. Existe porque el aviso del setup en cero estuvo días en pantalla sin
+ * que nadie lo tocara — y mientras tanto cada trabajo chico salía barato.
+ *
+ * ⚠️ Sólo lleva arreglo lo que tiene un valor de referencia **físico o de
+ * industria**, nunca una decisión comercial. El margen que quiere ganar el
+ * taller no lo puede proponer el sistema; los segundos que tarda un operario
+ * en subir una chapa a la mesa, sí.
+ *
+ * El arreglo se propone, no se aplica: la interfaz muestra qué hay y qué
+ * quedaría antes de tocar nada. Un dato que alguien cargó a mano no se pisa
+ * sin que lo vea.
+ *
+ *   { destino: 'maquina'|'comercial', id, campos: {...}, etiqueta, porque }
+ */
+function hallazgo(nivel, area, donde, msg, arreglo) {
+  const h = { nivel, area, donde, msg };
+  if (arreglo) h.arreglo = arreglo;
+  return h;
 }
+
+/* Referencias de una fibra sin cambiador de palet. Son las mismas que cita el
+   mensaje: viven acá una sola vez para que el texto y el arreglo no se puedan
+   separar cuando alguien edite uno de los dos. */
+export const SETUP_PROGRAMA_REF = 180;
+export const CARGA_CHAPA_REF = 90;
+
+/* Un nesting real de piezas variadas da 60-75 %. 0,78 deja el umbral apenas
+   por encima de lo típico: se cobra chapa entera sólo cuando de verdad se
+   llenó. */
+export const APROVECHAMIENTO_REF = 0.78;
 
 /* ------------------------------------------------------------------ */
 
@@ -75,7 +104,13 @@ function revisarComercial(cfg) {
       `El aprovechamiento objetivo está en ${Math.round(aprov * 100)} %. Un nesting real de ` +
       'piezas variadas da 60-75 %, así que ese umbral casi nunca se alcanza y el sistema ' +
       'termina cobrando siempre por área consumida: el retazo que queda no lo paga nadie. ' +
-      'Con 0,75-0,80 se cobra chapa entera cuando de verdad se llenó.'));
+      'Con 0,75-0,80 se cobra chapa entera cuando de verdad se llenó.',
+      {
+        destino: 'comercial',
+        campos: { aprovechamientoObjetivo: APROVECHAMIENTO_REF },
+        etiqueta: `Bajarlo a ${Math.round(APROVECHAMIENTO_REF * 100)} %`,
+        porque: 'Es el umbral que un nesting variado alcanza de verdad.',
+      }));
   }
 
   return out;
@@ -113,11 +148,27 @@ function revisarMinimos(cfg, maquinas, estructura) {
       setup <= 0 ? 'el setup del programa' : null,
       carga <= 0 ? 'la carga de chapa' : null,
     ].filter(Boolean).join(' y ');
+    /* Sólo se propone lo que está en cero. Si el setup está vacío pero la
+       carga la cargaron en 60 s, ese 60 es un dato real de este taller y no
+       se toca: la referencia vale como punto de partida donde no hay nada,
+       no como corrección de lo que alguien midió. */
+    const campos = {};
+    if (setup <= 0) campos.tiempoSetupPrograma = SETUP_PROGRAMA_REF;
+    if (carga <= 0) campos.tiempoCargaChapa = CARGA_CHAPA_REF;
+
     out.push(hallazgo('error', 'maquinas', `Máquinas → ${laser.nombre || laser.id}`,
       `Está en cero ${cuales}. Nadie prepara un programa ni sube una chapa en cero segundos: ` +
       'así, cada trabajo de pocas piezas se cotiza por debajo del costo y no se nota, porque ' +
-      'los precios simplemente salen baratos. Valores de referencia: 180 s de setup y 90 s de ' +
-      'carga por chapa sin cambiador de palet.'));
+      'los precios simplemente salen baratos. Valores de referencia: ' +
+      `${SETUP_PROGRAMA_REF} s de setup y ${CARGA_CHAPA_REF} s de ` +
+      'carga por chapa sin cambiador de palet.',
+      {
+        destino: 'maquina',
+        id: laser.id,
+        campos,
+        etiqueta: 'Cargar los valores de referencia',
+        porque: 'Son los de una fibra sin cambiador de palet. Cronometrá los tuyos y corregilos.',
+      }));
     return out;
   }
 

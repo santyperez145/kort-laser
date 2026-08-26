@@ -39,7 +39,7 @@ import { generarDXF } from '../src/core/dxf-write.js';
 import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
-import { revisarDatos } from '../src/core/salud.js';
+import { revisarDatos, SETUP_PROGRAMA_REF, CARGA_CHAPA_REF, APROVECHAMIENTO_REF } from '../src/core/salud.js';
 import { evaluarVigencia, materialesQueSeMovieron, impactoMaterialRapido, carteraEnRiesgo } from '../src/core/vigencia.js';
 import { rentabilidad, referenciaDelTaller, pisoDelTaller, evaluarTrabajo, ordenarPorRendimiento } from '../src/core/rentabilidad.js';
 import { detectarLineasComunes, ahorroLineaComun, explicarLineaComun, evaluarLineaComun } from '../src/core/linea-comun.js';
@@ -1869,6 +1869,62 @@ test('detecta un aprovechamiento objetivo inalcanzable', () => {
   const r = revisarDatos({ ...DATOS_OK, config: cfg });
   assert.ok(r.hallazgos.some((h) => /aprovechamiento objetivo está en 90/.test(h.msg)),
     'con 90 % el sistema cobra siempre por área y el retazo no lo paga nadie');
+});
+
+test('el hallazgo del aprovechamiento trae el arreglo, no sólo el reto', () => {
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, aprovechamientoObjetivo: 0.9 } };
+  const r = revisarDatos({ ...DATOS_OK, config: cfg });
+  const h = r.hallazgos.find((x) => /aprovechamiento objetivo está en 90/.test(x.msg));
+  assert.equal(h.arreglo.destino, 'comercial');
+  assert.equal(h.arreglo.campos.aprovechamientoObjetivo, APROVECHAMIENTO_REF);
+  // El valor propuesto tiene que resolver lo que el propio chequeo detecta, o
+  // aplicarlo dejaría el aviso en pantalla y el botón parecería roto.
+  const despues = revisarDatos({
+    ...DATOS_OK,
+    config: { ...cfg, comercial: { ...cfg.comercial, ...h.arreglo.campos } },
+  });
+  assert.ok(!despues.hallazgos.some((x) => /aprovechamiento objetivo está en/.test(x.msg)),
+    'aplicar el arreglo tiene que apagar el aviso que lo propuso');
+});
+
+test('el setup en cero propone los segundos de referencia', () => {
+  const laser = { ...DEFAULT_MACHINE, tiempoSetupPrograma: 0, tiempoCargaChapa: 0 };
+  const r = revisarDatos({ ...DATOS_OK, maquinas: [laser] });
+  const h = r.hallazgos.find((x) => /Está en cero/.test(x.msg));
+  assert.equal(h.arreglo.destino, 'maquina');
+  assert.equal(h.arreglo.id, laser.id);
+  assert.equal(h.arreglo.campos.tiempoSetupPrograma, SETUP_PROGRAMA_REF);
+  assert.equal(h.arreglo.campos.tiempoCargaChapa, CARGA_CHAPA_REF);
+});
+
+test('el arreglo NO pisa el campo que sí tiene un valor cargado', () => {
+  /* Es la regla que hace que el botón sea seguro. Si alguien cronometró la
+     carga de chapa de SU taller en 45 s, ese número es un dato medido y la
+     referencia de 90 s sería peor. Se propone únicamente lo que está vacío. */
+  const laser = { ...DEFAULT_MACHINE, tiempoSetupPrograma: 0, tiempoCargaChapa: 45 };
+  const r = revisarDatos({ ...DATOS_OK, maquinas: [laser] });
+  const h = r.hallazgos.find((x) => /Está en cero/.test(x.msg));
+  assert.equal(h.arreglo.campos.tiempoSetupPrograma, SETUP_PROGRAMA_REF);
+  assert.ok(!('tiempoCargaChapa' in h.arreglo.campos),
+    'los 45 s medidos no se reemplazan por la referencia');
+});
+
+test('el margen NO trae arreglo: es una decisión del dueño', () => {
+  /* La frontera del mecanismo. Los segundos que tarda subir una chapa son
+     física; cuánto quiere ganar el taller no lo puede proponer el sistema, ni
+     siquiera cuando el número parece un error de tipeo. */
+  const cfg = { ...DEFAULT_CONFIG, comercial: { ...DEFAULT_CONFIG.comercial, margen: 1500 } };
+  const r = revisarDatos({ ...DATOS_OK, config: cfg });
+  const h = r.hallazgos.find((x) => /margen de 1500/.test(x.msg));
+  assert.ok(h, 'igual tiene que avisar');
+  assert.ok(!h.arreglo, 'pero sin proponer un número');
+});
+
+test('los datos de fábrica no proponen ningún arreglo', () => {
+  // Si la configuración correcta ofreciera correcciones, el botón enseñaría a
+  // aplicar cambios sin leerlos.
+  const r = revisarDatos(DATOS_OK);
+  assert.ok(!r.hallazgos.some((h) => h.arreglo), 'nada que arreglar en lo que ya está bien');
 });
 
 test('detecta la puesta a punto en cero, que regala todos los trabajos chicos', () => {
