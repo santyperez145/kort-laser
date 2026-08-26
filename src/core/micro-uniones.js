@@ -165,6 +165,6 @@ export function aplicarMicroUniones(shape, plan) {
 
 export function explicarMicroUniones(plan) {
   if (!plan?.activa) return '';
-  return `${plan.cantidadUniones} micro-unión${plan.cantidadUniones === 1 ? '' : 'es'} de ${plan.ancho.toFixed(2)} mm`;
+  return `${plan.cantidadUniones} ${plan.cantidadUniones === 1 ? 'micro-unión' : 'micro-uniones'} de ${plan.ancho.toFixed(2)} mm`;
 }
 

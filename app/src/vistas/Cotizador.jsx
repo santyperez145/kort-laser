@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { FilePlus2 } from 'lucide-react';
@@ -27,6 +28,7 @@ import { ESTADOS_PRESUPUESTO, money } from '@/lib/formato';
 
 import { CtxCotizador, docVacio, itemNuevo, usarCotizador } from './cotizador/contexto';
 import { evaluarVigencia, materialesQueSeMovieron, baseDeCosto, baseQueSeMovio } from '@core/vigencia.js';
+import { agendaProduccion, plazoParaTrabajo, explicarPlazo } from '@core/agenda.js';
 
 /* Cada campo de la base se lee en su unidad. Un `0.78` y un `180` puestos uno
    al lado del otro no dicen nada; "78 %" y "3m 0s" sí, y lo que se busca al
@@ -578,9 +580,26 @@ export function VistaCotizador() {
 /* ------------------------------------------------------------------ */
 
 function Cabecera({ onNuevo }) {
-  const { doc, actualizarDoc } = usarCotizador();
+  const { doc, actualizarDoc, coti } = usarCotizador();
   const clientes = usarEstado((s) => s.clientes);
+  const config = usarEstado((s) => s.config);
   const cli = doc.cliente || {};
+
+  /* El plazo de entrega era un 7 escrito a mano que no dependía de nada: un
+     trabajo de veinte minutos y uno de cuarenta horas prometían lo mismo.
+     `agendaProduccion` ya sabía la carga del taller y la capacidad diaria
+     desde antes; sólo que no la llamaba nadie. */
+  const { data: ordenes = [] } = useQuery({
+    queryKey: ['ordenes'],
+    queryFn: () => api.get('ordenes'),
+    staleTime: 60_000,
+  });
+
+  const plazo = useMemo(() => {
+    const seg = coti?.resumen?.tiempoProduccion;
+    if (!seg || !config) return null;
+    return plazoParaTrabajo(agendaProduccion(ordenes, config), seg);
+  }, [coti, config, ordenes]);
 
   const elegirCliente = (idCliente) => {
     if (idCliente === '__nuevo__') {
@@ -652,6 +671,22 @@ function Cabecera({ onNuevo }) {
             type="number" min={0} value={doc.entregaDias}
             onChange={(e) => actualizarDoc({ entregaDias: +e.target.value })}
           />
+          {/* Se sugiere, nunca se escribe solo: el plazo lo promete el taller,
+              que puede tener un turno extra, un feriado o un cliente que
+              siempre demora los archivos. */}
+          {plazo && plazo.dias !== doc.entregaDias ? (
+            <button
+              type="button"
+              onClick={() => actualizarDoc({ entregaDias: plazo.dias })}
+              title={explicarPlazo(plazo)}
+              className="mt-1 text-left text-[10.5px] text-corte-500 hover:underline"
+            >
+              La máquina da {plazo.dias} día{plazo.dias === 1 ? '' : 's'} · usar
+            </button>
+          ) : null}
+          {plazo ? (
+            <div className="mt-0.5 text-[10px] leading-snug text-tenue">{explicarPlazo(plazo)}</div>
+          ) : null}
         </Campo>
 
         <Campo etiqueta="Condición de pago" className="md:col-span-2">

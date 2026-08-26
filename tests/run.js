@@ -58,7 +58,7 @@ import {
   unidadesDisponibles,
 } from '../src/core/retazos.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
-import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden } from '../src/core/agenda.js';
+import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden, plazoParaTrabajo, explicarPlazo } from '../src/core/agenda.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
@@ -4049,6 +4049,62 @@ test('marca atraso cuando la fecha comprometida no entra en la carga real', () =
   assert.equal(plan.fechaDisponible, '2026-08-17');
   assert.equal(plan.ordenes[0].atrasada, true);
   assert.equal(plan.atrasadas, 1);
+});
+
+test('el plazo suma lo que hay en cola al trabajo nuevo', () => {
+  const cfg = { estructura: { horasPorDia: 10, ocupacionProductiva: 50 } }; // 5 h/día
+  const ag = agendaProduccion(
+    [{ id: 'a', estado: 'pendiente', resumen: { tiempoProduccion: 10 * 3600 } }],
+    cfg, new Date('2026-08-17T12:00:00Z') // lunes
+  );
+  // 10 h en cola + 5 h nuevas = 15 h a 5 h/día = 3 días hábiles
+  const p = plazoParaTrabajo(ag, 5 * 3600, new Date('2026-08-17T12:00:00Z'));
+  assert.equal(p.dias, 3);
+  assert.equal(p.fecha, '2026-08-20');
+  assert.equal(p.maquinaLibre, false);
+  assert.ok(/10 h comprometidas/.test(explicarPlazo(p)));
+});
+
+test('con la máquina libre el plazo sale sólo del trabajo', () => {
+  const cfg = { estructura: { horasPorDia: 10, ocupacionProductiva: 50 } };
+  const ag = agendaProduccion([], cfg, new Date('2026-08-17T12:00:00Z'));
+  const p = plazoParaTrabajo(ag, 5 * 3600, new Date('2026-08-17T12:00:00Z'));
+  assert.equal(p.dias, 1);
+  assert.equal(p.maquinaLibre, true);
+  assert.ok(/no hay nada en cola/.test(explicarPlazo(p)),
+    '"1 día" con la máquina libre y con 30 h adelante no son la misma promesa');
+});
+
+test('una orden abierta sin tiempo estimado se cuenta y se avisa', () => {
+  /* Antes caía del filtro en silencio: 0 segundos, no entra en `abiertas`, y
+     la fecha prometida salía optimista. Prometer y no cumplir es el error
+     caro de los dos. */
+  const cfg = { estructura: { horasPorDia: 10, ocupacionProductiva: 50 } };
+  const ag = agendaProduccion([
+    { id: 'a', estado: 'pendiente', resumen: { tiempoProduccion: 5 * 3600 } },
+    { id: 'b', estado: 'pendiente' }, // sin estimación
+    { id: 'c', estado: 'entregado' }, // cerrada: no cuenta
+  ], cfg, new Date('2026-08-17T12:00:00Z'));
+  assert.equal(ag.abiertas, 1);
+  assert.equal(ag.sinEstimacion, 1, 'la cerrada no, la abierta sin dato sí');
+  const p = plazoParaTrabajo(ag, 3600, new Date('2026-08-17T12:00:00Z'));
+  assert.ok(/puede quedar corto/.test(explicarPlazo(p)));
+});
+
+test('el plazo nunca es cero días', () => {
+  // Un trabajo de dos minutos igual pasa por la máquina: prometer "hoy" con
+  // el programa sin hacer es prometer algo que no se cumple.
+  const cfg = { estructura: { horasPorDia: 8, ocupacionProductiva: 100 } };
+  const ag = agendaProduccion([], cfg, new Date('2026-08-17T12:00:00Z'));
+  assert.equal(plazoParaTrabajo(ag, 120).dias, 1);
+});
+
+test('sin trabajo no se inventa un plazo', () => {
+  const cfg = { estructura: { horasPorDia: 8, ocupacionProductiva: 100 } };
+  const ag = agendaProduccion([], cfg, new Date('2026-08-17T12:00:00Z'));
+  assert.equal(plazoParaTrabajo(ag, 0), null);
+  assert.equal(plazoParaTrabajo(null, 3600), null);
+  assert.equal(explicarPlazo(null), null);
 });
 
 grupo('PDF');

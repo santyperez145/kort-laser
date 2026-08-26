@@ -145,7 +145,7 @@ export function generarPresupuestoPDF(datos) {
     const ficha = [];
     ficha.push(`${it.material.nombre} · ${fmtNum(it.espesor, 1)} mm`);
     ficha.push(`${fmtNum(g.ancho, 0)} × ${fmtNum(g.alto, 0)} mm · ${fmtNum(g.pesoPieza, 2)} kg/u`);
-    const l3 = [`Corte ${fmtNum(g.largoCorteMM / 1000, 2)} m`, `${g.piercings} perforación${g.piercings === 1 ? '' : 'es'}`];
+    const l3 = [`Corte ${fmtNum(g.largoCorteMM / 1000, 2)} m`, `${g.piercings} ${g.piercings === 1 ? 'perforación' : 'perforaciones'}`];
     if (it.plegado?.nPliegues) l3.push(`${it.plegado.nPliegues} pliegue${it.plegado.nPliegues === 1 ? '' : 's'}`);
     ficha.push(l3.filter(Boolean).join(' · '));
     if (it.datosPliegue) {
