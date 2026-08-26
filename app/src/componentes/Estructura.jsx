@@ -33,7 +33,7 @@ export const RUTAS = [
   { a: '/materiales', txt: 'Materiales', Icono: Layers, nuevo: true },
   { a: '/stock', txt: 'Stock chapa', Icono: Archive, nuevo: true },
   { a: '/maquina-en-vivo', txt: 'Máquina en vivo', Icono: RadioTower, nuevo: true },
-  { a: '/maquinas', txt: 'Máquinas', Icono: Cpu },
+  { a: '/maquinas', txt: 'Máquinas', Icono: Cpu, nuevo: true },
   { a: '/costos', txt: 'Costos', Icono: Wallet, nuevo: true },
   { a: '/config', txt: 'Configuración', Icono: Settings },
 ];
