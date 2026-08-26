@@ -171,28 +171,10 @@ const cspEstricta = helmet.contentSecurityPolicy({
   directives: { ...directivasBase, scriptSrc: ["'self'"] },
 });
 
-/**
- * La interfaz anterior necesita `unsafe-inline` para su `<script
- * type="importmap">`, que resuelve el especificador desnudo "three" de
- * OrbitControls. Un import map externo no lo soportan todos los navegadores,
- * así que no hay forma de sacarlo del HTML.
- *
- * Se afloja SÓLO para `/legacy`, `/web` y `/lib`, que es código propio que ya
- * está en el repositorio y sale de esta misma máquina. La aplicación nueva
- * queda con la política estricta, y cuando se migren las siete vistas que
- * faltan esta excepción se borra junto con la carpeta.
- */
-const cspLegado = helmet.contentSecurityPolicy({
-  useDefaults: true,
-  directives: { ...directivasBase, scriptSrc: ["'self'", "'unsafe-inline'"] },
-});
-
-const RUTAS_LEGADO = ['/legacy', '/web/', '/lib/'];
-
-app.use((req, res, siguiente) => {
-  const legado = RUTAS_LEGADO.some((p) => req.path.startsWith(p));
-  return (legado ? cspLegado : cspEstricta)(req, res, siguiente);
-});
+/* Una sola política, sin excepciones. La que se afloja para `unsafe-inline`
+   desapareció con la interfaz anterior: ya no hay ningún script inline que
+   autorizar. */
+app.use(cspEstricta);
 
 app.use(
   helmet({
@@ -729,41 +711,6 @@ app.use('/api', api);
 // Los archivos generados: se listan y se abren desde el navegador.
 app.use('/salidas', express.static(DIR_SALIDAS, { index: false, dotfiles: 'deny' }));
 
-/* ---------------- Interfaz anterior ---------------- */
-
-/**
- * Las vistas que todavía no se rehicieron en React se sirven tal cual estaban
- * y la aplicación nueva las embebe en un iframe.
- *
- * El aislamiento no es pereza: `web/css/app.css` estiliza `button`, `input`,
- * `table` y `main` por selector de elemento. Cargada en el mismo documento que
- * la interfaz nueva, le cambia el aspecto a todos los componentes apenas se
- * visita una de esas vistas. El iframe corta eso de raíz, y cada vista que se
- * migra sale de acá sin tocar a las demás.
- */
-const DIR_LEGADO = path.join(RAIZ, 'web');
-
-const LIBRERIAS = {
-  '/lib/three.module.js': 'node_modules/three/build/three.module.min.js',
-  // three.module.min.js re-exporta desde three.core.min.js: hay que servir los dos
-  '/lib/three.core.min.js': 'node_modules/three/build/three.core.min.js',
-  '/lib/OrbitControls.js': 'node_modules/three/examples/jsm/controls/OrbitControls.js',
-  '/lib/chart.umd.js': 'node_modules/chart.js/dist/chart.umd.js',
-};
-
-app.get(Object.keys(LIBRERIAS), (req, res) => {
-  const lib = path.join(RAIZ, LIBRERIAS[req.path]);
-  if (!fs.existsSync(lib)) {
-    return res.status(404).type('text/plain').send(`Falta la librería ${req.path}. Ejecutá: npm install`);
-  }
-  res.type('text/javascript; charset=utf-8').sendFile(lib);
-});
-
-app.use('/web', express.static(DIR_LEGADO, { index: false }));
-// El motor de cálculo: la interfaz anterior lo importa por ruta absoluta.
-app.use('/src/core', express.static(path.join(RAIZ, 'src/core'), { index: false }));
-
-app.get(['/legacy', '/legacy/'], (_req, res) => res.sendFile(path.join(DIR_LEGADO, 'index.html')));
 
 if (hayBundle) {
   // Los assets de Vite llevan hash en el nombre: se pueden cachear fuerte.
@@ -771,11 +718,25 @@ if (hayBundle) {
     if (f.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
   } }));
 
+  /* Un pedido de archivo que no existe: cualquier ruta cuyo último tramo
+     tenga extensión y no sea `.html`. Se responde 404 y no el index.
+
+     La diferencia importa cuando el navegador tiene cacheada una versión
+     vieja de la página y pide un chunk que el build nuevo ya no genera. Si
+     le devolvemos el index, recibe HTML donde esperaba un módulo y tira
+     "Failed to load module script: MIME type text/html", que manda a buscar
+     el problema al lugar equivocado. Un 404 dice lo que pasó: ese archivo
+     no está. */
+  const PARECE_ARCHIVO = /\/[^/]+\.[a-z0-9]{1,8}$/i;
+
   // SPA: cualquier ruta que no sea API ni archivo devuelve el index.
   // HEAD entra también: si no, un chequeo de salud recibe un 404 y parece
   // que el sistema está caído cuando está andando.
   app.use((req, res, siguiente) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return siguiente();
+    if (PARECE_ARCHIVO.test(req.path) && !req.path.endsWith('.html')) {
+      return res.status(404).type('text/plain; charset=utf-8').send('No existe: ' + req.path);
+    }
     res.sendFile(path.join(DIR_WEB, 'index.html'));
   });
 } else {

@@ -8,50 +8,52 @@
 /* ------------------------------------------------------------------ */
 /* Variables                                                           */
 /*                                                                     */
-/* Van todas con prefijo `--k-` a propósito. Las vistas que todavía no  */
-/* se migraron a React siguen cargando `web/css/app.css`, que define    */
-/* --fondo, --panel, --borde y --tinta como hex. Acá son tripletas RGB  */
-/* (para poder usar /opacidad en Tailwind): si compartieran nombre, la  */
-/* hoja que cargue última rompería el tema de la otra por completo.     */
+/* Van como tripletas RGB y no como hex para poder usar la sintaxis de  */
+/* opacidad de Tailwind: `bg-panel/75` necesita los canales sueltos.    */
+/*                                                                     */
+/* Llevaban prefijo `--k-` mientras convivían con la hoja de estilos  */
+/* de la interfaz anterior, que definía --fondo, --panel, --borde y     */
+/* --tinta como hex: compartir nombre habría roto el tema de una de las */
+/* dos según cuál cargara última. Esa interfaz ya no existe.            */
 /* ------------------------------------------------------------------ */
 
 @layer base {
   :root {
-    --k-fondo: 244 247 250;
-    --k-hundido: 234 239 245;
-    --k-panel: 255 255 255;
-    --k-panel-alto: 247 249 251;
-    --k-borde: 221 227 234;
-    --k-borde-fuerte: 197 208 221;
-    --k-tinta: 18 22 28;
-    --k-suave: 91 102 114;
-    --k-tenue: 138 151 165;
-    --k-sombra: 0 1px 2px rgb(18 22 28 / 0.04), 0 6px 20px rgb(18 22 28 / 0.07);
+    --fondo: 244 247 250;
+    --hundido: 234 239 245;
+    --panel: 255 255 255;
+    --panel-alto: 247 249 251;
+    --borde: 221 227 234;
+    --borde-fuerte: 197 208 221;
+    --tinta: 18 22 28;
+    --suave: 91 102 114;
+    --tenue: 138 151 165;
+    --sombra: 0 1px 2px rgb(18 22 28 / 0.04), 0 6px 20px rgb(18 22 28 / 0.07);
 
     /* Lienzos de los visores. Separados del panel porque el 2D y el 3D
        necesitan más contraste contra la pieza que el resto de la interfaz. */
-    --k-lienzo: 247 249 251;
-    --k-chapa: 255 255 255;
-    --k-grilla: 227 233 239;
-    --k-grilla-fuerte: 207 216 226;
+    --lienzo: 247 249 251;
+    --chapa: 255 255 255;
+    --grilla: 227 233 239;
+    --grilla-fuerte: 207 216 226;
   }
 
   .dark {
-    --k-fondo: 11 15 21;
-    --k-hundido: 7 10 15;
-    --k-panel: 23 29 38;
-    --k-panel-alto: 30 38 50;
-    --k-borde: 42 53 67;
-    --k-borde-fuerte: 58 72 90;
-    --k-tinta: 232 237 243;
-    --k-suave: 154 168 184;
-    --k-tenue: 107 122 139;
-    --k-sombra: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 28px rgb(0 0 0 / 0.35);
+    --fondo: 11 15 21;
+    --hundido: 7 10 15;
+    --panel: 23 29 38;
+    --panel-alto: 30 38 50;
+    --borde: 42 53 67;
+    --borde-fuerte: 58 72 90;
+    --tinta: 232 237 243;
+    --suave: 154 168 184;
+    --tenue: 107 122 139;
+    --sombra: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 28px rgb(0 0 0 / 0.35);
 
-    --k-lienzo: 15 20 27;
-    --k-chapa: 26 33 43;
-    --k-grilla: 35 44 56;
-    --k-grilla-fuerte: 46 58 73;
+    --lienzo: 15 20 27;
+    --chapa: 26 33 43;
+    --grilla: 35 44 56;
+    --grilla-fuerte: 46 58 73;
   }
 }
 
@@ -101,16 +103,16 @@
 
   /* Semánticos: se leen de las variables de arriba, así una sola clase
      (`bg-panel`) sirve en los dos temas sin escribir `dark:` en cada lugar. */
-  --color-fondo: rgb(var(--k-fondo));
-  --color-hundido: rgb(var(--k-hundido));
-  --color-panel: rgb(var(--k-panel));
-  --color-panel-alto: rgb(var(--k-panel-alto));
-  --color-borde: rgb(var(--k-borde));
-  --color-borde-fuerte: rgb(var(--k-borde-fuerte));
-  --color-tinta: rgb(var(--k-tinta));
-  --color-suave: rgb(var(--k-suave));
-  --color-tenue: rgb(var(--k-tenue));
-  --color-lienzo: rgb(var(--k-lienzo));
+  --color-fondo: rgb(var(--fondo));
+  --color-hundido: rgb(var(--hundido));
+  --color-panel: rgb(var(--panel));
+  --color-panel-alto: rgb(var(--panel-alto));
+  --color-borde: rgb(var(--borde));
+  --color-borde-fuerte: rgb(var(--borde-fuerte));
+  --color-tinta: rgb(var(--tinta));
+  --color-suave: rgb(var(--suave));
+  --color-tenue: rgb(var(--tenue));
+  --color-lienzo: rgb(var(--lienzo));
 
   --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
@@ -155,8 +157,8 @@
   }
 
   body {
-    background: rgb(var(--k-fondo));
-    color: rgb(var(--k-tinta));
+    background: rgb(var(--fondo));
+    color: rgb(var(--tinta));
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
@@ -170,11 +172,11 @@
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgb(var(--k-borde-fuerte));
+    background: rgb(var(--borde-fuerte));
     border-radius: 6px;
-    border: 2px solid rgb(var(--k-fondo));
+    border: 2px solid rgb(var(--fondo));
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--k-tenue)); }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--tenue)); }
 
   /* El visor 3D orbita con el arrastre: sin esto se pelea con el scroll de
      la página en la notebook del taller. */
@@ -186,22 +188,22 @@
 /* ------------------------------------------------------------------ */
 
 @utility panel-kort {
-  background: rgb(var(--k-panel));
-  border: 1px solid rgb(var(--k-borde));
+  background: rgb(var(--panel));
+  border: 1px solid rgb(var(--borde));
   border-radius: var(--radius-panel);
-  box-shadow: var(--k-sombra);
+  box-shadow: var(--sombra);
 }
 
 @utility vidrio {
-  background: rgb(var(--k-panel) / 0.75);
+  background: rgb(var(--panel) / 0.75);
   backdrop-filter: blur(14px) saturate(1.4);
-  border-color: rgb(var(--k-borde) / 0.9);
+  border-color: rgb(var(--borde) / 0.9);
 }
 
 /* Trama de chapa perforada: fondo de los visores y de la cabecera. Da
    textura de taller sin competir con los datos que van encima. */
 @utility trama-chapa {
-  background-image: radial-gradient(rgb(var(--k-borde-fuerte) / 0.55) 1px, transparent 1px);
+  background-image: radial-gradient(rgb(var(--borde-fuerte) / 0.55) 1px, transparent 1px);
   background-size: 22px 22px;
 }
 

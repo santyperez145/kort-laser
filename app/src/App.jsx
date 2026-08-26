@@ -13,7 +13,6 @@ import { VistaMateriales } from '@/vistas/Materiales';
 import { VistaStock } from '@/vistas/Stock';
 import { VistaMaquinaEnVivo } from '@/vistas/MaquinaEnVivo';
 import { VistaProduccion } from '@/vistas/Produccion';
-import { Legacy } from '@/vistas/Legacy';
 import { VistaPresupuestos } from '@/vistas/Presupuestos';
 import { VistaCostos } from '@/vistas/Costos';
 import { VistaMaquinas } from '@/vistas/Maquinas';

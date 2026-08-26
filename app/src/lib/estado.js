@@ -131,15 +131,14 @@ export const usarEstado = create((set, get) => ({
 /* ------------------------------------------------------------------ */
 /* Tema                                                                */
 /*                                                                     */
-/* Se escriben las dos marcas a la vez: `html.dark` para Tailwind y     */
-/* `body.oscuro` para las vistas que todavía usan la hoja de estilos    */
-/* vieja. Mientras convivan las dos, el interruptor tiene que mover     */
-/* las dos o media aplicación queda en el tema contrario.               */
+/* Una sola marca: `html.dark`, que es la que lee Tailwind. Antes se    */
+/* escribía además `body.oscuro` para la hoja de estilos de la interfaz */
+/* anterior; con esa interfaz borrada, dejarla sería una clase que no   */
+/* lee nadie.                                                          */
 /* ------------------------------------------------------------------ */
 
 function aplicar(oscuro) {
   document.documentElement.classList.toggle('dark', oscuro);
-  document.body.classList.toggle('oscuro', oscuro);
   localStorage.setItem('kort-tema', oscuro ? 'oscuro' : 'claro');
   // Los visores de canvas no son CSS: se enteran del cambio por este evento.
   window.dispatchEvent(new Event('kort-tema'));
