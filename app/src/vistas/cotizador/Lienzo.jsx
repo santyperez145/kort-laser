@@ -7,11 +7,12 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Ruler, Box, Grid3x3, Download, Route, Frame, Grid2x2, Gift, Loader2, Puzzle } from 'lucide-react';
+import { Ruler, Box, Grid3x3, Download, Route, Frame, Grid2x2, Gift, Loader2, Combine, Puzzle } from 'lucide-react';
 
 import { usarCotizador } from './contexto';
 import { descargarDXFItem, descargarDXFNesting } from './acciones';
-import { rellenoSinCosto } from '@core/nesting.js';
+import { rellenoSinCosto, nest } from '@core/nesting.js';
+import { evaluarLineaComun, explicarLineaComun } from '@core/linea-comun.js';
 import { Visor2D } from '@/componentes/visores/Visor2D';
 import { Visor3D } from '@/componentes/visores/Visor3D';
 import { VisorNesting } from '@/componentes/visores/VisorNesting';
@@ -41,6 +42,8 @@ export function Lienzo() {
   const [pestania, setPestania] = useState('2d');
   const [ops, setOps] = useState({ grilla: true, cotas: true, recorrido: false });
   const [relleno, setRelleno] = useState(null);
+  const [lineaComun, setLineaComun] = useState(null);
+  const [calculandoLC, setCalculandoLC] = useState(false);
   const [calculandoRelleno, setCalculandoRelleno] = useState(false);
   const [segmentando,setSegmentando]=useState(false);
 
@@ -151,6 +154,72 @@ export function Lienzo() {
     }, 30);
   };
 
+
+
+  /** Las piezas que comparten chapa con el item actual, para volver a anidar. */
+  const piezasDelGrupo = () => {
+    // Los ids del layout son 'i' + indice del item: de ahi sale quien esta en
+    // el grupo sin tener que volver a agruparlos aca.
+    const indices = r?.nesting?.compartido
+      ? [...new Set(r.nesting.layout.flatMap((ch) => ch.piezas.map((p) => Number(String(p.id).slice(1)))))]
+      : [doc.items.indexOf(item)];
+    return indices
+      .filter((i) => i >= 0 && resueltos[i]?.shape)
+      .map((i) => {
+        const b = shapeBBox(resueltos[i].shape);
+        return {
+          id: 'i' + i,
+          nombre: doc.items[i].nombre || 'Pieza',
+          w: b.w,
+          h: b.h,
+          cantidad: Math.max(1, Math.round(doc.items[i].cantidad || 1)),
+          shape: resueltos[i].shape,
+        };
+      });
+  };
+
+  /**
+   * "Y si las anido pegadas?"
+   *
+   * El corte en linea comun comparte el trazo entre dos piezas vecinas: se
+   * corta una vez donde antes se cortaba dos. Se calcula a pedido porque es un
+   * anidado extra completo, y NO se aplica solo al precio: anidar pegado es
+   * una decision de produccion, y cotizar el ahorro sin que el taller lo haga
+   * seria cotizar por debajo del costo.
+   */
+  const calcularLineaComun = () => {
+    if (!r?.nesting || r.nesting.error) return;
+    setCalculandoLC(true);
+    setTimeout(() => {
+      try {
+        const prod = config.produccion;
+        const piezas = piezasDelGrupo();
+        const e = piezas.length
+          ? evaluarLineaComun(nest, piezas, r.nesting.chapa, {
+              separacion: prod.separacionPiezas,
+              margen: prod.margenChapa,
+              formaReal: prod.nestingFormaReal !== false,
+            })
+          : null;
+
+        if (!e) return setLineaComun({ vacio: true });
+
+        // El ahorro se mide contra el corte del LOTE, que es lo que se cotiza
+        const largoLote = (r.geometria?.largoCorteMM || 0) * (r.cantidad || 1);
+        const ahorroMM = Math.min(e.largoCompartido, largoLote * 0.5);
+        setLineaComun({
+          ...e,
+          ahorroMM,
+          pct: largoLote > 0 ? (ahorroMM / largoLote) * 100 : 0,
+        });
+      } catch {
+        setLineaComun({ vacio: true });
+      } finally {
+        setCalculandoLC(false);
+      }
+    }, 30);
+  };
+
   if (!item) {
     return (
       <Panel>
@@ -177,6 +246,12 @@ export function Lienzo() {
                   <Boton tam="sm" onClick={calcularRelleno} disabled={calculandoRelleno}>
                     {calculandoRelleno ? <Loader2 className="animate-spin" /> : <Gift />}
                     ¿Qué más entra?
+                  </Boton>
+                ) : null}
+                {pestania === 'nest' && r?.nesting && !r.nesting.error ? (
+                  <Boton tam="sm" onClick={calcularLineaComun} disabled={calculandoLC}>
+                    {calculandoLC ? <Loader2 className="animate-spin" /> : <Combine />}
+                    ¿Y si van pegadas?
                   </Boton>
                 ) : null}
                 <Boton
@@ -271,6 +346,36 @@ export function Lienzo() {
         </Pestanias>
       </Panel>
       <SegmentarGrande abierto={segmentando} alCerrar={()=>setSegmentando(false)} item={item} shape={resuelto?.shape} indice={doc.items.indexOf(item)}/>
+
+      {/* Anidar pegado NO se aplica solo al precio: es una decisión de
+          producción y cotizar el ahorro sin hacerlo sería cotizar de menos. */}
+      {lineaComun ? (
+        <Aviso nivel={lineaComun.vacio ? 'aviso' : 'info'}>
+          {lineaComun.vacio ? (
+            'En este lote no hay bordes rectos que se puedan compartir. El corte en línea común sirve con piezas rectangulares vecinas.'
+          ) : (
+            <>
+              <strong>Anidando pegadas se ahorran {(lineaComun.ahorroMM / 1000).toFixed(2)} m de corte</strong>{' '}
+              ({lineaComun.pct.toFixed(0)} % de este ítem)
+              {lineaComun.chapasAhorradas > 0
+                ? `, y ${lineaComun.chapasAhorradas} chapa(s) menos`
+                : ''}
+              .
+              <p className="mt-1.5 opacity-80">
+                A cambio, las piezas salen pegadas y hay que separarlas a mano, y cada una queda
+                media sangría más chica si el CAM no lo compensa.
+                {!lineaComun.aplicable
+                  ? ` Sólo ${lineaComun.piezasRectangulares} de ${lineaComun.piezasTotales} piezas son rectangulares.`
+                  : ''}
+              </p>
+              <p className="mt-1.5 opacity-70 text-[11px]">
+                No está aplicado al precio: el sistema cotiza el anidado normal hasta que el taller
+                confirme que lo va a hacer así.
+              </p>
+            </>
+          )}
+        </Aviso>
+      ) : null}
 
       {/* El material de esa chapa ya está pagado: lo que entre de más sólo
           cuesta tiempo de máquina y gas. Es la oferta con mejor margen que

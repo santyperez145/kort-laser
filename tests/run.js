@@ -40,6 +40,7 @@ import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
+import { detectarLineasComunes, ahorroLineaComun, explicarLineaComun, evaluarLineaComun } from '../src/core/linea-comun.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import {
   asignacionesRetazoDeItems,
@@ -1138,6 +1139,129 @@ test('el texto dice cuando la estimación ya daba bien', () => {
   const cal = calibrar(ordenesCon([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]));
   const txt = explicarFactor(factorPara(cal, 'acero-sae1010', 2));
   assert.ok(/igual que la realidad/.test(txt), txt);
+});
+
+/* ================================================================== */
+
+grupo('Corte en linea comun');
+
+/** Chapa de prueba: rectangulos pegados, con la luz que se le pase. */
+const chapaPegada = (luz = 0.2) => ({
+  w: 1000, h: 500,
+  piezas: [
+    { id: 'a', x: 0, y: 0, w: 300, h: 200, rot: 0 },
+    { id: 'b', x: 300 + luz, y: 0, w: 300, h: 200, rot: 0 },
+    { id: 'c', x: 0, y: 200 + luz, w: 300, h: 200, rot: 0 },
+  ],
+});
+
+test('detecta los bordes que se pueden cortar una sola vez', () => {
+  const r = detectarLineasComunes(chapaPegada(0.2), { separacion: 0.2 });
+  // a|b comparten 200 mm de borde vertical; a|c comparten 300 de horizontal
+  assert.equal(r.compartidos.length, 2);
+  cerca(r.largoCompartido, 500, 1e-6);
+});
+
+test('con la separacion normal del nesting NO hay linea comun', () => {
+  // Es la trampa del asunto: 5 mm entre piezas son dos cortes, no uno
+  const r = detectarLineasComunes(chapaPegada(5), { separacion: 0 });
+  assert.equal(r.compartidos.length, 0, 'a 5 mm no se comparte nada');
+  cerca(r.largoCompartido, 0, 1e-9);
+});
+
+test('ignora bordes demasiado cortos para resolverlos como linea unica', () => {
+  const chapa = { w: 1000, h: 500, piezas: [
+    { id: 'a', x: 0, y: 0, w: 300, h: 10, rot: 0 },
+    { id: 'b', x: 300.2, y: 0, w: 300, h: 10, rot: 0 },
+  ] };
+  const r = detectarLineasComunes(chapa, { separacion: 0.2 });
+  assert.equal(r.compartidos.length, 0, '10 mm de borde no es una linea comun');
+});
+
+test('no cuenta piezas que apenas se rozan en una esquina', () => {
+  const chapa = { w: 1000, h: 500, piezas: [
+    { id: 'a', x: 0, y: 0, w: 200, h: 200, rot: 0 },
+    { id: 'b', x: 200.2, y: 200.2, w: 200, h: 200, rot: 0 },
+  ] };
+  const r = detectarLineasComunes(chapa, { separacion: 0.2 });
+  assert.equal(r.compartidos.length, 0, 'el solape es cero: no hay borde compartido');
+});
+
+test('respeta la rotacion al armar el rectangulo', () => {
+  const chapa = { w: 1000, h: 500, piezas: [
+    { id: 'a', x: 0, y: 0, w: 300, h: 200, rot: 0 },
+    // rotada 90: ocupa 200 de ancho y 300 de alto
+    { id: 'b', x: 300.2, y: 0, w: 300, h: 200, rot: 90 },
+  ] };
+  const r = detectarLineasComunes(chapa, { separacion: 0.2 });
+  assert.equal(r.compartidos.length, 1);
+  cerca(r.compartidos[0].largo, 200, 1e-6, 'comparten solo el alto de la mas baja');
+});
+
+test('un contorno irregular no ofrece linea comun', () => {
+  // Poly triangular: sus vertices no caen todos en el borde de su caja
+  const chapa = { w: 1000, h: 500, piezas: [
+    { id: 'a', x: 0, y: 0, w: 300, h: 200, poly: [[0,0],[300,0],[150,200]] },
+    { id: 'b', x: 300.2, y: 0, w: 300, h: 200, poly: [[300.2,0],[600.2,0],[450,200]] },
+  ] };
+  const r = detectarLineasComunes(chapa, { separacion: 0.2 });
+  assert.equal(r.rectangulares, 0, 'no son rectangulos');
+  assert.equal(r.compartidos.length, 0);
+});
+
+test('el ahorro nunca puede pasar la mitad del corte total', () => {
+  const nesting = { layout: [chapaPegada(0.2)] };
+  // Un largo total absurdamente chico: el tope tiene que actuar
+  const a = ahorroLineaComun(nesting, 100, { separacion: 0.2 });
+  assert.ok(a.ahorroMM <= 50, 'un ahorro mayor a la mitad seria imposible');
+});
+
+test('avisa cuando solo una parte de las piezas es rectangular', () => {
+  const chapa = chapaPegada(0.2);
+  chapa.piezas.push({ id: 'd', x: 700, y: 0, w: 100, h: 100, poly: [[700,0],[800,0],[750,100]] });
+  const a = ahorroLineaComun({ layout: [chapa] }, 5000, { separacion: 0.2 });
+  assert.ok(!a.aplicable, 'no todas son rectangulares');
+  assert.ok(/3 de 4/.test(explicarLineaComun(a)), explicarLineaComun(a));
+});
+
+test('el texto dice el ahorro Y lo que se resigna', () => {
+  const a = ahorroLineaComun({ layout: [chapaPegada(0.2)] }, 5000, { separacion: 0.2 });
+  const t = explicarLineaComun(a);
+  assert.ok(/se ahorrar/.test(t), 'tiene que decir cuanto se ahorra');
+  assert.ok(/separarlas a mano/.test(t), 'y que salen pegadas');
+  assert.ok(/sangr/.test(t), 'y que pierden media sangria');
+});
+
+test('evaluar compara el anidado normal contra el pegado', () => {
+  const items = [{ id: 'p', nombre: 'Placa', w: 300, h: 200, cantidad: 8,
+                   shape: makeShape(rect(0, 0, 300, 200)) }];
+  const e = evaluarLineaComun(nest, items, { w: 2440, h: 1220 },
+    { separacion: 5, margen: 10, formaReal: false });
+  assert.ok(e, 'con ocho rectangulos iguales tiene que encontrar algo');
+  assert.ok(e.largoCompartido > 0);
+  assert.equal(e.piezasRectangulares, e.piezasTotales, 'son todas rectangulares');
+  assert.ok(e.chapasPegado <= e.chapasNormal, 'pegado nunca puede necesitar mas chapas');
+});
+
+test('evaluar devuelve null cuando no hay nada que compartir', () => {
+  // Una sola pieza no tiene con quien compartir borde
+  const items = [{ id: 'p', nombre: 'Placa', w: 300, h: 200, cantidad: 1,
+                   shape: makeShape(rect(0, 0, 300, 200)) }];
+  const e = evaluarLineaComun(nest, items, { w: 2440, h: 1220 },
+    { separacion: 5, margen: 10, formaReal: false });
+  assert.equal(e, null);
+});
+
+test('evaluar funciona aunque el nesting normal sea por forma real', () => {
+  // Regresion: el motor de forma real rasteriza a ~2,7 mm y no puede pegar
+  // piezas borde contra borde, asi que la deteccion daba cero siempre.
+  // Los dos anidados de la evaluacion van por el motor rectangular.
+  const items = [{ id: 'p', nombre: 'Placa', w: 300, h: 200, cantidad: 12,
+                   shape: makeShape(rect(0, 0, 300, 200)) }];
+  const e = evaluarLineaComun(nest, items, { w: 2440, h: 1220 },
+    { separacion: 5, margen: 10, formaReal: true });
+  assert.ok(e, 'con formaReal:true tambien tiene que encontrar la oportunidad');
+  assert.ok(e.largoCompartido > 1000, `solo ${e.largoCompartido} mm compartidos`);
 });
 
 /* ================================================================== */
