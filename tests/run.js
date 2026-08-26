@@ -40,7 +40,7 @@ import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
-import { evaluarVigencia, materialesQueSeMovieron } from '../src/core/vigencia.js';
+import { evaluarVigencia, materialesQueSeMovieron, impactoMaterialRapido, carteraEnRiesgo } from '../src/core/vigencia.js';
 import { detectarLineasComunes, ahorroLineaComun, explicarLineaComun, evaluarLineaComun } from '../src/core/linea-comun.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import {
@@ -1223,6 +1223,81 @@ test('no repite un material usado en varios items', () => {
   ];
   const m = materialesQueSeMovieron(items, [{ id: 'acero-sae1010', precioKg: 4400 }]);
   assert.equal(m.length, 1);
+});
+
+test('el impacto rapido es exacto para el material', () => {
+  // 20 kg de acero que paso de 3800 a 4200 = +8.000 de material, sin anidar nada
+  const p = {
+    estado: 'enviado',
+    resumen: { costo: 100000, subtotal: 180000 },
+    items: [{ materialId: 'acero-sae1010', _pesoTotal: 20, _precioKgMaterial: 3800 }],
+  };
+  const i = impactoMaterialRapido(p, [{ id: 'acero-sae1010', precioKg: 4200 }]);
+  cerca(i.delta, 8000, 1e-6);
+  cerca(i.costoEstimadoHoy, 108000, 1e-6);
+  cerca(i.utilidadEstimadaHoy, 72000, 1e-6);
+  assert.ok(!i.enRojo);
+  assert.ok(!i.parcial);
+});
+
+test('marca en rojo cuando lo prometido ya no cubre', () => {
+  const p = {
+    estado: 'enviado',
+    resumen: { costo: 100000, subtotal: 105000 },
+    items: [{ materialId: 'acero-sae1010', _pesoTotal: 40, _precioKgMaterial: 3800 }],
+  };
+  const i = impactoMaterialRapido(p, [{ id: 'acero-sae1010', precioKg: 4200 }]);
+  cerca(i.delta, 16000, 1e-6);       // 40 kg x 400
+  assert.ok(i.enRojo, 'costo 116.000 contra 105.000 prometidos');
+});
+
+test('avisa cuando el calculo es parcial por presupuestos viejos', () => {
+  const p = {
+    resumen: { costo: 100000, subtotal: 180000 },
+    items: [
+      { materialId: 'acero-sae1010', _pesoTotal: 20, _precioKgMaterial: 3800 },
+      { materialId: 'inox-304', _pesoTotal: 10 }, // sin precio guardado
+    ],
+  };
+  const i = impactoMaterialRapido(p, [{ id: 'acero-sae1010', precioKg: 4200 }, { id: 'inox-304', precioKg: 9000 }]);
+  assert.ok(i.parcial, 'un item quedo afuera y hay que decirlo');
+  assert.equal(i.itemsConDato, 1);
+  assert.equal(i.itemsTotales, 2);
+});
+
+test('sin ningun precio guardado devuelve null en vez de estimar', () => {
+  const p = { resumen: { costo: 100000, subtotal: 180000 }, items: [{ materialId: 'acero-sae1010', _pesoTotal: 20 }] };
+  assert.equal(impactoMaterialRapido(p, [{ id: 'acero-sae1010', precioKg: 4200 }]), null);
+});
+
+test('la cartera solo cuenta los presupuestos vivos', () => {
+  const item = (peso) => [{ materialId: 'acero-sae1010', _pesoTotal: peso, _precioKgMaterial: 3800 }];
+  const presus = [
+    { estado: 'enviado',    resumen: { costo: 100000, subtotal: 105000 }, items: item(40) }, // en rojo
+    { estado: 'borrador',   resumen: { costo: 100000, subtotal: 180000 }, items: item(20) }, // subio, no rojo
+    // Estos NO se pueden ni sostener ni perder: no cuentan
+    { estado: 'rechazado',  resumen: { costo: 100000, subtotal: 105000 }, items: item(40) },
+    { estado: 'facturado',  resumen: { costo: 100000, subtotal: 105000 }, items: item(40) },
+  ];
+  const c = carteraEnRiesgo(presus, [{ id: 'acero-sae1010', precioKg: 4200 }]);
+  assert.equal(c.vivos, 2, 'rechazado y facturado quedan afuera');
+  assert.equal(c.enRojo, 1);
+  assert.equal(c.subieron, 1);
+  assert.ok(c.montoEnRiesgo > 0);
+});
+
+test('el impacto rapido acompania a la cuenta completa', () => {
+  // El rapido solo mira material; el completo mira todo. En un caso donde el
+  // material es lo unico que cambio, los dos tienen que coincidir.
+  const p = {
+    fecha: new Date().toISOString(),
+    resumen: { costo: 100000, subtotal: 180000 },
+    items: [{ materialId: 'acero-sae1010', _pesoTotal: 25, _precioKgMaterial: 3800 }],
+  };
+  const rapido = impactoMaterialRapido(p, [{ id: 'acero-sae1010', precioKg: 4200 }]);
+  const completo = evaluarVigencia({ presupuesto: p, costoHoy: rapido.costoEstimadoHoy, config: CFG_V });
+  cerca(completo.variacionMonto, rapido.delta, 1e-6);
+  cerca(completo.utilidadHoy, rapido.utilidadEstimadaHoy, 1e-6);
 });
 
 /* ================================================================== */

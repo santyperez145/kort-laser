@@ -149,3 +149,101 @@ export function materialesQueSeMovieron(itemsCotizados = [], materialesHoy = [])
   }
   return [...vistos.values()].sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
 }
+
+/**
+ * Impacto del movimiento de materiales, sin recotizar.
+ *
+ * La lista de presupuestos necesita saber cuáles están en riesgo, pero
+ * recotizar cada uno significa anidar cada uno: con cincuenta presupuestos
+ * son varios segundos de pantalla congelada para pintar una tabla.
+ *
+ * Acá se usa lo que el presupuesto YA guardó por ítem —el peso total y el
+ * $/kg con el que se cotizó— y se calcula la diferencia de material contra el
+ * catálogo de hoy. Es una multiplicación por ítem: instantáneo.
+ *
+ * ⚠️ **Es EXACTO para el material y no mira nada más.** No recalcula corte,
+ * gas, plegado ni acabados. Y alcanza para lo que se usa: en chapa fina el
+ * material es el grueso del costo, así que si el material no se movió el
+ * presupuesto casi seguro sigue en pie, y si se movió fuerte hay que abrirlo.
+ * El número fino sale al abrirlo, con `evaluarVigencia()`.
+ *
+ * Devuelve null cuando el presupuesto es anterior a que se guardara el precio
+ * por ítem: mejor no decir nada que estimar sobre datos que no están.
+ */
+export function impactoMaterialRapido(presupuesto, materialesHoy = []) {
+  const items = presupuesto?.items || [];
+  const precioDe = new Map(materialesHoy.map((m) => [m.id, nz(m.precioKg)]));
+
+  let delta = 0;
+  let conDato = 0;
+  const porMaterial = new Map();
+
+  for (const it of items) {
+    const entonces = nz(it?._precioKgMaterial);
+    const peso = nz(it?._pesoTotal);
+    const hoy = precioDe.get(it?.materialId) || 0;
+    if (!(entonces > 0) || !(hoy > 0) || !(peso > 0)) continue;
+    conDato++;
+    const d = peso * (hoy - entonces);
+    delta += d;
+    const acc = porMaterial.get(it.materialId) || { id: it.materialId, entonces, hoy, delta: 0, kg: 0 };
+    acc.delta += d;
+    acc.kg += peso;
+    porMaterial.set(it.materialId, acc);
+  }
+
+  if (!conDato) return null;
+
+  const res = presupuesto?.resumen || {};
+  const costoEntonces = nz(res.costo);
+  const precioPrometido = nz(res.subtotal);
+  const costoEstimadoHoy = costoEntonces + delta;
+
+  return {
+    delta,
+    itemsConDato: conDato,
+    itemsTotales: items.length,
+    // Parcial cuando algunos ítems son viejos y no tienen el precio guardado:
+    // el número sirve igual pero se queda corto, y hay que decirlo.
+    parcial: conDato < items.length,
+    costoEntonces,
+    costoEstimadoHoy,
+    pct: costoEntonces > 0 ? (delta / costoEntonces) * 100 : null,
+    // La pregunta que importa: ¿lo prometido sigue cubriendo?
+    utilidadEstimadaHoy: precioPrometido > 0 ? precioPrometido - costoEstimadoHoy : null,
+    enRojo: precioPrometido > 0 && costoEstimadoHoy > precioPrometido,
+    materiales: [...porMaterial.values()].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)),
+  };
+}
+
+/**
+ * Resumen de la cartera abierta: qué hay que mirar hoy.
+ *
+ * Sólo cuentan los presupuestos VIVOS. Uno rechazado o ya facturado no se
+ * puede sostener ni perder: incluirlos infla el número y lo vuelve ruido.
+ */
+export const ESTADOS_VIVOS = ['borrador', 'enviado'];
+
+export function carteraEnRiesgo(presupuestos = [], materialesHoy = [], opts = {}) {
+  const vivos = (presupuestos || []).filter((p) =>
+    (opts.estados || ESTADOS_VIVOS).includes(p?.estado || 'borrador')
+  );
+
+  let enRojo = 0;
+  let subieron = 0;
+  let montoEnRiesgo = 0;
+  let sinDato = 0;
+
+  for (const p of vivos) {
+    const i = impactoMaterialRapido(p, materialesHoy);
+    if (!i) { sinDato++; continue; }
+    if (i.enRojo) {
+      enRojo++;
+      montoEnRiesgo += Math.abs(i.utilidadEstimadaHoy || 0);
+    } else if (i.pct != null && i.pct >= VARIACION_IGNORABLE) {
+      subieron++;
+    }
+  }
+
+  return { vivos: vivos.length, enRojo, subieron, montoEnRiesgo, sinDato };
+}

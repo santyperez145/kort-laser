@@ -73,7 +73,7 @@ app/          Interfaz nueva: React + Vite + Tailwind + Radix.
                                             sección de perfil plegado
               app/src/vistas/           Panel, Cotizador, Plegado,
                                         Tarifario y Materiales
-web/          Interfaz anterior: vanilla JS. Siguen vivas 6 vistas.
+web/          Interfaz anterior: vanilla JS. Siguen vivas 5 vistas.
 web-dist/     Salida de `npm run build`. No se commitea.
 server.js     Express + Helmet + Zod.
 tests/run.js  Suite completa. Un solo archivo, sin runner externo.
@@ -116,8 +116,8 @@ escribe. En un mostrador, esperar una vuelta de red por cada tecla se nota.
 
 ### Las dos interfaces conviven, y el iframe no es pereza
 
-Panel, Cotizador, Plegado, Tarifario, Producción y Materiales están rehechos en React. Las
-otras cinco vistas (Presupuestos, Clientes, Máquinas, Costos,
+Panel, Cotizador, Plegado, Tarifario, Producción, Materiales y Presupuestos están rehechos
+en React. Las otras cuatro vistas (Clientes, Máquinas, Costos,
 Configuración) siguen siendo las de antes y se muestran **dentro de un
 iframe** apuntando a `/legacy`.
 
@@ -251,6 +251,38 @@ uno de los dos sería inventar. Esas siguen contando para el factor global.
 
 `ctx.calibracion` es **opcional**: sin ella el factor es 1 y el cálculo queda
 exactamente como estaba. Hay un test que lo fija.
+
+## Un presupuesto viejo puede estar por debajo del costo
+
+`src/core/vigencia.js`. Con la inflación argentina un presupuesto se pudre
+solo: nadie lo toca y deja de cubrir porque subió la chapa.
+
+Dos cosas distintas, y **decide la segunda**:
+
+- **El calendario** (`validezDias`). Por sí solo no significa nada: si el
+  acero no se movió, el precio sigue siendo bueno y vencerlo es perder una
+  venta por trámite. Hay un test que lo fija.
+- **El costo.** Puede pasar DENTRO de la validez: si la chapa saltó 8 % en una
+  semana, uno de cinco días ya está en rojo.
+
+Dos caminos, a propósito:
+
+- `evaluarVigencia()` — al ABRIR un presupuesto. Compara contra la cotización
+  rehecha con los precios de hoy. Exacto.
+- `impactoMaterialRapido()` — en la LISTA. Usa `_pesoTotal` y
+  `_precioKgMaterial` que el presupuesto guardó por ítem: es una
+  multiplicación, sin anidar. **Exacto para el material y no mira nada más.**
+  Recotizar cincuenta presupuestos para pintar una tabla serían varios
+  segundos de pantalla congelada.
+
+⚠️ La comparación lee los ítems **guardados**, no la cotización de hoy: con la
+de hoy se compararía el precio actual contra sí mismo y no aparecería nunca
+ninguna variación. Fue el primer intento y se vio porque el desglose salía
+vacío.
+
+⚠️ Sin `_precioKgMaterial` (presupuestos anteriores al cambio) se muestra
+**"—", no "0 %"**. Un guión dice "no se puede saber"; un cero miente para el
+lado tranquilizador.
 
 ## Trampas conocidas
 
