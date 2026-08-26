@@ -18,6 +18,7 @@ import { VistaPresupuestos } from '@/vistas/Presupuestos';
 import { VistaCostos } from '@/vistas/Costos';
 import { VistaMaquinas } from '@/vistas/Maquinas';
 import { VistaConfiguracion } from '@/vistas/Configuracion';
+import { VistaClientes } from '@/vistas/Clientes';
 import { Aviso } from '@/componentes/ui/varios';
 import { Boton } from '@/componentes/ui/boton';
 
@@ -48,7 +49,7 @@ function Contenido() {
         <Route path="/tarifario" element={<VistaTarifario />} />
         <Route path="/presupuestos" element={<VistaPresupuestos />} />
         <Route path="/ordenes" element={<VistaProduccion />} />
-        <Route path="/clientes" element={<Legacy ruta="clientes" />} />
+        <Route path="/clientes" element={<VistaClientes />} />
         <Route path="/materiales" element={<VistaMateriales />} />
         <Route path="/stock" element={<VistaStock />} />
         <Route path="/maquina-en-vivo" element={<VistaMaquinaEnVivo />} />

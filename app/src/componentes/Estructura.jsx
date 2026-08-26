@@ -29,7 +29,7 @@ export const RUTAS = [
   { a: '/tarifario', txt: 'Tarifario', Icono: Tags, nuevo: true },
   { a: '/presupuestos', txt: 'Presupuestos', Icono: FileText, nuevo: true },
   { a: '/ordenes', txt: 'Producción', Icono: Factory, nuevo: true },
-  { a: '/clientes', txt: 'Clientes', Icono: Users },
+  { a: '/clientes', txt: 'Clientes', Icono: Users, nuevo: true },
   { a: '/materiales', txt: 'Materiales', Icono: Layers, nuevo: true },
   { a: '/stock', txt: 'Stock chapa', Icono: Archive, nuevo: true },
   { a: '/maquina-en-vivo', txt: 'Máquina en vivo', Icono: RadioTower, nuevo: true },

@@ -150,6 +150,7 @@ export function VistaCotizador() {
 
   /* ---------------- Carga inicial ---------------- */
   const id = params.get('id');
+  const idCliente = params.get('cliente');
 
   /**
    * ⚠️ Este efecto CREA el presupuesto desde cero, así que sólo puede correr
@@ -228,6 +229,32 @@ export function VistaCotizador() {
     const t = setTimeout(() => guardarBorrador(doc), 800);
     return () => clearTimeout(t);
   }, [doc]);
+
+  /* Vino de "cotizar para este cliente" en la lista de Clientes.
+   *
+   * Va en un efecto propio y no dentro del armado del presupuesto porque ese
+   * armado tiene varios caminos —presupuesto guardado, pieza que viene de
+   * Plegado, borrador a medio hacer— y meterle el cliente a cada uno sería
+   * repetir lo mismo tres veces y olvidarse en el cuarto.
+   *
+   * Sólo completa si todavía no hay cliente: si el presupuesto ya traía uno,
+   * el de la URL no lo pisa. */
+  useEffect(() => {
+    if (!idCliente || !clientes.length) return;
+    setDoc((d) => {
+      if (d.clienteId || d.cliente?.nombre) return d;
+      const c = clientes.find((x) => x.id === idCliente);
+      if (!c) return d;
+      return {
+        ...d,
+        clienteId: c.id,
+        cliente: {
+          nombre: c.nombre || '', cuit: c.cuit || '', telefono: c.telefono || '',
+          email: c.email || '', direccion: c.direccion || '',
+        },
+      };
+    });
+  }, [idCliente, clientes]);
 
   /* ---------------- Cálculo derivado ----------------
      `useDeferredValue` deja que la tecla se pinte antes de recotizar. Sin
