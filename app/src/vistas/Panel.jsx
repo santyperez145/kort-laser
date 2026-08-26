@@ -94,9 +94,18 @@ function RevisionDatos() {
   const materiales = usarEstado((s) => s.materiales);
   const laser = usarEstado((s) => s.laser());
 
+  /* El historial es lo único que sabe de cuándo es cada precio. Sin él el
+     resto de los chequeos corre igual: `revisarDatos` lo trata como opcional
+     justamente para eso. */
+  const { data: historialPrecios = [] } = useQuery({
+    queryKey: ['precios-historial'],
+    queryFn: () => api.get('precios?limite=5000'),
+    staleTime: 60_000,
+  });
+
   const revision = useMemo(
-    () => (config ? revisarDatos({ config, maquinas, materiales }) : null),
-    [config, maquinas, materiales]
+    () => (config ? revisarDatos({ config, maquinas, materiales, historialPrecios }) : null),
+    [config, maquinas, materiales, historialPrecios]
   );
 
   if (!revision || revision.ok) return null;

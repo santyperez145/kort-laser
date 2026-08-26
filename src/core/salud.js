@@ -20,6 +20,7 @@
 
 import { calcularCostoHoraMaquina, calcularEstructura, revisarCostoHora } from './costos.js';
 import { revisarConsumiblesHora } from './consumibles.js';
+import { frescuraDePrecios, explicarFrescura } from './frescura.js';
 
 const n = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
 
@@ -349,7 +350,23 @@ function revisarProduccion(cfg) {
  *
  * @returns {{ hallazgos: Array, errores: number, avisos: number, ok: boolean }}
  */
-export function revisarDatos({ config, maquinas, materiales } = {}) {
+/**
+ * `historialPrecios` es opcional a propósito: quien no lo tenga a mano sigue
+ * recibiendo el resto de los chequeos igual. Sin él no se puede saber de
+ * cuándo es un precio, y suponerlo sería peor que no decir nada.
+ */
+/* Un precio de material viejo no es un dato mal cargado: es un dato que fue
+   correcto y dejó de serlo. Entra igual acá porque el efecto es el mismo —
+   todos los precios salen mal en silencio— y porque éste es el panel que se
+   mira antes de cotizar. */
+function revisarFrescura(materiales, historial) {
+  if (!historial?.length || !materiales?.length) return [];
+  const f = frescuraDePrecios(materiales, historial);
+  const e = explicarFrescura(f);
+  return e ? [hallazgo(e.nivel, 'materiales', 'Materiales', e.msg)] : [];
+}
+
+export function revisarDatos({ config, maquinas, materiales, historialPrecios } = {}) {
   const cfg = config || {};
   const estructura = calcularEstructura(cfg.estructura);
 
@@ -359,6 +376,7 @@ export function revisarDatos({ config, maquinas, materiales } = {}) {
     ...revisarMinimos(cfg, maquinas, estructura),
     ...revisarMaquinas(maquinas, estructura),
     ...revisarMateriales(materiales),
+    ...revisarFrescura(materiales, historialPrecios),
     ...revisarProduccion(cfg),
   ];
 

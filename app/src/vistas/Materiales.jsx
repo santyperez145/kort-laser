@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Save, Plus, TrendingUp, Percent, Zap, Pencil, Trash2, Eye, EyeOff, Info, FileUp,
@@ -26,6 +27,7 @@ import { Insignia } from '@/componentes/ui/insignia';
 import { usarEstado } from '@/lib/estado';
 import { api } from '@/lib/api';
 import { money, num, fecha } from '@/lib/formato';
+import { frescuraDePrecios, explicarFrescura } from '@core/frescura.js';
 import { cn } from '@/lib/utils';
 
 import {
@@ -38,12 +40,32 @@ const clonar = (v) => JSON.parse(JSON.stringify(v));
 
 const TONO_GAS = { N2: 'azul', O2: 'naranja', AIRE: 'verde' };
 
+/* "hace 14 días" y no la fecha: lo que se quiere saber es la antigüedad, y
+   convertir 12/08 a "hace cuánto" es trabajo que hace el que lee. */
+function antiguedadTexto(x) {
+  if (!x) return '';
+  if (x.sinDato) return 'sin registro';
+  if (x.dias === 0) return 'hoy';
+  if (x.dias === 1) return 'ayer';
+  return `hace ${x.dias} días`;
+}
+
 export function VistaMateriales() {
   const materialesGuardados = usarEstado((s) => s.materiales);
   const guardarMateriales = usarEstado((s) => s.guardarMateriales);
   const config = usarEstado((s) => s.config);
   const laser = usarEstado((s) => s.laser());
   const sim = usarEstado((s) => s.simbolo());
+
+  /* Cuándo se tocó por última vez cada precio. El historial ya guardaba cada
+     cambio desde el primer día y no lo miraba nadie: la tabla mostraba el
+     número sin decir de cuándo era, y un precio sin fecha se lee como si
+     fuera de hoy. */
+  const { data: historial = [] } = useQuery({
+    queryKey: ['precios-historial'],
+    queryFn: () => api.get('precios?limite=5000'),
+    staleTime: 60_000,
+  });
 
   /* La copia de trabajo se siembra UNA sola vez, y recién cuando el store
      terminó de cargar: al montar la vista todavía está vacío, así que sembrar
@@ -53,6 +75,17 @@ export function VistaMateriales() {
      ya tuvo el cotizador con su efecto de arranque. */
   const [mats, setMats] = useState([]);
   const sembrado = useRef(false);
+
+  const frescura = useMemo(
+    () => (mats.length ? frescuraDePrecios(mats, historial) : null),
+    [mats, historial]
+  );
+  const avisoFrescura = useMemo(() => explicarFrescura(frescura), [frescura]);
+  const diasDe = useMemo(() => {
+    const m = new Map();
+    for (const x of frescura?.porMaterial || []) m.set(x.id, x);
+    return m;
+  }, [frescura]);
   useEffect(() => {
     if (sembrado.current || !materialesGuardados?.length) return;
     sembrado.current = true;
@@ -147,6 +180,12 @@ export function VistaMateriales() {
         tres espesores medidos, el resto interpola bien.
       </Aviso>
 
+      {avisoFrescura ? (
+        <Aviso nivel={avisoFrescura.nivel} className="mb-3">
+          {avisoFrescura.msg}
+        </Aviso>
+      ) : null}
+
       <Panel>
         <PanelCuerpo sinPad>
           {mats.length === 0 ? (
@@ -188,6 +227,18 @@ export function VistaMateriales() {
                       <td className="px-3 py-2 text-right tabular-nums">{num(m.densidad, 2)}</td>
                       <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
                         {money(m.precioKg, sim, 0)}
+                        {/* Va debajo del precio y no en una columna propia:
+                            es donde se mira, y no cuesta ancho en la notebook
+                            del taller. El material atrasado se marca; el que
+                            está al día sólo dice de cuándo es. */}
+                        <div
+                          className={cn(
+                            'text-[10px] font-sans font-normal',
+                            diasDe.get(m.id)?.atrasado ? 'text-alerta-500' : 'text-tenue'
+                          )}
+                        >
+                          {antiguedadTexto(diasDe.get(m.id))}
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-suave">{num(m.Rm, 0)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-suave">{num(m.kFactor, 2)}</td>

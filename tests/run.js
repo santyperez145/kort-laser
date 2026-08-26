@@ -41,6 +41,7 @@ import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, red
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos, SETUP_PROGRAMA_REF, CARGA_CHAPA_REF, APROVECHAMIENTO_REF } from '../src/core/salud.js';
 import { evaluarVigencia, materialesQueSeMovieron, impactoMaterialRapido, carteraEnRiesgo, baseDeCosto, baseQueSeMovio } from '../src/core/vigencia.js';
+import { frescuraDePrecios, explicarFrescura } from '../src/core/frescura.js';
 import { rentabilidad, referenciaDelTaller, pisoDelTaller, evaluarTrabajo, ordenarPorRendimiento } from '../src/core/rentabilidad.js';
 import { detectarLineasComunes, ahorroLineaComun, explicarLineaComun, evaluarLineaComun } from '../src/core/linea-comun.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
@@ -1286,6 +1287,92 @@ test('la cartera solo cuenta los presupuestos vivos', () => {
   assert.equal(c.subieron, 1);
   assert.ok(c.montoEnRiesgo > 0);
 });
+
+/* ------------------------------------------------------------------ */
+grupo('Frescura de los precios de material');
+
+const M4 = [
+  { id: 'acero', nombre: 'Acero SAE 1010', precioKg: 2800 },
+  { id: 'inox', nombre: 'Inoxidable 304', precioKg: 8900 },
+  { id: 'alu', nombre: 'Aluminio 5052', precioKg: 9800 },
+  { id: 'cobre', nombre: 'Cobre', precioKg: 22000 },
+];
+const HOY = new Date('2026-08-26T12:00:00Z');
+const haceDias = (d) => new Date(HOY.getTime() - d * 86400000).toISOString();
+
+test('encuentra el material que quedó atrás del resto', () => {
+  /* El modo de falla real: se actualiza el acero porque entra chapa todas las
+     semanas y el cobre queda con el precio de la carga inicial. */
+  const h = [
+    { material_id: 'acero', fecha: haceDias(2) },
+    { material_id: 'inox', fecha: haceDias(5) },
+    { material_id: 'alu', fecha: haceDias(9) },
+    { material_id: 'cobre', fecha: haceDias(70) },
+  ];
+  const f = frescuraDePrecios(M4, h, { hoy: HOY });
+  assert.equal(f.masReciente, 2);
+  assert.deepEqual(f.atrasados.map((x) => x.id), ['cobre']);
+  assert.ok(/Cobre/.test(explicarFrescura(f).msg));
+});
+
+test('un catálogo revisado parejo no dispara nada', () => {
+  const h = M4.map((m, i) => ({ material_id: m.id, fecha: haceDias(2 + i) }));
+  const f = frescuraDePrecios(M4, h, { hoy: HOY });
+  assert.equal(f.atrasados.length, 0);
+  assert.equal(f.catalogoViejo, false);
+  assert.equal(explicarFrescura(f), null, 'sin hallazgo no se inventa un aviso');
+});
+
+test('la regla relativa sola NO ve el catálogo entero viejo', () => {
+  /* Éste es el motivo de que haya dos reglas. Si todo está igual de viejo,
+     ningún material está "atrás del resto" — y es el peor caso, porque cada
+     cotización sale mal, no una. */
+  const h = M4.map((m) => ({ material_id: m.id, fecha: haceDias(120) }));
+  const f = frescuraDePrecios(M4, h, { hoy: HOY });
+  assert.equal(f.atrasados.length, 0, 'la relativa no encuentra nada, y es correcto');
+  assert.ok(f.catalogoViejo, 'la absoluta sí');
+  assert.ok(/no se actualiza ningún precio/.test(explicarFrescura(f).msg));
+});
+
+test('un material sin historial se informa aparte, no como atrasado', () => {
+  // No se puede saber de cuándo es: decir "hace 200 días" sería inventarlo.
+  const h = [{ material_id: 'acero', fecha: haceDias(3) }];
+  const f = frescuraDePrecios(M4, h, { hoy: HOY });
+  assert.equal(f.sinDato.length, 3);
+  assert.ok(f.sinDato.every((x) => !x.atrasado));
+  assert.equal(f.porMaterial.find((x) => x.id === 'cobre').dias, null);
+});
+
+test('no confía en el orden del historial', () => {
+  /* El endpoint devuelve ORDER BY fecha DESC hoy. Si alguien lo cambia y esto
+     leyera la primera fila, diría que todo está viejo sin que nada lo note. */
+  const h = [
+    { material_id: 'acero', fecha: haceDias(90) },
+    { material_id: 'acero', fecha: haceDias(1) },
+    { material_id: 'acero', fecha: haceDias(45) },
+  ];
+  const f = frescuraDePrecios([M4[0]], h, { hoy: HOY });
+  assert.equal(f.porMaterial[0].dias, 1, 'gana la más nueva, esté donde esté');
+});
+
+test('el material dado de baja no cuenta', () => {
+  const mats = [...M4, { id: 'zz', nombre: 'Viejo', precioKg: 1, activo: false }];
+  const h = M4.map((m) => ({ material_id: m.id, fecha: haceDias(3) }));
+  const f = frescuraDePrecios(mats, h, { hoy: HOY });
+  assert.ok(!f.porMaterial.some((x) => x.id === 'zz'), 'no se pide actualizar lo que no se vende');
+});
+
+test('una fecha rota no rompe el cálculo', () => {
+  const h = [
+    { material_id: 'acero', fecha: 'cualquier cosa' },
+    { material_id: 'acero', fecha: haceDias(4) },
+    { material_id: null, fecha: haceDias(1) },
+  ];
+  const f = frescuraDePrecios([M4[0]], h, { hoy: HOY });
+  assert.equal(f.porMaterial[0].dias, 4);
+});
+
+/* ------------------------------------------------------------------ */
 
 test('la base de costo detecta lo que el precio del material no ve', () => {
   /* El caso exacto que motivó esto: se corrigió el setup del programa de 0 a
