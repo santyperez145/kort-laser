@@ -113,6 +113,27 @@ function tomarItemPendiente() {
   }
 }
 
+/**
+ * Deja pasar el valor recién cuando dejaste de escribir.
+ *
+ * `useDeferredValue` posterga el pintado pero NO evita el cálculo: escribir
+ * "300" en la cantidad dispara tres cotizaciones (3, 30 y 300) y cada una
+ * anida el lote entero. Medido con 300 piezas: una tarea de 3,5 segundos con
+ * el hilo bloqueado, tres veces seguidas.
+ *
+ * Con esto se paga una sola. El retardo es corto a propósito: más de ~250 ms
+ * se siente como que el sistema no responde, que es justo lo que se quiere
+ * evitar.
+ */
+function usarQuieto(valor, ms = 220) {
+  const [quieto, setQuieto] = useState(valor);
+  useEffect(() => {
+    const t = setTimeout(() => setQuieto(valor), ms);
+    return () => clearTimeout(t);
+  }, [valor, ms]);
+  return quieto;
+}
+
 export function VistaCotizador() {
   const [params, setParams] = useSearchParams();
   const materiales = usarEstado((s) => s.materiales);
@@ -209,7 +230,8 @@ export function VistaCotizador() {
      `useDeferredValue` deja que la tecla se pinte antes de recotizar. Sin
      esto, escribir una cota en una pieza con muchos agujeros se siente
      pegajoso: el simulador de corte recorre la geometría entera. */
-  const docDiferido = useDeferredValue(doc);
+  const docQuieto = usarQuieto(doc);
+  const docDiferido = useDeferredValue(docQuieto);
   const calculando = doc !== docDiferido;
 
   const { resueltos, coti } = useMemo(() => {

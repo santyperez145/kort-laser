@@ -465,3 +465,44 @@ export function pointInPath(p, x, y) {
   }
   return inside;
 }
+
+/**
+ * Firma barata del contenido de una pieza.
+ *
+ * Existe para poder cachear el anidado. El cotizador reconstruye la geometría
+ * en cada tecla —`construir()` devuelve un objeto nuevo aunque los parámetros
+ * no hayan cambiado— así que comparar por identidad de objeto no sirve: sería
+ * siempre distinto y el caché nunca acertaría.
+ *
+ * Recorre todos los segmentos una vez y los mezcla en un entero de 32 bits.
+ * Es lineal en la cantidad de segmentos, o sea microsegundos, contra los
+ * cientos de milisegundos que cuesta anidar.
+ *
+ * ⚠️ Sirve para cachear, NO para decidir si dos piezas son iguales de verdad.
+ * Los valores se redondean a la milésima de milímetro antes de mezclarse, así
+ * que dos geometrías que difieran por debajo de eso comparten firma — y a esa
+ * escala el anidado da lo mismo igual.
+ */
+export function firmaShape(sh) {
+  let h = 0x811c9dc5; // FNV-1a de 32 bits
+  const mezclar = (v) => {
+    // Redondeo a la milésima: evita que el ruido de coma flotante cambie la
+    // firma de una geometría que en la práctica es la misma.
+    const n = Math.round((Number(v) || 0) * 1000);
+    h ^= n & 0xffffffff;
+    h = Math.imul(h, 0x01000193);
+  };
+
+  for (const p of allPaths(sh)) {
+    mezclar(p.segs.length);
+    for (const s of p.segs) {
+      if (s.t === 'L') {
+        mezclar(1); mezclar(s.x1); mezclar(s.y1); mezclar(s.x2); mezclar(s.y2);
+      } else {
+        mezclar(2); mezclar(s.cx); mezclar(s.cy); mezclar(s.r);
+        mezclar(s.a1); mezclar(s.a2); mezclar(s.ccw ? 1 : 0);
+      }
+    }
+  }
+  return (h >>> 0).toString(36);
+}

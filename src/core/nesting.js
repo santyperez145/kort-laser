@@ -20,7 +20,7 @@
  * cada columna, así que nunca promete un encastre que no entra.
  */
 
-import { flattenPath, pathBBox, shapeBBox, shapeArea, esMultiParte } from './geometry.js';
+import { flattenPath, pathBBox, shapeBBox, shapeArea, esMultiParte, firmaShape } from './geometry.js';
 import { aprovecharHuecos } from './huecos.js';
 
 /** El rectángulo envolvente como polígono, para anidar del lado seguro. */
@@ -653,6 +653,64 @@ function nestFormaReal(items, chapa, opts) {
 }
 
 /* ================================================================== */
+/* Caché de anidados                                                   */
+/* ================================================================== */
+
+/**
+ * El cotizador recalcula el precio con CADA TECLA, y anidar es lo caro: en un
+ * lote de 200 piezas son ~900 ms, contra menos de 1 ms de todo el resto del
+ * cálculo. Escribir el nombre del cliente, tocar el margen o agregar una nota
+ * no cambia una sola pieza del layout, pero volvía a anidar todo igual.
+ *
+ * El caché no cambia ningún resultado: ante las mismas entradas devuelve
+ * exactamente lo que habría calculado. Sirve para que las teclas que NO tocan
+ * la geometría salgan gratis.
+ *
+ * La clave se arma con TODAS las opciones, no con una lista elegida a mano.
+ * Si mañana alguien agrega una opción que cambia el layout y la clave no la
+ * mirara, el caché devolvería un anidado viejo con la opción nueva puesta —
+ * un error silencioso sobre el número que decide cuántas chapas se compran.
+ */
+const CACHE_MAX = 80;
+const cacheNest = new Map();
+
+/** Firma de un ítem: lo que lo hace distinto a los ojos del anidador. */
+function firmaItem(i) {
+  const geo = i.shape ? firmaShape(i.shape) : i.poly ? 'p' + i.poly.length + ':' + i.poly.flat().join(',') : '-';
+  return [i.id, i.w, i.h, i.cantidad, i.rotable, i.areaReal, geo].join('|');
+}
+
+function claveDeAnidado(items, chapa, opts) {
+  // Una función entre las opciones no se puede serializar: sin clave no hay
+  // caché, que es lo correcto — mejor lento que devolver algo que no es.
+  for (const v of Object.values(opts)) if (typeof v === 'function') return null;
+  try {
+    return JSON.stringify([items.map(firmaItem), chapa.w, chapa.h, opts]);
+  } catch {
+    return null; // referencias circulares u otra cosa rara: se calcula y listo
+  }
+}
+
+/** LRU simple: el más usado se conserva, el más viejo se cae. */
+function delCache(clave) {
+  if (!cacheNest.has(clave)) return null;
+  const v = cacheNest.get(clave);
+  cacheNest.delete(clave);
+  cacheNest.set(clave, v);
+  return v;
+}
+
+function alCache(clave, valor) {
+  cacheNest.set(clave, valor);
+  if (cacheNest.size > CACHE_MAX) cacheNest.delete(cacheNest.keys().next().value);
+}
+
+/** Para los tests y para medir. */
+export function limpiarCacheNesting() {
+  cacheNest.clear();
+}
+
+/* ================================================================== */
 /* API                                                                 */
 /* ================================================================== */
 
@@ -662,6 +720,17 @@ function nestFormaReal(items, chapa, opts) {
  * @param {Object} opts   { margen, separacion, maxChapas, formaReal, resolucion }
  */
 export function nest(items, chapa, opts = {}) {
+  const clave = opts.sinCache ? null : claveDeAnidado(items, chapa, opts);
+  if (clave) {
+    const guardado = delCache(clave);
+    if (guardado) return guardado;
+  }
+  const r = nestSinCache(items, chapa, opts);
+  if (clave) alCache(clave, r);
+  return r;
+}
+
+function nestSinCache(items, chapa, opts = {}) {
   /**
    * El área REAL de cada pieza, para medir el aprovechamiento.
    *

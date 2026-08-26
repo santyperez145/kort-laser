@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   rect, circle, slot, polyline, makeShape, shapeArea, shapeCutLength,
   shapeBBox, shapePiercings, pathLength, pathArea, regularPolygon, TAU, rad,
-  makeShapeMulti, partesDe, esMultiParte,
+  makeShapeMulti, partesDe, esMultiParte, firmaShape,
   flattenPath,
   pathBBox,
 } from '../src/core/geometry.js';
@@ -30,7 +30,7 @@ import {
   CARGAS_LABORALES,
 } from '../src/core/costos.js';
 import { calcularPliegue, calcularDesarrollo, matrizRecomendada, validarPlegado, tiempoPlegado } from '../src/core/bending.js';
-import { nest, piezasPorChapa, compararMetodos, rellenoSinCosto } from '../src/core/nesting.js';
+import { nest, piezasPorChapa, compararMetodos, rellenoSinCosto, limpiarCacheNesting } from '../src/core/nesting.js';
 import { rectanguloEnHueco, huecosDe, aprovecharHuecos } from '../src/core/huecos.js';
 import { DEFAULT_GUILLOTINA, esRectangularPelada, puedeGuillotinarse, tiempoGuillotina, espesorMaximoGuillotina } from '../src/core/guillotina.js';
 import { panelDecorativo, MOTIVOS, PATRONES, ligamentoMinimo, tamanioParaGrilla } from '../src/core/decorativo.js';
@@ -1139,6 +1139,74 @@ test('el texto dice cuando la estimación ya daba bien', () => {
   const cal = calibrar(ordenesCon([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]));
   const txt = explicarFactor(factorPara(cal, 'acero-sae1010', 2));
   assert.ok(/igual que la realidad/.test(txt), txt);
+});
+
+/* ================================================================== */
+
+grupo('Cache de anidados');
+
+const itemsCache = (cantidad = 40) => [{
+  id: 'p', nombre: 'Placa', w: 300, h: 200, cantidad,
+  shape: makeShape(rect(0, 0, 300, 200), [circle(150, 100, 15)]),
+}];
+const CHAPA_C = { w: 2440, h: 1220 };
+const OPTS_C = { separacion: 5, margen: 10, formaReal: true };
+
+test('acierta aunque la geometria se reconstruya desde cero', () => {
+  // Es EL caso: el cotizador llama a construir() con cada tecla y devuelve un
+  // objeto nuevo aunque los parametros no hayan cambiado. Comparar por
+  // identidad de objeto no serviria y el cache nunca acertaria.
+  limpiarCacheNesting();
+  const a = nest(itemsCache(), CHAPA_C, OPTS_C);
+  const b = nest(itemsCache(), CHAPA_C, OPTS_C); // items y shapes NUEVOS
+  assert.equal(a, b, 'tiene que devolver el mismo objeto: es un acierto de cache');
+});
+
+test('cambiar la cantidad NO devuelve el anidado viejo', () => {
+  limpiarCacheNesting();
+  const a = nest(itemsCache(40), CHAPA_C, OPTS_C);
+  const b = nest(itemsCache(80), CHAPA_C, OPTS_C);
+  assert.notEqual(a, b);
+  assert.ok(b.cantidadChapas >= a.cantidadChapas, 'el doble de piezas no puede entrar en menos chapas');
+});
+
+test('cambiar una opcion NO devuelve el anidado viejo', () => {
+  limpiarCacheNesting();
+  const a = nest(itemsCache(), CHAPA_C, OPTS_C);
+  const b = nest(itemsCache(), CHAPA_C, { ...OPTS_C, separacion: 20 });
+  assert.notEqual(a, b, 'con 20 mm de separacion el layout es otro');
+});
+
+test('cambiar la chapa NO devuelve el anidado viejo', () => {
+  limpiarCacheNesting();
+  const a = nest(itemsCache(), CHAPA_C, OPTS_C);
+  const b = nest(itemsCache(), { w: 1500, h: 1000 }, OPTS_C);
+  assert.notEqual(a, b);
+});
+
+test('cambiar la geometria NO devuelve el anidado viejo', () => {
+  limpiarCacheNesting();
+  const a = nest(itemsCache(), CHAPA_C, OPTS_C);
+  const otros = [{ ...itemsCache()[0], shape: makeShape(rect(0, 0, 300, 260)) }];
+  const b = nest(otros, CHAPA_C, OPTS_C);
+  assert.notEqual(a, b, 'otra pieza es otro anidado');
+});
+
+test('el cache no cambia el resultado', () => {
+  limpiarCacheNesting();
+  const conCache = nest(itemsCache(), CHAPA_C, OPTS_C);
+  const sinCache = nest(itemsCache(), CHAPA_C, { ...OPTS_C, sinCache: true });
+  assert.equal(conCache.cantidadChapas, sinCache.cantidadChapas);
+  cerca(conCache.aprovechamientoGlobal, sinCache.aprovechamientoGlobal, 1e-9);
+  assert.equal(conCache.piezasColocadas, sinCache.piezasColocadas);
+});
+
+test('la firma distingue geometrias y sobrevive a la reconstruccion', () => {
+  const a = makeShape(rect(0, 0, 300, 200), [circle(150, 100, 15)]);
+  const b = makeShape(rect(0, 0, 300, 200), [circle(150, 100, 15)]);
+  const c = makeShape(rect(0, 0, 300, 200), [circle(150, 100, 16)]);
+  assert.equal(firmaShape(a), firmaShape(b), 'misma geometria, misma firma');
+  assert.notEqual(firmaShape(a), firmaShape(c), 'un agujero de 1 mm mas ya es otra pieza');
 });
 
 /* ================================================================== */
