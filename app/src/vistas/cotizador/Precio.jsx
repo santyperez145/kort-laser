@@ -7,9 +7,11 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Save, FileText, ClipboardList, Download, Grid3x3, Loader2, Calculator, ShoppingCart, Gauge, MessageCircle, Mail, Tags, Archive } from 'lucide-react';
 import { cotizarItem } from '@core/pricing.js';
 import { explicarFactor } from '@core/calibracion.js';
+import { evaluarTrabajo } from '@core/rentabilidad.js';
 import { explicarItem } from '@core/explicacion.js';
 import { listaDeCompra, pedidoEnTexto } from '@core/compras.js';
 
@@ -20,6 +22,7 @@ import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/
 import { Boton } from '@/componentes/ui/boton';
 import { Campo, Entrada, AreaTexto } from '@/componentes/ui/campos';
 import { Barra, Aviso } from '@/componentes/ui/varios';
+import { api } from '@/lib/api';
 import { usarEstado } from '@/lib/estado';
 import { money, num, pct } from '@/lib/formato';
 import { cn } from '@/lib/utils';
@@ -53,9 +56,26 @@ export function Precio() {
   const { doc, item, resuelto, resueltos, coti, r, sel, calculando, actualizarItem, actualizarDoc, guardar } = usarCotizador();
   const config = usarEstado((s) => s.config);
   const ctx = usarEstado((s) => s.ctx);
+  /* Los trabajos ya aprobados son la vara: lo que ESTE taller consigue por
+     hora. Comparte caché con la vista de Presupuestos, así que no es una
+     consulta extra. Si falla, `evaluarTrabajo` cae al piso de estructura. */
+  const { data: presupuestos = [] } = useQuery({
+    queryKey: ['presupuestos'],
+    queryFn: () => api.get('presupuestos'),
+    staleTime: 60_000,
+  });
   const retazos = usarEstado((s) => s.retazos);
   const sim = usarEstado((s) => s.simbolo());
   const res = coti?.resumen;
+  /* Un taller no vende chapa: vende horas de máquina. Comparar dos trabajos
+     por el total del presupuesto premia al que tiene la chapa más cara, que
+     es plata que entra y sale. Lo que decide es cuánto deja cada hora del
+     recurso que no se puede fabricar. */
+  const rinde = useMemo(
+    () => (coti ? evaluarTrabajo(coti, { presupuestos, estructura: coti.estructura }) : null),
+    [coti, presupuestos]
+  );
+
   const textoCalibracion = r?.corte?.calibracion ? explicarFactor(r.corte.calibracion) : null;
 
   /**
@@ -402,6 +422,48 @@ export function Precio() {
                 {money(res.utilidad, sim, 0)} ({pct(res.utilidadPct, 1)})
               </span>
             </p>
+
+            {/* La medida que decide si el trabajo conviene: lo que deja cada
+                hora del recurso escaso. El total engaña — un trabajo grande
+                con mucha chapa puede rendir menos que uno chico. */}
+            {rinde?.utilidadPorHora != null ? (
+              <div
+                className={cn(
+                  'mt-2.5 rounded-lg border px-2.5 py-2 text-[11.5px] leading-relaxed',
+                  rinde.nivel === 'error'
+                    ? 'border-peligro-500/35 bg-peligro-500/10 text-peligro-500 dark:text-peligro-400'
+                    : rinde.nivel === 'aviso'
+                      ? 'border-alerta-500/35 bg-alerta-500/10 text-alerta-500 dark:text-alerta-400'
+                      : rinde.nivel === 'bueno'
+                        ? 'border-chapa-500/35 bg-chapa-500/10 text-chapa-500 dark:text-chapa-300'
+                        : 'border-borde bg-panel-alto text-suave'
+                )}
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-semibold">Deja por hora de máquina</span>
+                  <span className="tabular font-bold">{money(rinde.utilidadPorHora, sim, 0)}/h</span>
+                </div>
+                <div className="mt-0.5 opacity-80 tabular">
+                  {/* Un trabajo de 70 s redondeaba a "0,0 h", que al lado de una
+                      tasa por hora se lee como una división por cero. */}
+                  {fmtTiempo(rinde.horas * 3600)} de máquina
+                  {rinde.vara ? ` · el taller consigue ${money(rinde.vara, sim, 0)}/h` : ''}
+                </div>
+                {rinde.mensaje ? <p className="mt-1.5">{rinde.mensaje}</p> : null}
+                {rinde.precioParaLaVara ? (
+                  <p className="mt-1.5">
+                    Para llegar a esa vara habría que cobrarlo{' '}
+                    <strong className="tabular">{money(rinde.precioParaLaVara, sim, 0)}</strong>.
+                  </p>
+                ) : null}
+                {rinde.materialPct > 55 ? (
+                  <p className="mt-1.5 opacity-80">
+                    Ojo con la caja: {money(rinde.materialAdelantado, sim, 0)} son chapa que hay que
+                    comprar antes de cobrar ({num(rinde.materialPct, 0)} % del precio).
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             <Campo etiqueta="Descuento global" className="mt-4">
               <Entrada

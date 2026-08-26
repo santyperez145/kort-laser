@@ -41,6 +41,7 @@ import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, red
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
 import { evaluarVigencia, materialesQueSeMovieron, impactoMaterialRapido, carteraEnRiesgo } from '../src/core/vigencia.js';
+import { rentabilidad, referenciaDelTaller, pisoDelTaller, evaluarTrabajo, ordenarPorRendimiento } from '../src/core/rentabilidad.js';
 import { detectarLineasComunes, ahorroLineaComun, explicarLineaComun, evaluarLineaComun } from '../src/core/linea-comun.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import {
@@ -1298,6 +1299,121 @@ test('el impacto rapido acompania a la cuenta completa', () => {
   const completo = evaluarVigencia({ presupuesto: p, costoHoy: rapido.costoEstimadoHoy, config: CFG_V });
   cerca(completo.variacionMonto, rapido.delta, 1e-6);
   cerca(completo.utilidadHoy, rapido.utilidadEstimadaHoy, 1e-6);
+});
+
+/* ================================================================== */
+
+grupo('Rentabilidad por hora de maquina');
+
+const coti = (subtotal, costo, horas, material = 0) => ({
+  resumen: { subtotal, costo, utilidad: subtotal - costo, tiempoProduccion: horas * 3600 },
+  items: [{ costos: { material } }],
+});
+const aprobado = (subtotal, costo, horas) => ({
+  estado: 'aprobado',
+  resumen: { subtotal, costo, utilidad: subtotal - costo, tiempoProduccion: horas * 3600 },
+});
+
+test('el trabajo chico y rapido puede ser mejor que el grande', () => {
+  // Es el caso que motiva todo el modulo
+  const grande = rentabilidad(coti(500000, 0, 12));
+  const chico = rentabilidad(coti(80000, 0, 0.5));
+  cerca(grande.utilidadPorHora, 500000 / 12, 1e-6);
+  cerca(chico.utilidadPorHora, 160000, 1e-6);
+  assert.ok(chico.utilidadPorHora > grande.utilidadPorHora * 3,
+    'el chico rinde mucho mas por hora de maquina');
+});
+
+test('mide UTILIDAD por hora, no facturacion por hora', () => {
+  // Mismo trabajo, mismas horas, pero uno con chapa cara que solo pasa de largo
+  const barato = rentabilidad(coti(200000, 100000, 2, 60000));
+  const caro = rentabilidad(coti(400000, 300000, 2, 260000));
+  assert.ok(caro.facturacionPorHora > barato.facturacionPorHora, 'factura mas');
+  cerca(caro.utilidadPorHora, barato.utilidadPorHora, 1e-6, 'pero deja exactamente lo mismo');
+});
+
+test('avisa cuanto material hay que poner antes de cobrar', () => {
+  const r = rentabilidad(coti(400000, 300000, 2, 260000));
+  cerca(r.material, 260000, 1e-6);
+  cerca(r.materialPct, 65, 1e-6);
+});
+
+test('la referencia sale solo de los trabajos APROBADOS', () => {
+  const presus = [
+    aprobado(200000, 100000, 1),   // 100.000/h
+    aprobado(300000, 150000, 1.5), // 100.000/h
+    aprobado(180000, 120000, 1),   //  60.000/h
+    aprobado(240000, 140000, 1),   // 100.000/h
+    // Este no lo tomo el cliente: no dice nada sobre lo que el taller consigue
+    { estado: 'rechazado', resumen: { subtotal: 900000, costo: 100000, utilidad: 800000, tiempoProduccion: 3600 } },
+  ];
+  const ref = referenciaDelTaller(presus);
+  assert.ok(ref.hay);
+  assert.equal(ref.n, 4, 'el rechazado queda afuera');
+  cerca(ref.mediana, 100000, 1e-6);
+});
+
+test('sin suficientes trabajos no inventa una referencia', () => {
+  const ref = referenciaDelTaller([aprobado(200000, 100000, 1), aprobado(300000, 150000, 1.5)]);
+  assert.ok(!ref.hay);
+  assert.equal(ref.n, 2);
+});
+
+test('el piso sale de la estructura, no de una opinion', () => {
+  const piso = pisoDelTaller({ totalMes: 894000, horasProductivas: 100.8 });
+  cerca(piso.porHora, 894000 / 100.8, 1e-6);
+});
+
+test('marca error cuando el trabajo no paga ni los gastos fijos', () => {
+  const estructura = { totalMes: 894000, horasProductivas: 100.8 }; // 8.869/h
+  // 6 horas de maquina que dejan 30.000: 5.000/h, por debajo del piso
+  const e = evaluarTrabajo(coti(230000, 200000, 6), { estructura, presupuestos: [] });
+  assert.equal(e.nivel, 'error');
+  assert.ok(/no las paga/.test(e.mensaje), e.mensaje);
+});
+
+test('compara contra lo que el taller consigue, no contra un numero de manual', () => {
+  const presus = [aprobado(200000,100000,1), aprobado(300000,150000,1.5), aprobado(240000,140000,1), aprobado(220000,120000,1)];
+  const e = evaluarTrabajo(coti(150000, 100000, 1), { presupuestos: presus, estructura: { totalMes: 894000, horasProductivas: 100.8 } });
+  assert.equal(e.origenVara, 'historial');
+  assert.equal(e.nivel, 'aviso', '50.000/h contra ~100.000 habitual');
+  assert.ok(e.precioParaLaVara > 150000, 'y dice a cuanto habria que cobrarlo');
+});
+
+test('dice a cuanto hay que cobrarlo para llegar a la vara', () => {
+  const presus = [aprobado(200000,100000,1), aprobado(200000,100000,1), aprobado(200000,100000,1), aprobado(200000,100000,1)];
+  // vara = 100.000/h. Trabajo de 2 h con costo 100.000 -> 100.000 + 100.000*2
+  const e = evaluarTrabajo(coti(150000, 100000, 2), { presupuestos: presus });
+  cerca(e.vara, 100000, 1e-6);
+  cerca(e.precioParaLaVara, 300000, 1e-6);
+});
+
+test('destaca los trabajos que rinden bastante mas que lo habitual', () => {
+  const presus = [aprobado(200000,100000,1), aprobado(200000,100000,1), aprobado(200000,100000,1), aprobado(200000,100000,1)];
+  const e = evaluarTrabajo(coti(400000, 100000, 1), { presupuestos: presus });
+  assert.equal(e.nivel, 'bueno');
+  assert.ok(/priorizar/.test(e.mensaje), e.mensaje);
+});
+
+test('ordena por lo que deja por hora y no por el total', () => {
+  const grande = aprobado(500000, 0, 12);
+  const chico = aprobado(80000, 0, 0.5);
+  const orden = ordenarPorRendimiento([grande, chico]);
+  assert.equal(orden[0].presupuesto, chico, 'primero el que mas rinde por hora');
+});
+
+test('un trabajo de un minuto tambien se evalua', () => {
+  // Regresion: el umbral estaba en 1 minuto y dejaba sin evaluar justo los
+  // trabajos chicos, que son donde mas importa mirar la tasa por hora.
+  const r = rentabilidad(coti(12000, 4500, 70 / 3600));
+  assert.ok(r.utilidadPorHora != null, 'setenta segundos es un trabajo real');
+  cerca(r.utilidadPorHora, 7500 / (70 / 3600), 1e-6);
+});
+
+test('sin horas de maquina no arriesga un numero', () => {
+  const r = rentabilidad(coti(100000, 50000, 0));
+  assert.equal(r.utilidadPorHora, null);
+  assert.equal(evaluarTrabajo(coti(100000, 50000, 0), {}), null);
 });
 
 /* ================================================================== */

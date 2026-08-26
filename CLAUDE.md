@@ -284,6 +284,37 @@ vacío.
 **"—", no "0 %"**. Un guión dice "no se puede saber"; un cero miente para el
 lado tranquilizador.
 
+## Un taller no vende chapa: vende horas de máquina
+
+`src/core/rentabilidad.js`. La chapa se compra y se revende; lo escaso, lo que
+no se puede fabricar más, son las horas de la fibra y de la plegadora. Ese es
+el cuello de botella, y por lo tanto la única unidad en la que conviene
+comparar dos trabajos.
+
+Mirar el total del presupuesto es la medida equivocada:
+
+    A · $500.000 en 12 h   ->  $41.700 de utilidad por hora
+    B · $ 80.000 en 0,5 h  -> $160.000 por hora
+
+B es cuatro veces mejor negocio aunque parezca el trabajo chico. Un taller que
+toma los A porque "son grandes" termina con la máquina llena y la cuenta vacía.
+
+⚠️ Se mide **utilidad** por hora, no facturación por hora. Facturación premia
+el material caro, que es plata que entra y sale: cortar inoxidable no es mejor
+negocio por el solo hecho de que la chapa salga el triple. Hay un test que fija
+que dos trabajos con la misma utilidad y las mismas horas dan lo mismo aunque
+uno facture el doble.
+
+⚠️ La vara sale del **historial aprobado de este taller**, no de un número de
+manual — y sólo de los aprobados: un presupuesto que el cliente no tomó dice
+lo que se pidió, no lo que el taller consigue. Sin al menos cuatro trabajos no
+se inventa una referencia y se cae al piso de estructura.
+
+El piso de estructura no es opinión: si el taller gasta $894.000 por mes en
+100,8 horas productivas, cada hora tiene que dejar $8.869 sólo para no perder.
+Debajo de eso el trabajo no paga ni la parte de alquiler y sueldos que le toca
+por ocupar la máquina, y el aviso es de error.
+
 ## Trampas conocidas
 
 - **Douglas-Peucker sobre un contorno CERRADO colapsa.** El algoritmo fija el
