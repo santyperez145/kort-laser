@@ -20,11 +20,13 @@ import { requerimientosDeCotizacion } from '@core/reposicion.js';
 import { crearPlanProduccion } from '@core/produccion.js';
 import { Panel, PanelCab, PanelTitulo, PanelCuerpo } from '@/componentes/ui/panel';
 import { Boton } from '@/componentes/ui/boton';
+import { Aviso } from '@/componentes/ui/varios';
 import { Campo, Entrada, Selector, Opcion } from '@/componentes/ui/campos';
 import { InsigniaEstado } from '@/componentes/ui/insignia';
-import { ESTADOS_PRESUPUESTO } from '@/lib/formato';
+import { ESTADOS_PRESUPUESTO, money } from '@/lib/formato';
 
 import { CtxCotizador, docVacio, itemNuevo, usarCotizador } from './cotizador/contexto';
+import { evaluarVigencia, materialesQueSeMovieron } from '@core/vigencia.js';
 import { ListaItems } from './cotizador/ListaItems';
 import { Lienzo } from './cotizador/Lienzo';
 import { Parametros } from './cotizador/Parametros';
@@ -137,6 +139,7 @@ function usarQuieto(valor, ms = 220) {
 export function VistaCotizador() {
   const [params, setParams] = useSearchParams();
   const materiales = usarEstado((s) => s.materiales);
+  const config = usarEstado((s) => s.config);
   const clientes = usarEstado((s) => s.clientes);
   const ctx = usarEstado((s) => s.ctx);
   const recargarClientes = usarEstado((s) => s.recargarClientes);
@@ -254,6 +257,34 @@ export function VistaCotizador() {
     return { resueltos, coti };
   }, [docDiferido, materiales, ctx]);
 
+  /* ---------------- ¿Sigue en pie este precio? ----------------
+     Sólo tiene sentido en un presupuesto YA guardado: se compara el costo con
+     el que se cotizó contra el de hoy. Con la inflación argentina, honrar uno
+     de tres semanas puede ser vender por debajo del costo, y hasta ahora nada
+     lo avisaba: `validezDias` se imprimía en el PDF y nadie la miraba. */
+  const vigencia = useMemo(() => {
+    if (!doc.id || !doc.resumen?.costo || !coti?.resumen?.costo) return null;
+    const v = evaluarVigencia({
+      presupuesto: doc,
+      costoHoy: coti.resumen.costo,
+      config,
+    });
+    if (!v) return null;
+    /* Se comparan los items GUARDADOS contra el catálogo de hoy. Usar la
+       cotización recién hecha compararía el precio actual contra sí mismo y
+       no mostraría nunca ninguna variación. */
+    const guardados = (doc.items || [])
+      .filter((it) => it._precioKgMaterial > 0)
+      .map((it) => ({
+        material: {
+          id: it.materialId,
+          nombre: materiales.find((m) => m.id === it.materialId)?.nombre || it.materialId,
+          precioKg: it._precioKgMaterial,
+        },
+      }));
+    return { ...v, materiales: materialesQueSeMovieron(guardados, materiales) };
+  }, [doc, coti, config, materiales]);
+
   /* ---------------- Mutadores ---------------- */
   const actualizarDoc = useCallback((cambios) => {
     setDoc((d) => ({ ...d, ...(typeof cambios === 'function' ? cambios(d) : cambios) }));
@@ -342,6 +373,10 @@ export function VistaCotizador() {
           _largoCorte: r?.geometria?.largoCorteMM ?? 0,
           _precioNeto: r?.precio?.neto ?? 0,
           _costoTotal: r?.costos?.total ?? 0,
+          // El $/kg con el que se cotizó. Sin esto, al reabrir el presupuesto
+          // se puede saber que el costo cambió pero no CUÁL material se movió,
+          // y quien cotiza tiene que salir a buscarlo a mano.
+          _precioKgMaterial: r?.material?.precioKg ?? null,
         };
       }),
     };
@@ -380,13 +415,13 @@ export function VistaCotizador() {
 
   const valor = useMemo(
     () => ({
-      doc, setDoc, sel, setSel, coti, resueltos, calculando,
+      doc, setDoc, sel, setSel, coti, resueltos, calculando, vigencia,
       actualizarDoc, actualizarItem, agregarItem, quitarItem, duplicarItem, guardar,
       item: doc.items[sel],
       resuelto: resueltos[sel],
       r: coti?.items[sel],
     }),
-    [doc, sel, coti, resueltos, calculando, actualizarDoc, actualizarItem, agregarItem, quitarItem, duplicarItem, guardar]
+    [doc, sel, coti, resueltos, calculando, vigencia, actualizarDoc, actualizarItem, agregarItem, quitarItem, duplicarItem, guardar]
   );
 
   if (!materiales.length || cargando) {
@@ -397,6 +432,38 @@ export function VistaCotizador() {
     <CtxCotizador.Provider value={valor}>
       <div className="space-y-4">
         <Cabecera onNuevo={nuevoPresupuesto} />
+
+        {/* Un presupuesto guardado no sabe solo que quedó viejo. Con la
+            inflación argentina, honrar uno de tres semanas puede ser vender
+            por debajo del costo. */}
+        {vigencia && vigencia.nivel !== 'ok' ? (
+          <Aviso nivel={vigencia.nivel}>
+            <strong>{vigencia.mensaje}</strong>
+            {vigencia.dias != null ? (
+              <span className="opacity-80">
+                {' '}Se cotizó hace {vigencia.dias} día{vigencia.dias === 1 ? '' : 's'}.
+              </span>
+            ) : null}
+            {vigencia.materiales?.length ? (
+              <ul className="mt-1.5 space-y-0.5 opacity-90">
+                {vigencia.materiales.map((m) => (
+                  <li key={m.id} className="tabular">
+                    · {m.nombre}: {m.pct > 0 ? '+' : ''}{m.pct.toFixed(1)} % ({m.entonces} → {m.hoy} /kg)
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {vigencia.precioParaMismoMargen ? (
+              <p className="mt-1.5">
+                Para conservar el margen original habría que cotizarlo en{' '}
+                <strong className="tabular">
+                  {money(vigencia.precioParaMismoMargen, config?.comercial?.simbolo || '$', 0)}
+                </strong>{' '}
+                (se prometió {money(vigencia.precioPrometido, config?.comercial?.simbolo || '$', 0)}).
+              </p>
+            ) : null}
+          </Aviso>
+        ) : null}
 
         {/* Con la navegación arriba y no al costado entran las tres columnas
             desde 1280 px, que es la notebook del taller. Antes hacían falta

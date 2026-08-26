@@ -40,6 +40,7 @@ import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos } from '../src/core/salud.js';
+import { evaluarVigencia, materialesQueSeMovieron } from '../src/core/vigencia.js';
 import { detectarLineasComunes, ahorroLineaComun, explicarLineaComun, evaluarLineaComun } from '../src/core/linea-comun.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
 import {
@@ -1139,6 +1140,89 @@ test('el texto dice cuando la estimación ya daba bien', () => {
   const cal = calibrar(ordenesCon([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]));
   const txt = explicarFactor(factorPara(cal, 'acero-sae1010', 2));
   assert.ok(/igual que la realidad/.test(txt), txt);
+});
+
+/* ================================================================== */
+
+grupo('Vigencia del presupuesto');
+
+const CFG_V = { comercial: { validezDias: 10, margen: 45, simbolo: '$' } };
+const presu = (costo, subtotal, diasAtras) => ({
+  fecha: new Date(Date.now() - diasAtras * 24 * 3600 * 1000).toISOString(),
+  resumen: { costo, subtotal, total: subtotal * 1.21 },
+});
+
+test('sin movimiento de costos no alarma, aunque este vencido', () => {
+  // Vencer una venta por tramite cuando el precio sigue siendo bueno es
+  // perder plata, no cuidarla.
+  const v = evaluarVigencia({ presupuesto: presu(100000, 180000, 40), costoHoy: 100200, config: CFG_V });
+  assert.equal(v.nivel, 'ok');
+  assert.ok(v.vencidoPorCalendario, 'por calendario si esta vencido');
+  assert.ok(/casi no se movieron/.test(v.mensaje), v.mensaje);
+});
+
+test('avisa cuando el costo subio de verdad, aunque este dentro de la validez', () => {
+  // Cinco dias, pero la chapa salto: el riesgo es real igual
+  const v = evaluarVigencia({ presupuesto: presu(100000, 180000, 5), costoHoy: 118000, config: CFG_V });
+  assert.ok(!v.vencidoPorCalendario, 'todavia esta en fecha');
+  assert.equal(v.nivel, 'aviso');
+  cerca(v.variacionPct, 18, 1e-6);
+});
+
+test('marca error cuando el precio prometido ya no cubre el costo', () => {
+  const v = evaluarVigencia({ presupuesto: presu(100000, 180000, 20), costoHoy: 195000, config: CFG_V });
+  assert.equal(v.nivel, 'error');
+  assert.ok(v.utilidadHoy < 0);
+  assert.ok(/por debajo del costo/.test(v.mensaje), v.mensaje);
+});
+
+test('el impacto se informa en pesos, no solo en porcentaje', () => {
+  const v = evaluarVigencia({ presupuesto: presu(100000, 180000, 20), costoHoy: 195000, config: CFG_V });
+  // 180.000 prometidos - 195.000 de costo = 15.000 de bolsillo
+  cerca(v.utilidadHoy, -15000, 1e-6);
+  assert.ok(/15000/.test(v.mensaje.replace(/\./g, '')), v.mensaje);
+});
+
+test('dice a cuanto habria que cotizarlo hoy para el mismo margen', () => {
+  const v = evaluarVigencia({ presupuesto: presu(100000, 200000, 12), costoHoy: 120000, config: CFG_V });
+  // margen original: (200.000-100.000)/200.000 = 50 %  ->  120.000/0,5 = 240.000
+  cerca(v.precioParaMismoMargen, 240000, 1e-6);
+});
+
+test('el margen de hoy se mide contra el precio YA prometido', () => {
+  // El precio no se puede mover: lo unico que cambia es cuanto queda
+  const v = evaluarVigencia({ presupuesto: presu(100000, 200000, 3), costoHoy: 140000, config: CFG_V });
+  cerca(v.margenEntonces, 50, 1e-6);
+  cerca(v.margenHoy, 30, 1e-6);
+});
+
+test('sin datos suficientes devuelve null en vez de inventar', () => {
+  assert.equal(evaluarVigencia({ presupuesto: { resumen: {} }, costoHoy: 1000, config: CFG_V }), null);
+  assert.equal(evaluarVigencia({ presupuesto: presu(100000, 180000, 5), costoHoy: 0, config: CFG_V }), null);
+});
+
+test('explica cual material se movio y cuanto', () => {
+  const items = [
+    { material: { id: 'acero-sae1010', nombre: 'Acero', precioKg: 3800 } },
+    { material: { id: 'inox-304', nombre: 'Inoxidable', precioKg: 8900 } },
+  ];
+  const hoy = [
+    { id: 'acero-sae1010', precioKg: 4200 },
+    { id: 'inox-304', precioKg: 8950 }, // 0,56 %: ruido, no se informa
+  ];
+  const m = materialesQueSeMovieron(items, hoy);
+  assert.equal(m.length, 1, 'solo el que se movio de verdad');
+  assert.equal(m[0].id, 'acero-sae1010');
+  cerca(m[0].pct, (4200 - 3800) / 3800 * 100, 1e-6);
+});
+
+test('no repite un material usado en varios items', () => {
+  const items = [
+    { material: { id: 'acero-sae1010', nombre: 'Acero', precioKg: 3800 } },
+    { material: { id: 'acero-sae1010', nombre: 'Acero', precioKg: 3800 } },
+  ];
+  const m = materialesQueSeMovieron(items, [{ id: 'acero-sae1010', precioKg: 4400 }]);
+  assert.equal(m.length, 1);
 });
 
 /* ================================================================== */
