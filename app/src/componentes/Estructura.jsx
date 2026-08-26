@@ -35,7 +35,7 @@ export const RUTAS = [
   { a: '/maquina-en-vivo', txt: 'Máquina en vivo', Icono: RadioTower, nuevo: true },
   { a: '/maquinas', txt: 'Máquinas', Icono: Cpu, nuevo: true },
   { a: '/costos', txt: 'Costos', Icono: Wallet, nuevo: true },
-  { a: '/config', txt: 'Configuración', Icono: Settings },
+  { a: '/config', txt: 'Configuración', Icono: Settings, nuevo: true },
 ];
 
 const PRINCIPALES = new Set(['/', '/cotizador', '/ordenes', '/plegado', '/maquina-en-vivo', '/stock']);

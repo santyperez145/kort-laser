@@ -73,7 +73,7 @@ app/          Interfaz nueva: React + Vite + Tailwind + Radix.
                                             sección de perfil plegado
               app/src/vistas/           Panel, Cotizador, Plegado,
                                         Tarifario y Materiales
-web/          Interfaz anterior: vanilla JS. Siguen vivas 2 vistas.
+web/          Interfaz anterior: vanilla JS. Sigue viva 1 vista (Clientes).
 web-dist/     Salida de `npm run build`. No se commitea.
 server.js     Express + Helmet + Zod.
 tests/run.js  Suite completa. Un solo archivo, sin runner externo.
@@ -116,9 +116,7 @@ escribe. En un mostrador, esperar una vuelta de red por cada tecla se nota.
 
 ### Las dos interfaces conviven, y el iframe no es pereza
 
-Panel, Cotizador, Plegado, Tarifario, Producción, Materiales, Presupuestos, Costos y
-Máquinas están rehechos en React. Las otras dos vistas (Clientes y
-Configuración) siguen siendo las de antes y se muestran **dentro de un
+Todo está rehecho en React salvo **Clientes**, que sigue siendo la de antes y se muestran **dentro de un
 iframe** apuntando a `/legacy`.
 
 El aislamiento es el punto: `web/css/app.css` estiliza `button`, `input`,

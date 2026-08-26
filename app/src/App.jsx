@@ -17,6 +17,7 @@ import { Legacy } from '@/vistas/Legacy';
 import { VistaPresupuestos } from '@/vistas/Presupuestos';
 import { VistaCostos } from '@/vistas/Costos';
 import { VistaMaquinas } from '@/vistas/Maquinas';
+import { VistaConfiguracion } from '@/vistas/Configuracion';
 import { Aviso } from '@/componentes/ui/varios';
 import { Boton } from '@/componentes/ui/boton';
 
@@ -53,7 +54,7 @@ function Contenido() {
         <Route path="/maquina-en-vivo" element={<VistaMaquinaEnVivo />} />
         <Route path="/maquinas" element={<VistaMaquinas />} />
         <Route path="/costos" element={<VistaCostos />} />
-        <Route path="/config" element={<Legacy ruta="config" />} />
+        <Route path="/config" element={<VistaConfiguracion />} />
         <Route path="*" element={<VistaPanel />} />
       </Routes>
     </Estructura>
