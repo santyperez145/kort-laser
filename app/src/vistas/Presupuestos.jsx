@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Plus, Search, Pencil, Factory, Trash2, TriangleAlert, OctagonAlert, ArrowUpRight,
+  Wrench,
 } from 'lucide-react';
 
 import { api } from '@/lib/api';
@@ -32,11 +33,14 @@ import { Entrada, Selector, Opcion } from '@/componentes/ui/campos';
 import { Insignia } from '@/componentes/ui/insignia';
 import { Dialogo, ContenidoDialogo } from '@/componentes/ui/varios';
 import { cn } from '@/lib/utils';
-import { impactoMaterialRapido, carteraEnRiesgo } from '@core/vigencia.js';
+import { impactoMaterialRapido, carteraEnRiesgo, baseDeCosto, baseQueSeMovio } from '@core/vigencia.js';
+import { calcularCostoHoraMaquina, calcularEstructura } from '@core/costos.js';
 import { rentabilidad } from '@core/rentabilidad.js';
 
 export function VistaPresupuestos() {
   const materiales = usarEstado((s) => s.materiales);
+  const config = usarEstado((s) => s.config);
+  const maquinas = usarEstado((s) => s.maquinas);
   const sim = usarEstado((s) => s.simbolo());
   const navegar = useNavigate();
   const qc = useQueryClient();
@@ -54,6 +58,18 @@ export function VistaPresupuestos() {
 
   const recargar = () => qc.invalidateQueries({ queryKey: ['presupuestos'] });
 
+  /* La base con la que se cotizaría HOY. Se calcula una vez para toda la
+     lista: es la misma para todos los presupuestos. */
+  const baseHoy = useMemo(() => {
+    const laser = (maquinas || []).find((m) => m.tipo === 'laser');
+    if (!laser || !config) return null;
+    const estructura = calcularEstructura(config.estructura);
+    return baseDeCosto({
+      config, maquinas,
+      costoHoraLaser: calcularCostoHoraMaquina(laser, estructura).total,
+    });
+  }, [config, maquinas]);
+
   /* Riesgo por presupuesto. El catálogo de materiales es el mismo para todos,
      así que se recorre una vez por lista y no una vez por fila. */
   const conRiesgo = useMemo(
@@ -61,20 +77,26 @@ export function VistaPresupuestos() {
       presupuestos.map((p) => ({
         p,
         riesgo: impactoMaterialRapido(p, materiales),
+        // Distinto del riesgo de material: acá el acero puede no haberse
+        // movido y el precio estar viejo igual.
+        base: baseHoy ? baseQueSeMovio(p._baseCosto, baseHoy) : null,
         // `rentabilidad` espera la forma de una cotización; el presupuesto
         // guardado ya trae el resumen con lo que hace falta.
         rinde: rentabilidad({ resumen: p.resumen, items: [] }),
       })),
-    [presupuestos, materiales]
+    [presupuestos, materiales, baseHoy]
   );
 
-  const cartera = useMemo(() => carteraEnRiesgo(presupuestos, materiales), [presupuestos, materiales]);
+  const cartera = useMemo(
+    () => carteraEnRiesgo(presupuestos, materiales, baseHoy ? { baseHoy } : {}),
+    [presupuestos, materiales, baseHoy]
+  );
 
   const lista = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    return conRiesgo.filter(({ p, riesgo }) => {
+    return conRiesgo.filter(({ p, riesgo, base }) => {
       if (estado !== '__todos__' && (p.estado || 'borrador') !== estado) return false;
-      if (soloRiesgo && !(riesgo?.enRojo || Math.abs(riesgo?.pct ?? 0) >= 1.5)) return false;
+      if (soloRiesgo && !(riesgo?.enRojo || Math.abs(riesgo?.pct ?? 0) >= 1.5 || base)) return false;
       if (!q) return true;
       return (
         String(p.numero || '').toLowerCase().includes(q) ||
@@ -153,7 +175,9 @@ export function VistaPresupuestos() {
         </Boton>
       </div>
 
-      {cartera.enRojo > 0 || cartera.subieron > 0 ? (
+      {/* `baseCambiada` entra en la condición porque puede ser lo único que
+          pasó: ningún material se movió y aun así el precio quedó viejo. */}
+      {cartera.enRojo > 0 || cartera.subieron > 0 || cartera.baseCambiada > 0 ? (
         <Panel className={cn('border-l-4', cartera.enRojo ? 'border-l-peligro-500' : 'border-l-alerta-500')}>
           <PanelCuerpo className="flex flex-wrap items-center gap-x-6 gap-y-3">
             {cartera.enRojo > 0 ? (
@@ -179,6 +203,22 @@ export function VistaPresupuestos() {
                     {cartera.subieron} con el costo más alto que cuando se cotizó
                   </div>
                   <div className="text-[11.5px] text-suave">Todavía dejan ganancia, pero menos</div>
+                </div>
+              </div>
+            ) : null}
+
+            {cartera.baseCambiada > 0 ? (
+              <div className="flex items-start gap-2">
+                <Wrench className="mt-0.5 size-4 shrink-0 text-alerta-500" />
+                <div>
+                  <div className="text-[13px] font-semibold">
+                    {cartera.baseCambiada} se cotizó{cartera.baseCambiada === 1 ? '' : 'saron'} con
+                    otra base de cálculo
+                  </div>
+                  <div className="text-[11.5px] text-suave">
+                    Cambió el setup, el aprovechamiento, el margen o el costo por hora. Abrilos para
+                    ver el precio de hoy.
+                  </div>
                 </div>
               </div>
             ) : null}

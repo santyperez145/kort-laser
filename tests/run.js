@@ -40,7 +40,7 @@ import { leerDXF } from '../src/core/dxf-read.js';
 import { cotizarItem, cotizarPresupuesto, planificarNesting, DEFAULT_CONFIG, redondear, descuentoPorCantidad } from '../src/core/pricing.js';
 import { construir, PIEZAS, paramsPorDefecto, getPieza } from '../src/core/library.js';
 import { revisarDatos, SETUP_PROGRAMA_REF, CARGA_CHAPA_REF, APROVECHAMIENTO_REF } from '../src/core/salud.js';
-import { evaluarVigencia, materialesQueSeMovieron, impactoMaterialRapido, carteraEnRiesgo } from '../src/core/vigencia.js';
+import { evaluarVigencia, materialesQueSeMovieron, impactoMaterialRapido, carteraEnRiesgo, baseDeCosto, baseQueSeMovio } from '../src/core/vigencia.js';
 import { rentabilidad, referenciaDelTaller, pisoDelTaller, evaluarTrabajo, ordenarPorRendimiento } from '../src/core/rentabilidad.js';
 import { detectarLineasComunes, ahorroLineaComun, explicarLineaComun, evaluarLineaComun } from '../src/core/linea-comun.js';
 import { costoConsumiblesHora, estadoConsumiblesPorHoras, revisarConsumiblesHora, CONSUMIBLES_LASER } from '../src/core/consumibles.js';
@@ -1285,6 +1285,67 @@ test('la cartera solo cuenta los presupuestos vivos', () => {
   assert.equal(c.enRojo, 1);
   assert.equal(c.subieron, 1);
   assert.ok(c.montoEnRiesgo > 0);
+});
+
+test('la base de costo detecta lo que el precio del material no ve', () => {
+  /* El caso exacto que motivó esto: se corrigió el setup del programa de 0 a
+     180 s y la pieza única subió 75 %. Ningún material se movió un peso, así
+     que sin esto la cartera decía que estaba todo bien mientras cada
+     presupuesto abierto quedaba por debajo del costo. */
+  const entonces = { setup: 0, carga: 60, aprovechamiento: 0.9, margen: 150, costoHora: 25512 };
+  const hoy = { setup: 180, carga: 60, aprovechamiento: 0.78, margen: 150, costoHora: 25512 };
+  const c = baseQueSeMovio(entonces, hoy);
+  assert.equal(c.length, 2, 'el setup y el aprovechamiento; el margen y la carga no');
+  assert.deepEqual(c.map((x) => x.campo).sort(), ['aprovechamiento', 'setup']);
+});
+
+test('la base igual no reporta nada', () => {
+  const b = { setup: 180, carga: 60, aprovechamiento: 0.78, margen: 150, costoHora: 25512 };
+  assert.equal(baseQueSeMovio(b, { ...b }), null);
+});
+
+test('un peso de diferencia en el costo hora no es un cambio de base', () => {
+  /* `costoHora` se redondea al peso, así que sin tolerancia cualquier
+     recálculo dispararía el aviso. Un aviso que salta siempre enseña a
+     ignorar los que importan. */
+  const b = { setup: 180, carga: 60, aprovechamiento: 0.78, margen: 150, costoHora: 25512 };
+  assert.equal(baseQueSeMovio(b, { ...b, costoHora: 25513 }), null, 'ruido de redondeo');
+  assert.ok(baseQueSeMovio(b, { ...b, costoHora: 28000 }), 'un 10 % sí es un cambio real');
+});
+
+test('sin base guardada no se inventa un veredicto', () => {
+  // Los presupuestos anteriores a la estampa no tienen `_baseCosto`. Decir
+  // que "no cambió" sería afirmar algo que no se puede saber.
+  const hoy = { setup: 180, carga: 60, aprovechamiento: 0.78, margen: 150, costoHora: 25512 };
+  assert.equal(baseQueSeMovio(undefined, hoy), null);
+  assert.equal(baseQueSeMovio(hoy, undefined), null);
+});
+
+test('la cartera cuenta la base cambiada aparte del material', () => {
+  const base = { setup: 0, carga: 60, aprovechamiento: 0.9, margen: 150, costoHora: 25512 };
+  const baseHoy = { ...base, setup: 180 };
+  const item = [{ materialId: 'acero-sae1010', _pesoTotal: 20, _precioKgMaterial: 3800 }];
+  const presus = [
+    { estado: 'enviado',  resumen: { costo: 100000, subtotal: 180000 }, items: item, _baseCosto: base },
+    { estado: 'borrador', resumen: { costo: 100000, subtotal: 180000 }, items: item, _baseCosto: baseHoy },
+    { estado: 'borrador', resumen: { costo: 100000, subtotal: 180000 }, items: item }, // sin estampa
+  ];
+  // El material NO se movió: sin la base, esto daría todo en verde.
+  const c = carteraEnRiesgo(presus, [{ id: 'acero-sae1010', precioKg: 3800 }], { baseHoy });
+  assert.equal(c.vivos, 3);
+  assert.equal(c.enRojo, 0, 'el acero no se movió');
+  assert.equal(c.subieron, 0);
+  assert.equal(c.baseCambiada, 1, 'sólo el que se cotizó con el setup viejo');
+});
+
+test('sin baseHoy la cartera se comporta como antes', () => {
+  // Quien no pase la base de hoy no puede empezar a recibir un conteo nuevo.
+  const item = [{ materialId: 'acero-sae1010', _pesoTotal: 20, _precioKgMaterial: 3800 }];
+  const c = carteraEnRiesgo(
+    [{ estado: 'borrador', resumen: { costo: 100000, subtotal: 180000 }, items: item, _baseCosto: { setup: 0 } }],
+    [{ id: 'acero-sae1010', precioKg: 3800 }]
+  );
+  assert.equal(c.baseCambiada, 0);
 });
 
 test('el impacto rapido acompania a la cuenta completa', () => {

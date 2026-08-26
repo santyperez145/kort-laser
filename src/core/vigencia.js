@@ -150,6 +150,74 @@ export function materialesQueSeMovieron(itemsCotizados = [], materialesHoy = [])
   return [...vistos.values()].sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
 }
 
+/* ------------------------------------------------------------------ */
+/* La base de costo                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `impactoMaterialRapido` mira el precio del material y nada más. Alcanzaba
+ * mientras lo único que se movía fuera el acero — que con la inflación es lo
+ * que más se mueve— pero deja afuera algo igual de caro: los parámetros con
+ * los que el motor calcula.
+ *
+ * El día que se corrigió el setup del programa de 0 a 180 s, la pieza única
+ * pasó de $4.000 a $7.000 (+75 %). Ningún precio de material cambió, así que
+ * la cartera habría seguido diciendo que estaba todo bien mientras cada
+ * presupuesto abierto quedaba por debajo del costo. Honrar uno es regalar la
+ * diferencia.
+ *
+ * Por eso al guardar se estampa la base con la que se cotizó, igual que se
+ * estampa `_precioKgMaterial` por ítem. Son los cinco números que mueven el
+ * precio sin tocar la geometría ni el material.
+ *
+ * ⚠️ Esto detecta que la base cambió; **no** estima en cuánto. Calcular el
+ * impacto exacto pide rehacer el nesting y volver a cotizar, que es
+ * justamente lo que hace el Cotizador al abrir el presupuesto. Inventar acá
+ * un número aproximado sería peor que no darlo: se lee como si fuera el
+ * precio nuevo.
+ */
+export function baseDeCosto(ctx = {}) {
+  const cfg = ctx.config || {};
+  const com = cfg.comercial || {};
+  const laser = (ctx.maquinas || []).find((m) => m.tipo === 'laser');
+  if (!laser && !Object.keys(com).length) return null;
+  return {
+    setup: nz(laser?.tiempoSetupPrograma),
+    carga: nz(laser?.tiempoCargaChapa),
+    aprovechamiento: nz(com.aprovechamientoObjetivo),
+    margen: nz(com.margen),
+    // El costo por hora resume estructura, consumibles, energía y operario en
+    // un solo número: si cambia cualquiera de ésos, cambia éste.
+    costoHora: Math.round(nz(ctx.costoHoraLaser)),
+  };
+}
+
+/** Qué campos de la base se movieron entre lo guardado y lo de hoy. */
+export function baseQueSeMovio(entonces, hoy) {
+  if (!entonces || !hoy) return null;
+  const NOMBRES = {
+    setup: 'Setup del programa',
+    carga: 'Carga de chapa',
+    aprovechamiento: 'Aprovechamiento objetivo',
+    margen: 'Margen',
+    costoHora: 'Costo por hora del láser',
+  };
+  const cambios = [];
+  for (const k of Object.keys(NOMBRES)) {
+    const a = nz(entonces[k]);
+    const b = nz(hoy[k]);
+    /* Se compara con tolerancia relativa: el costo por hora se redondea al
+       peso y una diferencia de un peso sobre veinticinco mil no es un cambio
+       de base, es ruido de redondeo. Un aviso que salta por eso enseña a
+       ignorarlo. */
+    const escala = Math.max(Math.abs(a), Math.abs(b), 1e-9);
+    if (Math.abs(b - a) / escala > 0.001) {
+      cambios.push({ campo: k, nombre: NOMBRES[k], entonces: a, hoy: b });
+    }
+  }
+  return cambios.length ? cambios : null;
+}
+
 /**
  * Impacto del movimiento de materiales, sin recotizar.
  *
@@ -233,8 +301,15 @@ export function carteraEnRiesgo(presupuestos = [], materialesHoy = [], opts = {}
   let subieron = 0;
   let montoEnRiesgo = 0;
   let sinDato = 0;
+  let baseCambiada = 0;
 
   for (const p of vivos) {
+    /* Dos preguntas distintas sobre el mismo presupuesto, y se cuentan por
+       separado a propósito: el material puede no haberse movido un peso
+       mientras la base de cálculo cambió entera. Fue exactamente lo que pasó
+       al corregir el setup del programa. */
+    if (opts.baseHoy && baseQueSeMovio(p?._baseCosto, opts.baseHoy)) baseCambiada++;
+
     const i = impactoMaterialRapido(p, materialesHoy);
     if (!i) { sinDato++; continue; }
     if (i.enRojo) {
@@ -245,5 +320,5 @@ export function carteraEnRiesgo(presupuestos = [], materialesHoy = [], opts = {}
     }
   }
 
-  return { vivos: vivos.length, enRojo, subieron, montoEnRiesgo, sinDato };
+  return { vivos: vivos.length, enRojo, subieron, montoEnRiesgo, sinDato, baseCambiada };
 }

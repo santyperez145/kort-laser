@@ -26,7 +26,23 @@ import { InsigniaEstado } from '@/componentes/ui/insignia';
 import { ESTADOS_PRESUPUESTO, money } from '@/lib/formato';
 
 import { CtxCotizador, docVacio, itemNuevo, usarCotizador } from './cotizador/contexto';
-import { evaluarVigencia, materialesQueSeMovieron } from '@core/vigencia.js';
+import { evaluarVigencia, materialesQueSeMovieron, baseDeCosto, baseQueSeMovio } from '@core/vigencia.js';
+
+/* Cada campo de la base se lee en su unidad. Un `0.78` y un `180` puestos uno
+   al lado del otro no dicen nada; "78 %" y "3m 0s" sí, y lo que se busca al
+   leer este aviso es justamente reconocer el número. */
+function baseComoTexto(campo, v) {
+  if (campo === 'aprovechamiento') return `${Math.round(v * 100)} %`;
+  if (campo === 'margen') return `${v} %`;
+  if (campo === 'costoHora') return `$ ${Math.round(v).toLocaleString('es-AR')}/h`;
+  // setup y carga, en segundos
+  if (v >= 60) {
+    const m = Math.floor(v / 60);
+    const seg = Math.round(v % 60);
+    return seg ? `${m}m ${seg}s` : `${m}m`;
+  }
+  return `${Math.round(v)}s`;
+}
 import { ListaItems } from './cotizador/ListaItems';
 import { Lienzo } from './cotizador/Lienzo';
 import { Parametros } from './cotizador/Parametros';
@@ -140,6 +156,7 @@ export function VistaCotizador() {
   const [params, setParams] = useSearchParams();
   const materiales = usarEstado((s) => s.materiales);
   const config = usarEstado((s) => s.config);
+  const maquinas = usarEstado((s) => s.maquinas);
   const clientes = usarEstado((s) => s.clientes);
   const ctx = usarEstado((s) => s.ctx);
   const recargarClientes = usarEstado((s) => s.recargarClientes);
@@ -309,8 +326,21 @@ export function VistaCotizador() {
           precioKg: it._precioKgMaterial,
         },
       }));
-    return { ...v, materiales: materialesQueSeMovieron(guardados, materiales) };
-  }, [doc, coti, config, materiales]);
+    /* Y qué parámetro de cálculo se movió, que es una causa distinta del
+       precio del material y hasta ahora no se veía por ningún lado. El costo
+       de hoy ya está en `coti` —se recotizó con la config actual— así que el
+       número de arriba es correcto; esto explica POR QUÉ cambió cuando ningún
+       material se movió. */
+    const baseHoy = baseDeCosto({
+      config, maquinas,
+      costoHoraLaser: coti.items?.[0]?.costos?.costoHoraLaser,
+    });
+    return {
+      ...v,
+      materiales: materialesQueSeMovieron(guardados, materiales),
+      base: baseQueSeMovio(doc._baseCosto, baseHoy),
+    };
+  }, [doc, coti, config, maquinas, materiales]);
 
   /* ---------------- Mutadores ---------------- */
   const actualizarDoc = useCallback((cambios) => {
@@ -380,6 +410,19 @@ export function VistaCotizador() {
     const cuerpo = {
       ...doc,
       resumen: definitiva.resumen,
+      /* Los parámetros con los que se calculó este precio, igual que
+         `_precioKgMaterial` guarda el $/kg por ítem.
+
+         Sin esto, un cambio en el setup, el aprovechamiento, el margen o el
+         costo por hora es invisible para la cartera: los precios de material
+         no se movieron, así que Presupuestos dice que está todo bien mientras
+         cada presupuesto abierto quedó por debajo del costo. Pasó el día que
+         se corrigió el setup de 0 a 180 s y la pieza única subió 75 %. */
+      _baseCosto: baseDeCosto({
+        config: contexto.config,
+        maquinas: contexto.maquinas,
+        costoHoraLaser: definitiva.items?.[0]?.costos?.costoHoraLaser,
+      }),
       requerimientosChapa: requerimientosDeCotizacion(definitiva),
       // Es una fotografía del programa vendido. Producción no debe recalcular
       // el nesting con precios, chapas o algoritmos que cambien más adelante.
@@ -463,8 +506,12 @@ export function VistaCotizador() {
         {/* Un presupuesto guardado no sabe solo que quedó viejo. Con la
             inflación argentina, honrar uno de tres semanas puede ser vender
             por debajo del costo. */}
-        {vigencia && vigencia.nivel !== 'ok' ? (
-          <Aviso nivel={vigencia.nivel}>
+        {/* La condición incluye `vigencia.base` a propósito. Si ningún material
+            se movió, `nivel` es 'ok' y este bloque no se mostraba — que es
+            exactamente el caso peligroso: la base de cálculo cambió y el aviso
+            no aparecía por ningún lado. */}
+        {vigencia && (vigencia.nivel !== 'ok' || vigencia.base) ? (
+          <Aviso nivel={vigencia.nivel !== 'ok' ? vigencia.nivel : 'aviso'}>
             <strong>{vigencia.mensaje}</strong>
             {vigencia.dias != null ? (
               <span className="opacity-80">
@@ -479,6 +526,22 @@ export function VistaCotizador() {
                   </li>
                 ))}
               </ul>
+            ) : null}
+            {vigencia.base ? (
+              <div className="mt-1.5">
+                <strong>Cambió la base con la que se calculó este precio.</strong>
+                <ul className="mt-0.5 space-y-0.5 opacity-90">
+                  {vigencia.base.map((c) => (
+                    <li key={c.campo} className="tabular">
+                      · {c.nombre}: {baseComoTexto(c.campo, c.entonces)} → {baseComoTexto(c.campo, c.hoy)}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 opacity-80">
+                  El precio de arriba ya está recalculado con lo de hoy: es el que hay que
+                  sostener.
+                </p>
+              </div>
             ) : null}
             {vigencia.precioParaMismoMargen ? (
               <p className="mt-1.5">
