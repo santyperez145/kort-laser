@@ -33,6 +33,7 @@ import { Insignia } from '@/componentes/ui/insignia';
 import { Dialogo, ContenidoDialogo } from '@/componentes/ui/varios';
 import { cn } from '@/lib/utils';
 import { impactoMaterialRapido, carteraEnRiesgo } from '@core/vigencia.js';
+import { rentabilidad } from '@core/rentabilidad.js';
 
 export function VistaPresupuestos() {
   const materiales = usarEstado((s) => s.materiales);
@@ -43,6 +44,7 @@ export function VistaPresupuestos() {
   const [busca, setBusca] = useState('');
   const [estado, setEstado] = useState('__todos__');
   const [soloRiesgo, setSoloRiesgo] = useState(false);
+  const [orden, setOrden] = useState('fecha');
   const [aBorrar, setABorrar] = useState(null);
 
   const { data: presupuestos = [], isLoading } = useQuery({
@@ -54,12 +56,17 @@ export function VistaPresupuestos() {
 
   /* Riesgo por presupuesto. El catálogo de materiales es el mismo para todos,
      así que se recorre una vez por lista y no una vez por fila. */
-  const conRiesgo = useMemo(() => {
-    const ordenados = [...presupuestos].sort((a, b) =>
-      String(b.creado || b.fecha || '').localeCompare(String(a.creado || a.fecha || ''))
-    );
-    return ordenados.map((p) => ({ p, riesgo: impactoMaterialRapido(p, materiales) }));
-  }, [presupuestos, materiales]);
+  const conRiesgo = useMemo(
+    () =>
+      presupuestos.map((p) => ({
+        p,
+        riesgo: impactoMaterialRapido(p, materiales),
+        // `rentabilidad` espera la forma de una cotización; el presupuesto
+        // guardado ya trae el resumen con lo que hace falta.
+        rinde: rentabilidad({ resumen: p.resumen, items: [] }),
+      })),
+    [presupuestos, materiales]
+  );
 
   const cartera = useMemo(() => carteraEnRiesgo(presupuestos, materiales), [presupuestos, materiales]);
 
@@ -76,6 +83,22 @@ export function VistaPresupuestos() {
       );
     });
   }, [conRiesgo, busca, estado, soloRiesgo]);
+
+  /* Por fecha se ve qué pasó; por rendimiento se ve qué empujar. La segunda
+     sólo importa cuando hay más trabajo que máquina, que es justo el momento
+     en que ordenar por fecha no sirve para nada. */
+  const listaOrdenada = useMemo(() => {
+    const l = [...lista];
+    if (orden === 'rendimiento') {
+      return l.sort((a, b) => (b.rinde?.utilidadPorHora ?? -1) - (a.rinde?.utilidadPorHora ?? -1));
+    }
+    if (orden === 'total') {
+      return l.sort((a, b) => (b.p.resumen?.total ?? 0) - (a.p.resumen?.total ?? 0));
+    }
+    return l.sort((a, b) =>
+      String(b.p.creado || b.p.fecha || '').localeCompare(String(a.p.creado || a.p.fecha || ''))
+    );
+  }, [lista, orden]);
 
   const abrir = (p) => navegar(`/cotizador?id=${p.id}`);
 
@@ -189,6 +212,13 @@ export function VistaPresupuestos() {
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
+          <Selector valor={orden} alCambiar={setOrden} className="h-8 w-[190px]">
+            <Opcion valor="fecha">Más recientes primero</Opcion>
+            <Opcion valor="rendimiento" detalle="lo que deja cada hora de máquina">
+              Los que más rinden
+            </Opcion>
+            <Opcion valor="total">Los de mayor total</Opcion>
+          </Selector>
           <Selector valor={estado} alCambiar={setEstado} className="h-8 w-[168px]">
             <Opcion valor="__todos__">Todos los estados</Opcion>
             {Object.entries(ESTADOS_PRESUPUESTO).map(([k, v]) => (
@@ -219,13 +249,13 @@ export function VistaPresupuestos() {
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-borde">
-                    {['N°', 'Cliente', 'Fecha', 'Ítems', 'Piezas', 'Peso', 'Total', 'Cambio', 'Estado', ''].map(
+                    {['N°', 'Cliente', 'Fecha', 'Ítems', 'Piezas', 'Peso', 'Total', '$/h máquina', 'Cambio', 'Estado', ''].map(
                       (t, i) => (
                         <th
                           key={t + i}
                           className={cn(
                             'whitespace-nowrap px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-tenue',
-                            [3, 4, 5, 6].includes(i) ? 'text-right' : 'text-left'
+                            [3, 4, 5, 6, 7].includes(i) ? 'text-right' : 'text-left'
                           )}
                         >
                           {t}
@@ -235,7 +265,7 @@ export function VistaPresupuestos() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lista.map(({ p, riesgo }) => {
+                  {listaOrdenada.map(({ p, riesgo, rinde }) => {
                     const r = p.resumen || {};
                     return (
                       <tr
@@ -268,6 +298,22 @@ export function VistaPresupuestos() {
                         </td>
                         <td className="tabular whitespace-nowrap px-3 py-2 text-right font-semibold">
                           {money(r.total, sim, 0)}
+                        </td>
+                        <td
+                          className="tabular whitespace-nowrap px-3 py-2 text-right"
+                          title={
+                            rinde?.utilidadPorHora != null
+                              ? `${money(rinde.utilidad, sim, 0)} de utilidad en ${num(rinde.horas, 2)} h de máquina`
+                              : 'Sin tiempo de producción guardado'
+                          }
+                        >
+                          {rinde?.utilidadPorHora != null ? (
+                            <span className={cn(orden === 'rendimiento' && 'font-semibold')}>
+                              {money(rinde.utilidadPorHora, sim, 0)}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-tenue">—</span>
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2">
                           <CeldaCambio riesgo={riesgo} sim={sim} />
