@@ -59,6 +59,7 @@ import {
 } from '../src/core/retazos.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden, plazoParaTrabajo, explicarPlazo } from '../src/core/agenda.js';
+import { diametroPunto, sangria, revisarCabezal, fichaOptica } from '../src/core/optica.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
 import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
@@ -4018,6 +4019,99 @@ test('el tarifario no inventa espesores que la máquina no corta', () => {
 
 /* ================================================================== */
 /* ================================================================== */
+grupo('Cadena óptica: fuente y cabezal');
+
+test('el punto focal es la ampliación de la fibra, no una estimación', () => {
+  /* Óptica geométrica pura: el cabezal proyecta la punta de la fibra sobre la
+     chapa. 50 µm con colimador 100 y foco 150 dan 75 µm. */
+  cerca(diametroPunto({ nucleoFibraUM: 50, colimadorMM: 100, focoMM: 150 }), 75, 1e-9);
+  cerca(diametroPunto({ nucleoFibraUM: 100, colimadorMM: 100, focoMM: 125 }), 125, 1e-9);
+  // Más foco, punto más grande: corta más grueso y pierde detalle fino.
+  const corto = diametroPunto({ nucleoFibraUM: 50, colimadorMM: 100, focoMM: 125 });
+  const largo = diametroPunto({ nucleoFibraUM: 50, colimadorMM: 100, focoMM: 200 });
+  assert.ok(largo > corto);
+});
+
+test('sin los tres datos no se inventa un punto focal', () => {
+  assert.equal(diametroPunto({ nucleoFibraUM: 50, colimadorMM: 100 }), null);
+  assert.equal(diametroPunto({}), null);
+  assert.equal(diametroPunto({ nucleoFibraUM: 0, colimadorMM: 100, focoMM: 150 }), null);
+});
+
+test('la sangría medida le gana siempre a la estimada', () => {
+  /* La regla del proyecto: un número que alguien midió vale más que uno que
+     el sistema dedujo, y hay que poder distinguirlos en pantalla. */
+  const optica = { nucleoFibraUM: 50, colimadorMM: 100, focoMM: 150 };
+  const est = sangria({ optica }, 3, 'N2');
+  assert.equal(est.origen, 'estimada');
+  const med = sangria({ optica: { ...optica, sangriaMedida: 0.18 } }, 3, 'N2');
+  assert.equal(med.origen, 'medida');
+  assert.equal(med.mm, 0.18);
+});
+
+test('sin óptica cargada la sangría dice que no sabe', () => {
+  const r = sangria({}, 3, 'N2');
+  assert.equal(r.mm, null);
+  assert.equal(r.origen, 'sin datos');
+});
+
+test('la sangría nunca es menor que el punto focal y crece con el espesor', () => {
+  const optica = { nucleoFibraUM: 50, colimadorMM: 100, focoMM: 150 }; // 75 µm
+  const fino = sangria({ optica }, 1, 'N2').mm;
+  const grueso = sangria({ optica }, 10, 'N2').mm;
+  assert.ok(fino >= 0.075, 'el punto es el piso físico');
+  assert.ok(grueso > fino);
+  // El oxígeno ensancha más: la reacción quema fuera del punto.
+  assert.ok(sangria({ optica }, 6, 'O2').mm > sangria({ optica }, 6, 'N2').mm);
+});
+
+test('avisa cuando el proceso pide más presión que la del cabezal', () => {
+  const maq = { optica: { presionMaxBar: 15 } };
+  const mats = [{
+    nombre: 'Inox 304', activo: true,
+    procesos: { N2: { maxEspesor: 6, presion: { 1: 12, 3: 15, 6: 18 } } },
+  }];
+  const r = revisarCabezal(maq, mats);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].campo, 'presionMaxBar');
+  assert.ok(/6 mm pide 18 bar/.test(r[0].msg));
+});
+
+test('NO avisa por un espesor que el propio proceso ya rechaza', () => {
+  // Pedir presión para 10 mm cuando el material corta hasta 6 sería un aviso
+  // falso, y un aviso falso enseña a ignorar los verdaderos.
+  const maq = { optica: { presionMaxBar: 15 } };
+  const mats = [{
+    nombre: 'Inox 304', activo: true,
+    procesos: { N2: { maxEspesor: 3, presion: { 1: 12, 3: 15, 10: 25 } } },
+  }];
+  assert.equal(revisarCabezal(maq, mats).length, 0);
+});
+
+test('avisa cuando la boquilla que hace falta no entra en el cabezal', () => {
+  const maq = { optica: { boquillaMaxMM: 2 } };
+  const mats = [{
+    nombre: 'Acero', activo: true,
+    procesos: { O2: { maxEspesor: 20, boquilla: { 1: 1, 10: 2, 20: 3 } } },
+  }];
+  const r = revisarCabezal(maq, mats);
+  assert.equal(r[0].campo, 'boquillaMaxMM');
+  assert.ok(/hasta 2/.test(r[0].msg));
+});
+
+test('sin límites de cabezal cargados no se revisa nada', () => {
+  // No se supone un cabezal genérico: no saber es distinto de estar bien.
+  const mats = [{ nombre: 'x', procesos: { N2: { presion: { 1: 99 } } } }];
+  assert.equal(revisarCabezal({}, mats).length, 0);
+  assert.equal(revisarCabezal({ optica: {} }, mats).length, 0);
+});
+
+test('el material dado de baja no genera avisos de cabezal', () => {
+  const maq = { optica: { presionMaxBar: 10 } };
+  const mats = [{ nombre: 'viejo', activo: false, procesos: { N2: { presion: { 1: 20 } } } }];
+  assert.equal(revisarCabezal(maq, mats).length, 0);
+});
+
 grupo('Agenda de producción');
 
 test('la capacidad diaria sale de horas abiertas por ocupación productiva', () => {

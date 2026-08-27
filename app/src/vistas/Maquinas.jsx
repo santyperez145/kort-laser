@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import { calcularEstructura, calcularCostoHoraMaquina } from '@core/costos.js';
 import { revisarDatos } from '@core/salud.js';
 import { factorPara, explicarFactor } from '@core/calibracion.js';
+import { fichaOptica, sangria, revisarCabezal } from '@core/optica.js';
 
 /* Los campos técnicos alimentan el simulador de recorrido: la aceleración y la
    tolerancia de esquina son la razón de que una pieza con muchos agujeros
@@ -54,6 +55,26 @@ const TECNICOS = {
     { k: 'factorPeso', txt: 'Segundos extra por kg de pieza' },
   ],
 };
+
+/* La cadena óptica. Hasta acá la máquina era `potenciaKW` y nada más: con 3 kW
+   se elige la fila de la tabla de velocidades, pero dos equipos de 3 kW con
+   ópticas distintas cortan distinto. De estos tres números sale el punto
+   focal, y del punto focal salen la sangría y el detalle mínimo.
+
+   Los límites del cabezal no son decorativos: si un proceso pide más presión
+   o una boquilla más grande de la que entra, esa combinación no se puede
+   cortar en calidad y hoy se cotizaría igual. */
+/* Coma decimal, como el resto de la aplicación. */
+const coma = (v) => (v == null ? '' : String(v).replace('.', ','));
+
+const OPTICA_NUM = [
+  { k: 'nucleoFibraUM', txt: 'Núcleo de la fibra', u: 'µm' },
+  { k: 'colimadorMM', txt: 'Colimador', u: 'mm' },
+  { k: 'focoMM', txt: 'Lente de foco', u: 'mm' },
+  { k: 'presionMaxBar', txt: 'Presión máxima del cabezal', u: 'bar' },
+  { k: 'boquillaMaxMM', txt: 'Boquilla máxima', u: 'mm' },
+  { k: 'sangriaMedida', txt: 'Sangría medida (0 = estimar)', u: 'mm' },
+];
 
 const COSTOS = [
   { k: 'valorEquipo', txt: 'Valor del equipo', ancho: true },
@@ -104,6 +125,9 @@ export function VistaMaquinas() {
   const setCosto = (i, k, v) =>
     setBorrador((b) => b.map((m, j) => (j === i ? { ...m, costo: { ...m.costo, [k]: v } } : m)));
 
+  const setOptica = (i, k, v) =>
+    setBorrador((b) => b.map((m, j) => (j === i ? { ...m, optica: { ...m.optica, [k]: v } } : m)));
+
   const guardar = async () => {
     setGuardando(true);
     try {
@@ -153,6 +177,8 @@ export function VistaMaquinas() {
             avisos={revision?.hallazgos.filter((h) => h.donde?.includes(m.nombre || m.id)) || []}
             set={set}
             setCosto={setCosto}
+            setOptica={setOptica}
+            materiales={materiales}
             maquinasGuardadas={guardadas}
           />
         ))}
@@ -173,7 +199,7 @@ export function VistaMaquinas() {
   );
 }
 
-function TarjetaMaquina({ m, i, sim, estructura, calibracion, avisos, set, setCosto, maquinasGuardadas }) {
+function TarjetaMaquina({ m, i, sim, estructura, calibracion, avisos, set, setCosto, setOptica, materiales, maquinasGuardadas }) {
   const c = useMemo(() => calcularCostoHoraMaquina(m, estructura), [m, estructura]);
   const esLaser = m.tipo === 'laser';
 
@@ -183,6 +209,13 @@ function TarjetaMaquina({ m, i, sim, estructura, calibracion, avisos, set, setCo
   const factor = useMemo(
     () => (esLaser && calibracion?.activa ? factorPara(calibracion, null, 2) : null),
     [esLaser, calibracion]
+  );
+
+  /* Se revisa contra el catálogo entero, no contra una lista escrita a mano:
+     si mañana se agrega un material, el chequeo lo cubre solo. */
+  const avisosCabezal = useMemo(
+    () => (esLaser ? revisarCabezal(m, materiales) : []),
+    [esLaser, m, materiales]
   );
 
   const partes = [
@@ -267,6 +300,64 @@ function TarjetaMaquina({ m, i, sim, estructura, calibracion, avisos, set, setCo
               </>
             ) : null}
           </div>
+
+          {esLaser ? (
+            <div className="mt-4">
+              <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-tenue">
+                Fuente y cabezal
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Campo etiqueta="Fuente (marca y modelo)">
+                  <Entrada
+                    value={m.optica?.fuente || ''}
+                    placeholder="Max Photonics MSFC-3000C"
+                    onChange={(e) => setOptica(i, 'fuente', e.target.value)}
+                  />
+                </Campo>
+                <Campo etiqueta="Cabezal (marca y modelo)">
+                  <Entrada
+                    value={m.optica?.cabezal || ''}
+                    placeholder="Empower"
+                    onChange={(e) => setOptica(i, 'cabezal', e.target.value)}
+                  />
+                </Campo>
+                {OPTICA_NUM.map((f) => (
+                  <Campo key={f.k} etiqueta={f.txt}>
+                    <Entrada
+                      type="number" step="any" unidad={f.u}
+                      value={m.optica?.[f.k] ?? 0}
+                      onChange={(e) => setOptica(i, f.k, parseFloat(e.target.value) || 0)}
+                    />
+                  </Campo>
+                ))}
+              </div>
+
+              {/* El punto focal se calcula, no se carga: es óptica geométrica.
+                  Mostrarlo acá es la forma de que se note si un dato quedó mal
+                  tipeado — un punto de 500 µm salta a la vista. */}
+              {fichaOptica(m).puntoUM ? (
+                <p className="mt-2 text-[11px] text-suave">
+                  Punto focal <strong className="tabular">{coma(fichaOptica(m).puntoUM)} µm</strong>{' '}
+                  (ampliación {coma(fichaOptica(m).ampliacion)}×). Sangría estimada en 3 mm con N₂:{' '}
+                  <strong className="tabular">{coma(sangria(m, 3, 'N2').mm)} mm</strong>
+                  {sangria(m, 3, 'N2').origen === 'medida' ? ' (medida)' : ' (estimada — medila cortando un cuadrado de 100 mm)'}.
+                </p>
+              ) : (
+                <p className="mt-2 text-[11px] text-tenue">
+                  Con el núcleo de la fibra, el colimador y el foco se calcula el punto focal.
+                  Los tres están en la hoja de datos de la fuente y en el manual del cabezal.
+                </p>
+              )}
+
+              {avisosCabezal.length ? (
+                <div className="mt-2 space-y-1.5">
+                  {avisosCabezal.map((a, k) => (
+                    <Aviso key={k} nivel={a.nivel}>{a.msg}</Aviso>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {factor ? (
             <Aviso nivel="info" className="mt-3">
