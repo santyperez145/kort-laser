@@ -54,3 +54,8 @@ desktop.ini
 .idea/
 
 .vercel
+
+# Configuracion del puente a la maquina: lleva la IP del equipo del taller
+# y, si se usa, el token de telemetria. Se genera con:
+#   npm run puente-maquina -- --ejemplo > puente-maquina.json
+puente-maquina.json

@@ -62,7 +62,8 @@ import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden, plaz
 import { diametroPunto, sangria, revisarCabezal, fichaOptica } from '../src/core/optica.js';
 import { planificarMicroUniones, aplicarMicroUniones, anchoMicroUnion } from '../src/core/micro-uniones.js';
 import { planReposicion, requerimientosDeCotizacion } from '../src/core/reposicion.js';
-import { normalizarMuestra, resumirTelemetria, serieTelemetria } from '../src/core/telemetria.js';
+import { normalizarMuestra, resumirTelemetria, serieTelemetria, recorridoCabezal } from '../src/core/telemetria.js';
+import { decodificar, anchoDe, armarMuestra } from '../scripts/puente-maquina.js';
 import { crearPlanProduccion, aplicarEventoTaller, resumenTaller, retazoSeguroDePrograma } from '../src/core/produccion.js';
 import { aplicarEventoCalidad, evaluarMedicion, resumenCalidad } from '../src/core/calidad.js';
 import { auditarFabricabilidad } from '../src/core/fabricabilidad.js';
@@ -4548,7 +4549,168 @@ test('la reposición cubre órdenes abiertas más seguridad y descuenta stock li
 });
 
 /* ================================================================== */
+grupo('Puente Modbus');
+
+test('decodifica los tipos con su escala', () => {
+  const b = Buffer.from([0x00, 0x64, 0xff, 0x9c]); // 100 y -100 en int16
+  cerca(decodificar(b, 0, { tipo: 'uint16' }), 100, 1e-9);
+  cerca(decodificar(b, 1, { tipo: 'int16' }), -100, 1e-9);
+  // Escala: el equipo manda décimas de grado.
+  cerca(decodificar(b, 0, { tipo: 'int16', escala: 0.1 }), 10, 1e-9);
+});
+
+test('el orden de palabras de 32 bits cambia el número por completo', () => {
+  /* ⚠️ El orden NO está en el estándar Modbus y cada fabricante elige. Un
+     valor mal decodificado se ve perfectamente creíble —un contador de horas
+     en millones— por eso es lo primero que hay que revisar cuando un número
+     no cierra. */
+  const b = Buffer.from([0x00, 0x01, 0x86, 0xa0]); // 100000 con palabra mayor primero
+  cerca(decodificar(b, 0, { tipo: 'uint32' }), 100000, 1e-9);
+  const invertido = decodificar(b, 0, { tipo: 'uint32', palabras: 'menor-primero' });
+  assert.notEqual(invertido, 100000);
+  cerca(invertido, 0x86a00001, 1e-9);
+});
+
+test('un campo de 32 bits ocupa dos registros', () => {
+  assert.equal(anchoDe({ tipo: 'uint16' }), 1);
+  assert.equal(anchoDe({}), 1, 'uint16 es el default');
+  assert.equal(anchoDe({ tipo: 'int32' }), 2);
+  assert.equal(anchoDe({ tipo: 'float32' }), 2);
+});
+
+test('un registro sin configurar queda en null, nunca en cero', () => {
+  /* La misma regla que en el contrato: 0 mm es el cero de máquina y 0 W es el
+     láser apagado. Publicar cero por un registro que no se leyó dibujaría una
+     máquina que no existe. */
+  const m = armarMuestra({ 'posicion.x': 1200, 'laser.potenciaW': 2400 }, { maquinaId: 'laser-3kw' });
+  assert.equal(m.posicion.x, 1200);
+  assert.equal(m.posicion.y, null, 'no configurado, no cero');
+  assert.equal(m.laser.horasEmitiendo, null);
+  assert.equal(m.fuente, 'modbus');
+});
+
+test('sin ningún registro de un bloque, el bloque entero va null', () => {
+  // Tener posición no implica tener fuente: son dos equipos y dos buses.
+  const m = armarMuestra({ 'posicion.x': 0, 'posicion.y': 0 }, {});
+  assert.deepEqual(m.posicion, { x: 0, y: 0, z: null });
+  assert.equal(m.laser, null);
+});
+
+test('sin registro de estado se deduce de la potencia óptica', () => {
+  assert.equal(armarMuestra({ 'laser.potenciaW': 2400 }, {}).estado, 'produciendo');
+  assert.equal(armarMuestra({ 'laser.potenciaW': 0 }, {}).estado, 'inactiva');
+  // Y sin potencia tampoco se afirma que está produciendo.
+  assert.equal(armarMuestra({}, {}).estado, 'inactiva');
+});
+
+test('el estado leído del equipo le gana a la deducción', () => {
+  const m = armarMuestra({ _estado: 'alarma', 'laser.potenciaW': 2400 }, {});
+  assert.equal(m.estado, 'alarma');
+});
+
+test('el puente no implementa ninguna función de escritura Modbus', () => {
+  /* Garantía estructural y no una promesa en un comentario: si alguien agrega
+     un código de escritura, este test lo frena. Escribir un registro de una
+     fuente láser desde un tablero de sólo lectura no puede pasar por
+     accidente. */
+  const fuente = fs.readFileSync(new URL('../scripts/puente-maquina.js', import.meta.url), 'utf8');
+  for (const prohibido of [/writeSingleCoil/i, /writeRegister/i, /forceCoil/i, /fn\s*=\s*(5|6|15|16)/]) {
+    assert.ok(!prohibido.test(fuente), `el puente no debe contener ${prohibido}`);
+  }
+  // Y el mapa de funciones sólo tiene lectura.
+  const mapa = fuente.match(/const FUNCION = \{[^}]*\}/)[0];
+  assert.ok(/holding: 3/.test(mapa) && /input: 4/.test(mapa));
+  assert.ok(!/[:\s](5|6|15|16),/.test(mapa), 'ningún código de escritura en el mapa');
+});
+
 grupo('Telemetría de máquina');
+
+test('un dato que falta queda en null y NUNCA en cero', () => {
+  /* La diferencia decide qué se ve en la pantalla del taller: 0 W es "el
+     láser está apagado" y 0 mm es "el cabezal está en el cero de máquina".
+     Convertir "no lo sé" en 0 haría que una pasarela mal conectada dibuje el
+     cabezal en la esquina y la fuente apagada, indistinguible de la verdad. */
+  const m = normalizarMuestra({ estado: 'produciendo' });
+  assert.equal(m.posicion, null);
+  assert.equal(m.laser, null);
+
+  const conCero = normalizarMuestra({ estado: 'produciendo', posicion: { x: 0, y: 0, z: 0 }, laser: { potenciaW: 0 } });
+  assert.deepEqual(conCero.posicion, { x: 0, y: 0, z: 0 }, 'el cero de máquina es una posición real');
+  assert.equal(conCero.laser.potenciaW, 0, 'y 0 W es una lectura real');
+});
+
+test('la posición no se recorta contra el área de trabajo', () => {
+  /* Recortarla escondería el síntoma de un adaptador leyendo el registro
+     equivocado, que es justo lo que hay que ver. */
+  const m = normalizarMuestra({ estado: 'produciendo', posicion: { x: 99999, y: -500 } });
+  assert.equal(m.posicion.x, 99999);
+  assert.equal(m.posicion.y, -500);
+});
+
+test('posición y fuente son bloques independientes', () => {
+  // El CNC y la fuente son dos equipos y dos buses: puede haber uno y no el otro.
+  const soloPos = normalizarMuestra({ estado: 'produciendo', posicion: { x: 10, y: 20 } });
+  assert.ok(soloPos.posicion);
+  assert.equal(soloPos.laser, null);
+  const soloLaser = normalizarMuestra({ estado: 'produciendo', laser: { tempC: 28.5 } });
+  assert.equal(soloLaser.posicion, null);
+  assert.equal(soloLaser.laser.tempC, 28.5);
+  assert.equal(soloLaser.laser.potenciaW, null);
+});
+
+test('el recorrido se corta en el hueco y no inventa una línea recta', () => {
+  /* Si la pasarela estuvo caída, unir el último punto con el siguiente
+     dibujaría un movimiento que la máquina nunca hizo. Un trazo inventado en
+     una pantalla de taller es peor que un hueco. */
+  const p = (seg, x, y) => ({
+    estado: 'produciendo', fecha: new Date(Date.UTC(2026, 7, 22, 12, 0, seg)).toISOString(),
+    posicion: { x, y },
+  });
+  const tramos = recorridoCabezal([p(0,0,0), p(1,10,0), p(2,20,0), p(300,500,500), p(301,510,500), p(302,520,500)]);
+  assert.equal(tramos.length, 2, 'cinco minutos de silencio parten el trazo');
+  assert.equal(tramos[0].length, 3);
+  assert.equal(tramos[1].length, 3);
+});
+
+test('el recorrido distingue corte de posicionamiento', () => {
+  const p = (seg, x, w) => ({
+    estado: 'produciendo', fecha: new Date(Date.UTC(2026, 7, 22, 12, 0, seg)).toISOString(),
+    posicion: { x, y: 0 }, laser: { potenciaW: w },
+  });
+  const t = recorridoCabezal([p(0,0,0), p(1,10,2400), p(2,20,2400)])[0];
+  assert.equal(t[0].emitiendo, false, '0 W es rápido, no corte');
+  assert.equal(t[1].emitiendo, true);
+});
+
+test('sin potencia de fuente el corte se deduce del estado del CNC', () => {
+  // Es lo único que se sabe cuando sólo está conectado el control numérico.
+  const p = (seg, estado) => ({
+    estado, fecha: new Date(Date.UTC(2026, 7, 22, 12, 0, seg)).toISOString(),
+    posicion: { x: seg * 10, y: 0 },
+  });
+  const t = recorridoCabezal([p(0,'preparando'), p(1,'produciendo'), p(2,'produciendo')])[0];
+  assert.equal(t[0].emitiendo, false);
+  assert.equal(t[1].emitiendo, true);
+});
+
+test('una muestra sin coordenadas corta el trazo en vez de saltearse', () => {
+  const p = (seg, pos) => ({
+    estado: 'produciendo', fecha: new Date(Date.UTC(2026, 7, 22, 12, 0, seg)).toISOString(),
+    ...(pos ? { posicion: pos } : {}),
+  });
+  const tramos = recorridoCabezal([
+    p(0,{x:0,y:0}), p(1,{x:10,y:0}), p(2,null), p(3,{x:900,y:900}), p(4,{x:910,y:900}),
+  ]);
+  assert.equal(tramos.length, 2, 'saltear el hueco uniría dos puntos lejanos');
+});
+
+test('un tramo de un solo punto no es un recorrido', () => {
+  const uno = recorridoCabezal([{ estado: 'produciendo', posicion: { x: 1, y: 1 } }]);
+  assert.equal(uno.length, 0);
+  assert.equal(recorridoCabezal([]).length, 0);
+  assert.equal(recorridoCabezal(null).length, 0);
+});
+
 
 test('normaliza el dialecto del adaptador sin aceptar valores imposibles', () => {
   const m = normalizarMuestra({

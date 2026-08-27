@@ -10,6 +10,8 @@ import { Panel, PanelCab, PanelTitulo, PanelCuerpo, Vacio } from '@/componentes/
 import { Aviso } from '@/componentes/ui/varios';
 import { Insignia } from '@/componentes/ui/insignia';
 import { num, pct } from '@/lib/formato';
+import { RecorridoCabezal } from '@/componentes/visores/RecorridoCabezal';
+import { usarEstado } from '@/lib/estado';
 
 const ESTADO = {
   apagada: ['Apagada', 'gris'], inactiva: ['En espera', 'gris'], preparando: ['Preparando', 'amarillo'],
@@ -32,6 +34,10 @@ function Kpi({ titulo, valor, detalle, Icono }) {
 }
 
 export function VistaMaquinaEnVivo() {
+  // El área de trabajo sale de la máquina cargada, no de un número fijo: el
+  // marco del visor tiene que ser el de ESTA máquina o los puntos "fuera del
+  // área" serían mentira.
+  const laser = usarEstado((s) => s.laser());
   const { data, isError, error } = useQuery({
     queryKey: ['telemetria', 'laser-3kw'],
     queryFn: () => api.get('telemetria?maquina=laser-3kw&horas=8'),
@@ -61,6 +67,33 @@ export function VistaMaquinaEnVivo() {
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <Panel className="xl:col-span-2">
+        <PanelCab
+          acciones={u?.laser ? (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-suave">
+              {u.laser.potenciaW != null ? (
+                <span className="tabular"><strong className="text-tinta">{num(u.laser.potenciaW, 0)} W</strong> ópticos</span>
+              ) : null}
+              {u.laser.tempC != null ? <span className="tabular">{num(u.laser.tempC, 1)} °C</span> : null}
+              {u.laser.horasEmitiendo != null ? (
+                <span className="tabular">{num(u.laser.horasEmitiendo, 0)} h emitiendo</span>
+              ) : null}
+              {u.laser.alarma ? <span className="font-semibold text-peligro-500">{u.laser.alarma}</span> : null}
+            </div>
+          ) : null}
+        >
+          <Radio className="size-3.5 text-corte-500" />
+          <PanelTitulo>Recorrido del cabezal</PanelTitulo>
+        </PanelCab>
+        <PanelCuerpo>
+          <RecorridoCabezal
+            tramos={data?.recorrido || []}
+            area={laser?.areaTrabajo}
+            ultima={u?.posicion}
+          />
+        </PanelCuerpo>
+      </Panel>
+
       <Panel>
         <PanelCab><Activity className="size-3.5 text-corte-500" /><PanelTitulo>Proceso — últimas 8 horas</PanelTitulo></PanelCab>
         <PanelCuerpo>

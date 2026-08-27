@@ -30,7 +30,7 @@ import {
   normalizarRetazo,
   reservarRetazos,
 } from './src/core/retazos.js';
-import { normalizarMuestra, resumirTelemetria, serieTelemetria } from './src/core/telemetria.js';
+import { normalizarMuestra, resumirTelemetria, serieTelemetria, recorridoCabezal } from './src/core/telemetria.js';
 import { aplicarEventoTaller } from './src/core/produccion.js';
 import { aplicarEventoCalidad } from './src/core/calidad.js';
 
@@ -96,6 +96,22 @@ const esquemaTelemetria = z.object({
   piezasBuenas: z.coerce.number().int().nonnegative().optional(),
   piezasRechazadas: z.coerce.number().int().nonnegative().optional(),
   fuente: z.string().max(60).optional(),
+  /* Posición y fuente van como bloques opcionales: el CNC y la fuente láser
+     son dos equipos distintos y pueden estar conectados uno sí y otro no.
+     `nullable` porque la pasarela informa explícitamente "no lo sé", que es
+     distinto de cero. */
+  posicion: z.object({
+    x: z.coerce.number().finite().nullable().optional(),
+    y: z.coerce.number().finite().nullable().optional(),
+    z: z.coerce.number().finite().nullable().optional(),
+  }).nullable().optional(),
+  laser: z.object({
+    potenciaW: z.coerce.number().finite().nonnegative().nullable().optional(),
+    tempC: z.coerce.number().finite().nullable().optional(),
+    horasEncendida: z.coerce.number().finite().nonnegative().nullable().optional(),
+    horasEmitiendo: z.coerce.number().finite().nonnegative().nullable().optional(),
+    alarma: z.string().max(200).nullable().optional(),
+  }).nullable().optional(),
 });
 
 const esquemaEntero = (def, max) =>
@@ -681,7 +697,12 @@ api.get('/telemetria', (req, res) => {
   res.json({
     maquinaId, desde, muestras: serieTelemetria(muestras),
     resumen: resumirTelemetria(muestras),
-    contrato: 'kort.telemetria.v1',
+    /* Sobre las muestras CRUDAS y no sobre la serie reducida: `serieTelemetria`
+       promedia, y el promedio de dos posiciones es un punto por el que el
+       cabezal nunca pasó. Se acota el recorrido a lo último porque dibujar
+       ocho horas de trazo tapa la pantalla y no se ve nada. */
+    recorrido: recorridoCabezal(muestras.slice(-2000)),
+    contrato: 'kort.telemetria.v2',
   });
 });
 

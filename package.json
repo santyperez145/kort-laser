@@ -10,7 +10,8 @@
     "servir": "vite build && node server.js",
     "dev": "concurrently -n api,web -c blue,magenta \"node server.js\" \"vite\"",
     "test": "node tests/run.js",
-    "simular-maquina": "node scripts/simular-maquina.js"
+    "simular-maquina": "node scripts/simular-maquina.js",
+    "puente-maquina": "node scripts/puente-maquina.js"
   },
   "engines": {
     "node": ">=22.12 <25"

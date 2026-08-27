@@ -10,6 +10,61 @@ const ESTADOS_VALIDOS = new Set(ESTADOS_MAQUINA);
 const n = (v, d = 0) => Number.isFinite(Number(v)) ? Number(v) : d;
 const acotar = (v, min, max) => Math.max(min, Math.min(max, n(v)));
 
+/**
+ * Un número que puede faltar. Devuelve null y NO 0.
+ *
+ * La diferencia importa en todo lo que sigue: 0 W de potencia óptica es una
+ * lectura válida (el láser está apagado) y 0 mm es una posición válida (el
+ * cabezal está en el cero de máquina). Convertir "no lo sé" en 0 haría que
+ * una pasarela mal conectada dibuje el cabezal en la esquina y muestre la
+ * fuente apagada, que es indistinguible de que lo esté de verdad.
+ */
+function opcional(v) {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+}
+
+/**
+ * Posición del cabezal, en mm y en coordenadas de máquina.
+ *
+ * No se acota contra el área de trabajo acá: este módulo no conoce la
+ * máquina, y recortar una lectura fuera de rango escondería justamente el
+ * síntoma de un adaptador que está leyendo el registro equivocado. Se
+ * transporta tal cual y quien la dibuje decide qué hacer con un valor
+ * imposible.
+ */
+function normalizarPosicion(p) {
+  if (!p || typeof p !== 'object') return null;
+  const x = opcional(p.x);
+  const y = opcional(p.y);
+  const z = opcional(p.z);
+  if (x == null && y == null && z == null) return null;
+  return { x, y, z };
+}
+
+/**
+ * Lo que informa la fuente, que es un equipo distinto del control numérico.
+ *
+ * El CNC sabe dónde está el cabezal y qué programa corre; la fuente sabe
+ * cuánta potencia óptica está entregando, a qué temperatura y cuántas horas
+ * lleva emitiendo. Son dos buses distintos y pueden estar uno sí y otro no,
+ * así que van en bloques separados: tener posición no implica tener fuente.
+ *
+ * `horasEmitiendo` es el contador más valioso de todos — es el tiempo real de
+ * arco, contra el que se puede contrastar lo que el motor estima.
+ */
+function normalizarLaser(l) {
+  if (!l || typeof l !== 'object') return null;
+  const out = {
+    potenciaW: opcional(l.potenciaW ?? l.potencia_w),
+    tempC: opcional(l.tempC ?? l.temp_c),
+    horasEncendida: opcional(l.horasEncendida ?? l.horas_encendida),
+    horasEmitiendo: opcional(l.horasEmitiendo ?? l.horas_emitiendo),
+    alarma: l.alarma ? String(l.alarma).trim().slice(0, 200) : null,
+  };
+  return Object.values(out).some((v) => v != null) ? out : null;
+}
+
 export function normalizarMuestra(muestra = {}, ahora = new Date()) {
   const estado = ESTADOS_VALIDOS.has(muestra.estado) ? muestra.estado : 'inactiva';
   const fecha = new Date(muestra.fecha || ahora);
@@ -28,7 +83,58 @@ export function normalizarMuestra(muestra = {}, ahora = new Date()) {
     piezasBuenas: Math.max(0, Math.round(n(muestra.piezasBuenas ?? muestra.piezas_buenas))),
     piezasRechazadas: Math.max(0, Math.round(n(muestra.piezasRechazadas ?? muestra.piezas_rechazadas))),
     fuente: String(muestra.fuente || 'adaptador').trim().slice(0, 60),
+    posicion: normalizarPosicion(muestra.posicion),
+    laser: normalizarLaser(muestra.laser),
   };
+}
+
+/**
+ * El recorrido del cabezal, para dibujarlo.
+ *
+ * Se corta el trazo cuando hay un hueco de tiempo mayor al esperado: si la
+ * pasarela estuvo caída diez minutos, unir el último punto con el siguiente
+ * dibujaría una línea recta que la máquina nunca hizo. Un trazo inventado en
+ * una pantalla de taller es peor que un hueco.
+ *
+ * Cada punto lleva `emitiendo` para poder distinguir corte de posicionamiento:
+ * son las dos cosas que la pantalla tiene que mostrar distinto, porque una es
+ * la que consume chapa y la otra no.
+ */
+export function recorridoCabezal(muestras = [], opciones = {}) {
+  const cortePorHuecoSeg = Math.max(1, n(opciones.cortePorHuecoSeg, 5));
+  const tramos = [];
+  let actual = null;
+  let anterior = null;
+
+  for (const cruda of muestras || []) {
+    const m = normalizarMuestra(cruda);
+    if (!m.posicion || m.posicion.x == null || m.posicion.y == null) {
+      // Sin coordenadas no hay punto; y se corta, porque el próximo punto
+      // válido no es continuación de nada.
+      actual = null;
+      anterior = m;
+      continue;
+    }
+    const t = new Date(m.fecha).getTime();
+    const hueco = anterior ? (t - new Date(anterior.fecha).getTime()) / 1000 : Infinity;
+    if (!actual || hueco > cortePorHuecoSeg) {
+      actual = [];
+      tramos.push(actual);
+    }
+    actual.push({
+      x: m.posicion.x,
+      y: m.posicion.y,
+      z: m.posicion.z,
+      fecha: m.fecha,
+      // Emitiendo = el haz está encendido. Se toma de la potencia de la fuente
+      // si la hay; si no, del estado, que es lo único que sabe el CNC.
+      emitiendo: m.laser?.potenciaW != null ? m.laser.potenciaW > 0 : m.estado === 'produciendo',
+      velocidadMMMin: m.velocidadMMMin,
+    });
+    anterior = m;
+  }
+
+  return tramos.filter((t) => t.length > 1);
 }
 
 /**
@@ -68,6 +174,12 @@ export function resumirTelemetria(muestras = [], ahora = new Date(), opciones = 
   };
 }
 
+/**
+ * Reduce la serie para graficar. ⚠️ Promedia potencia y velocidad, así que
+ * **no sirve para el recorrido**: promediar dos posiciones da un punto por el
+ * que el cabezal nunca pasó. `recorridoCabezal` trabaja sobre las muestras
+ * crudas por eso mismo.
+ */
 export function serieTelemetria(muestras = [], maxPuntos = 240) {
   const lista = (muestras || []).map((m) => normalizarMuestra(m));
   if (lista.length <= maxPuntos) return lista;
