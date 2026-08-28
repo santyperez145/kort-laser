@@ -41,6 +41,7 @@ import { baseQueSeMovio, impactoMaterialRapido, ESTADOS_VIVOS } from './vigencia
 import { agendaProduccion } from './agenda.js';
 import { evaluarTrabajo } from './rentabilidad.js';
 import { revisarCabezal } from './optica.js';
+import { entrenar as entrenarModelo } from './modelo-corte.js';
 import { evidenciaSuficiente } from './aprendizaje.js';
 
 const n = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
@@ -161,6 +162,22 @@ function porLosDatos({ config, maquinas, materiales, historialPrecios }) {
         // Un error envenena los precios más que un aviso.
         extra: h.nivel === 'error' ? 300 : 0,
       }
+    ));
+  }
+
+  /* Auditoría física de las tablas de proceso. No mira si un número está
+     fuera de un rango arbitrario: ajusta el balance de energía del corte a
+     cada curva y comprueba que los parámetros recuperados —cómo cae el
+     acoplamiento con el espesor, cuánta energía entra al metal— sean posibles
+     para ESE metal. Una tabla mal cargada da precios mal en silencio. */
+  const modelo = entrenarModelo(materiales);
+  for (const d of modelo.dudosos) {
+    out.push(sugerencia(
+      'dato',
+      `La tabla de ${d.materialId} con ${d.gas} no cierra con la física del corte`,
+      `${d.fisica.motivo}. Ajustado sobre ${d.puntos} espesores (R² ${d.r2?.toFixed(3)}), ` +
+      'todos los precios de ese material salen de esa curva.',
+      { accion: 'Contrastá esos espesores contra la tabla del fabricante', ruta: '/materiales', extra: 100 }
     ));
   }
 

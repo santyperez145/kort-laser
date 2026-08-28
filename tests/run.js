@@ -59,6 +59,8 @@ import {
 } from '../src/core/retazos.js';
 import { estimarConEncogimiento, pesoDeEvidencia, explicarEncogimiento, evidenciaSuficiente, mediana } from '../src/core/aprendizaje.js';
 import { copiloto, resumenCopiloto } from '../src/core/copiloto.js';
+import { entrenarProceso, ajustarRecta, statsVacios, sumar, ABSORTIVIDAD, correccionVacia, aprenderMedicion, factorCorreccion, velocidadCorregida, envejecerCorreccion } from '../src/core/modelo-corte.js';
+const ln = Math.log;
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden, plazoParaTrabajo, explicarPlazo } from '../src/core/agenda.js';
 import { diametroPunto, sangria, revisarCabezal, fichaOptica } from '../src/core/optica.js';
@@ -1104,6 +1106,126 @@ test('el resumen no repite en el encabezado lo que ya está en la lista', () => 
   const txt = resumenCopiloto(r, null);
   const veces = (txt.match(/estima el tiempo/g) || []).length;
   assert.ok(veces <= 1, `aparece ${veces} veces: ${txt}`);
+});
+
+grupo('Modelo de corte: física y corrección aprendida');
+
+const MAT_ACERO = {
+  id: 'zz-acero', nombre: 'ZZ Acero', familia: 'acero', densidad: 7.85,
+  procesos: { N2: { maxEspesor: 6, speeds: { 1: 22000, 2: 11000, 3: 5500, 4: 2800, 5: 1500, 6: 900 } } },
+};
+
+test('recupera una ley de potencia exacta', () => {
+  /* Si la tabla ES v = A·t^m, el ajuste tiene que devolver ese m. Sin esto no
+     se puede confiar en ningún parámetro que el modelo diga después. */
+  const speeds = {};
+  for (const t of [1, 2, 3, 4, 6, 8]) speeds[t] = 10000 * t ** -1.4;
+  const p = entrenarProceso({ id: 'x', familia: 'acero', densidad: 7.85 }, 'N2', { maxEspesor: 10, speeds });
+  cerca(p.m, -1.4, 1e-9);
+  cerca(p.r2, 1, 1e-9, 'ajuste perfecto sobre datos perfectos');
+});
+
+test('no ajusta con menos de tres puntos', () => {
+  // Dos puntos definen una recta sin residuo: presentarla con error cero sería
+  // afirmar una precisión que no existe.
+  assert.equal(ajustarRecta(sumar(sumar(statsVacios(), 0, 1), 1, 2)), null);
+});
+
+test('ignora las filas por encima del espesor máximo del proceso', () => {
+  const conBasura = {
+    maxEspesor: 6,
+    speeds: { 1: 22000, 2: 11000, 3: 5500, 4: 2800, 6: 900, 20: 5 },
+  };
+  const a = entrenarProceso(MAT_ACERO, 'N2', conBasura);
+  const b = entrenarProceso(MAT_ACERO, 'N2', { ...conBasura, speeds: { 1: 22000, 2: 11000, 3: 5500, 4: 2800, 6: 900 } });
+  cerca(a.m, b.m, 1e-9, 'la fila de 20 mm no entra al ajuste');
+});
+
+test('la banda de plausibilidad depende de la absortividad del metal', () => {
+  /* El cobre refleja ~95 % de un haz de fibra: su acoplamiento es
+     legítimamente diez veces menor que el del acero. Una banda única marcaría
+     como error de carga justamente al material bien cargado. */
+  assert.ok(ABSORTIVIDAD.cobre < ABSORTIVIDAD.acero / 4);
+  const cobre = { id: 'zz-cu', familia: 'cobre', densidad: 8.96,
+    procesos: { N2: { maxEspesor: 3, speeds: { 1: 3000, 1.5: 1800, 2: 1100, 2.5: 700, 3: 450 } } } };
+  const p = entrenarProceso(cobre, 'N2', cobre.procesos.N2);
+  assert.ok(p.fisica.plausible, `cobre con eta ${p.fisica.eta}: ${p.fisica.motivo}`);
+});
+
+test('detecta una tabla que no cierra con la física', () => {
+  // Velocidad casi plana con el espesor: ninguna máquina hace eso.
+  const rara = { maxEspesor: 10, speeds: { 1: 5000, 3: 4800, 6: 4600, 10: 4400 } };
+  const p = entrenarProceso(MAT_ACERO, 'N2', rara);
+  assert.equal(p.fisica.plausible, false);
+  assert.ok(/no corresponde a ningún proceso real/.test(p.fisica.motivo), p.fisica.motivo);
+});
+
+test('la validación cruzada SACA el punto de verdad', () => {
+  /* Éste es el test que hacía falta: `sumar` rechazaba pesos negativos, así
+     que restar un punto no restaba nada y `validar()` medía error de ajuste
+     llamándolo validación. El error real dio 13,7 % contra 11,2 %. */
+  const st = [1, 2, 3, 4].reduce((a, t) => sumar(a, ln(t), ln(1000 / t)), statsVacios());
+  const menos = sumar(st, ln(4), ln(250), -1);
+  assert.ok(menos.n < st.n, `n bajó de ${st.n} a ${menos.n}`);
+  cerca(menos.n, 3, 1e-9);
+});
+
+test('sin mediciones la corrección es exactamente 1', () => {
+  /* La propiedad que hace seguro activar esto: mientras no haya evidencia, el
+     sistema se comporta idéntico a hoy. */
+  const f = factorCorreccion(correccionVacia(), 'zz-acero', 'N2', 3);
+  assert.equal(f.factor, 1);
+  assert.equal(f.n, 0);
+  const v = velocidadCorregida(5500, correccionVacia(), 'zz-acero', 'N2', 3);
+  assert.equal(v.v, 5500);
+});
+
+test('una sola medición mueve poco, varias mueven', () => {
+  let c = correccionVacia();
+  const medir = (esp, real, tabla) => { c = aprenderMedicion(c, { materialId: 'zz-acero', gas: 'N2', espesor: esp, velocidadReal: real, velocidadTabla: tabla }); };
+
+  medir(3, 4400, 5500); // 20 % más lento de lo que dice la tabla
+  const una = factorCorreccion(c, 'zz-acero', 'N2', 3).factor;
+  assert.ok(una > 0.9 && una < 1, `una sola medición encoge: ${una}`);
+
+  medir(3, 4400, 5500); medir(3, 4400, 5500); medir(3, 4400, 5500);
+  const varias = factorCorreccion(c, 'zz-acero', 'N2', 3).factor;
+  assert.ok(varias < una, 'con más evidencia se acerca a lo medido');
+  assert.ok(varias < 0.9, `${varias} ya cerca de 0,8`);
+});
+
+test('la corrección puede depender del espesor', () => {
+  // Una boquilla gastada afecta más al grueso que al fino.
+  let c = correccionVacia();
+  for (const [esp, f] of [[1, 1.0], [2, 0.95], [4, 0.85], [6, 0.75], [8, 0.65]]) {
+    c = aprenderMedicion(c, { materialId: 'zz-acero', gas: 'N2', espesor: esp, velocidadReal: 1000 * f, velocidadTabla: 1000 });
+  }
+  const fino = factorCorreccion(c, 'zz-acero', 'N2', 1).factor;
+  const grueso = factorCorreccion(c, 'zz-acero', 'N2', 8).factor;
+  assert.ok(fino > grueso, `${fino} > ${grueso}: el grueso se castiga más`);
+  assert.ok(fino > 0.95 && grueso < 0.75, 'y sigue la tendencia medida');
+});
+
+test('la corrección no se aplica a otro material', () => {
+  let c = correccionVacia();
+  for (let i = 0; i < 5; i++) c = aprenderMedicion(c, { materialId: 'zz-acero', gas: 'N2', espesor: 3, velocidadReal: 700, velocidadTabla: 1000 });
+  assert.equal(factorCorreccion(c, 'inox-304', 'N2', 3).factor, 1, 'lo aprendido del acero no toca al inoxidable');
+  assert.equal(factorCorreccion(c, 'zz-acero', 'O2', 3).factor, 1, 'ni el N2 al O2');
+});
+
+test('el olvido baja la evidencia, y con menos evidencia se cree menos', () => {
+  /* Envejecer no borra lo aprendido: le baja el peso. Y como el factor se
+     encoge hacia 1 según la evidencia, menos evidencia deja el factor MÁS
+     CERCA de 1. Eso es lo correcto y no un efecto lateral: si las mediciones
+     son viejas, el sistema tiene que dudar más de ellas. */
+  let c = correccionVacia();
+  for (let i = 0; i < 6; i++) c = aprenderMedicion(c, { materialId: 'zz-acero', gas: 'N2', espesor: 3, velocidadReal: 700, velocidadTabla: 1000 });
+  const antes = factorCorreccion(c, 'zz-acero', 'N2', 3);
+  const despues = factorCorreccion(envejecerCorreccion(c, 0.5), 'zz-acero', 'N2', 3);
+
+  assert.ok(despues.n < antes.n, `la evidencia baja de ${antes.n} a ${despues.n}`);
+  assert.ok(despues.factor > antes.factor, 'y el factor se acerca a 1');
+  assert.ok(despues.factor < 1, 'sin cruzar al otro lado: lo medido sigue contando');
 });
 
 grupo('Aprendizaje con pocos datos');
