@@ -30,6 +30,9 @@ import { PALETA, usarColores, ejeMoneda, Globo } from '@/componentes/graficos';
 import { calcularEstructura, calcularCostoHoraMaquina, puntoEquilibrio } from '@core/costos.js';
 import { revisarDatos } from '@core/salud.js';
 import { ArreglarHallazgo } from '@/componentes/ArreglarHallazgo';
+import { Copiloto } from '@/componentes/Copiloto';
+import { copiloto, resumenCopiloto } from '@core/copiloto.js';
+import { baseDeCosto } from '@core/vigencia.js';
 import { CONSUMIBLES_LASER, estadoConsumiblesPorHoras } from '@core/consumibles.js';
 import { Aviso } from '@/componentes/ui/varios';
 import { BotonCalculadorConsumibles } from '@/componentes/CalculadorConsumibles';
@@ -298,6 +301,46 @@ export function VistaPanel() {
     queryFn: () => api.get('ordenes'),
   });
 
+  const { data: presupuestos = [] } = useQuery({
+    queryKey: ['presupuestos'],
+    queryFn: () => api.get('presupuestos'),
+  });
+
+  const { data: historialPrecios = [] } = useQuery({
+    queryKey: ['precios-historial'],
+    queryFn: () => api.get('precios?limite=5000'),
+    staleTime: 60_000,
+  });
+
+  const { data: telemetria } = useQuery({
+    queryKey: ['telemetria-copiloto'],
+    queryFn: () => api.get('telemetria?maquina=laser-3kw&horas=1'),
+    retry: false,
+  });
+
+  /* El copiloto no calcula nada nuevo: junta lo que ya calculan salud,
+     frescura, vigencia, agenda, rentabilidad y óptica, y decide qué va
+     primero. Por eso vive en el núcleo y no acá. */
+  const maquinas = usarEstado.getState().maquinas;
+  const calibracion = usarEstado((s) => s.calibracion);
+  const consejo = useMemo(() => {
+    if (!config) return null;
+    const l = (maquinas || []).find((m) => m.tipo === 'laser');
+    const baseHoy = l
+      ? baseDeCosto({
+          config, maquinas,
+          costoHoraLaser: calcularCostoHoraMaquina(l, calcularEstructura(config.estructura)).total,
+        })
+      : null;
+    return copiloto({
+      config, maquinas, materiales,
+      presupuestos: Array.isArray(presupuestos) ? presupuestos : [],
+      ordenes: Array.isArray(ordenes) ? ordenes : [],
+      historialPrecios, calibracion, baseHoy,
+      telemetria: telemetria?.resumen || null,
+    });
+  }, [config, maquinas, materiales, presupuestos, ordenes, historialPrecios, calibracion, telemetria]);
+
   if (isLoading || !st || !config) {
     return (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -370,6 +413,13 @@ export function VistaPanel() {
           </Boton>
         </div>
       </div>
+
+      {/* El copiloto va PRIMERO, antes que los indicadores. Un KPI dice cómo
+          viene el mes; esto dice qué hacer en los próximos diez minutos, y esa
+          es la pregunta con la que alguien abre el panel a la mañana. */}
+      {consejo?.hay ? (
+        <Copiloto resultado={consejo} resumen={resumenCopiloto(consejo, calibracion)} sim={sim} />
+      ) : null}
 
       {/* ---------------- Indicadores ---------------- */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

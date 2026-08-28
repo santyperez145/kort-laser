@@ -1,3 +1,5 @@
+import { estimarConEncogimiento, evidenciaSuficiente } from './aprendizaje.js';
+
 /**
  * KORT - Calibración: el sistema aprende cuánto tarda de verdad
  *
@@ -166,9 +168,25 @@ export function calibrar(ordenes = []) {
     grupos[clave] = { ...resumirGrupo(ratios), materialId, banda };
   }
 
+  /* Los ratios crudos por nivel, que es lo que necesita el estimador
+     jerárquico. Se guardan aparte de `grupos` para no tocar el contrato que
+     ya consumen las pantallas.
+
+     La banda de espesor sola es un nivel que antes no existía y es el que más
+     falta hacía: el comportamiento del corte lo domina el espesor mucho más
+     que el material, así que un trabajo de inoxidable de 2 mm dice bastante
+     sobre uno de acero de 2 mm — y no decía nada. */
+  const ratiosPorBanda = {};
+  const ratiosPorGrupo = {};
+  for (const m of muestras) {
+    if (m.banda) (ratiosPorBanda[m.banda] ||= []).push(m.ratio);
+    if (m.grupo) (ratiosPorGrupo[m.grupo] ||= []).push(m.ratio);
+  }
+
   return {
     global,
     grupos,
+    ratios: { todo: muestras.map((m) => m.ratio), banda: ratiosPorBanda, grupo: ratiosPorGrupo },
     muestras,
     descartadas,
     // Mientras no haya suficientes trabajos NO se corrige nada. Es la
@@ -189,25 +207,53 @@ export function factorPara(calibracion, materialId, espesor) {
   const sinCorregir = { factor: 1, origen: 'ninguno', n: 0, detalle: 'sin calibrar' };
   if (!calibracion?.activa) return sinCorregir;
 
-  const g = calibracion.grupos?.[claveGrupo(materialId, espesor)];
-  if (g?.suficiente) {
+  const banda = bandaDe(espesor);
+  const r = calibracion.ratios;
+
+  /* Encogimiento jerárquico en vez del umbral duro que había antes.
+     1,0 → taller → banda de espesor → material+banda, cada nivel confiando en
+     su propia medición en proporción a la evidencia que tiene.
+
+     Lo que se gana: el quinto trabajo de un grupo ya no cambia el precio de
+     golpe, y el primero ya aporta algo en lugar de nada. Detalle en
+     `aprendizaje.js`. */
+  const est = r
+    ? estimarConEncogimiento([
+        { id: 'taller', valores: r.todo || [] },
+        { id: `banda:${banda.id}`, valores: r.banda?.[banda.id] || [] },
+        { id: `grupo:${materialId}|${banda.id}`, valores: r.grupo?.[claveGrupo(materialId, espesor)] || [] },
+      ])
+    : null;
+
+  if (!est || !evidenciaSuficiente(est)) {
+    // Se mantiene el piso: sin evidencia suficiente no se corrige. Un factor
+    // con dos mediciones da confianza falsa, que es peor que no corregir.
+    const gl = calibracion.global;
+    if (!gl?.suficiente) return sinCorregir;
     return {
-      factor: g.factor,
-      origen: 'grupo',
-      n: g.n,
-      confiable: g.confiable,
-      detalle: `${g.n} trabajos de ${materialId} ${bandaDe(espesor).txt}`,
+      factor: gl.factor, origen: 'global', n: gl.n, confiable: gl.confiable,
+      detalle: `${gl.n} trabajos medidos en el taller`,
     };
   }
 
-  const gl = calibracion.global;
-  if (!gl?.suficiente) return sinCorregir;
+  const principal = [...est.composicion].sort((a, b) => b.peso - a.peso)[0];
+  const origen = principal.id.startsWith('grupo:') ? 'grupo'
+    : principal.id.startsWith('banda:') ? 'banda'
+    : principal.id === 'taller' ? 'global' : 'ninguno';
+
+  const nombre = origen === 'grupo' ? `${materialId} ${banda.txt}`
+    : origen === 'banda' ? `chapa ${banda.txt}`
+    : 'el taller';
+
   return {
-    factor: gl.factor,
-    origen: 'global',
-    n: gl.n,
-    confiable: gl.confiable,
-    detalle: `${gl.n} trabajos medidos en el taller`,
+    factor: est.valor,
+    origen,
+    n: principal.n,
+    confiable: est.evidencia >= TRABAJOS_CONFIABLE,
+    detalle: `${principal.n} trabajos de ${nombre}`,
+    // Para poder explicar el número exacto, no sólo el nivel que más pesó.
+    composicion: est.composicion,
+    evidencia: est.evidencia,
   };
 }
 

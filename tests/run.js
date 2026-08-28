@@ -57,6 +57,8 @@ import {
   superficieRetazoM2,
   unidadesDisponibles,
 } from '../src/core/retazos.js';
+import { estimarConEncogimiento, pesoDeEvidencia, explicarEncogimiento, evidenciaSuficiente, mediana } from '../src/core/aprendizaje.js';
+import { copiloto, resumenCopiloto } from '../src/core/copiloto.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden, plazoParaTrabajo, explicarPlazo } from '../src/core/agenda.js';
 import { diametroPunto, sangria, revisarCabezal, fichaOptica } from '../src/core/optica.js';
@@ -1029,6 +1031,172 @@ test('el ancho de la micro-unión crece con el espesor pero queda acotado', () =
 
 /* ================================================================== */
 
+grupo('Copiloto');
+
+const CFG_COPILOTO = { estructura: { horasPorDia: 8, ocupacionProductiva: 60 }, comercial: { margen: 150, aprovechamientoObjetivo: 0.78, tipoCambio: 1550, minimoPorItem: 20000, minimoFacturacion: 30000 } };
+
+test('un taller vacío pide cargar datos, no inventa hallazgos', () => {
+  /* Lo más fácil de hacer mal: un tablero recién instalado que muestra
+     "3 presupuestos en riesgo" cuando no hay ninguno. */
+  const r = copiloto({ config: CFG_COPILOTO, maquinas: [], materiales: [], presupuestos: [], ordenes: [] });
+  assert.equal(r.arranque, true);
+  assert.ok(!r.sugerencias.some((s) => s.tipo === 'plata'), 'sin cartera no hay plata en riesgo');
+  assert.ok(!r.sugerencias.some((s) => s.tipo === 'promesa'), 'sin órdenes no hay promesas rotas');
+});
+
+test('la plata va primero que un dato mal cargado', () => {
+  const p = (id) => ({
+    id, estado: 'enviado', resumen: { costo: 100000, subtotal: 105000 },
+    items: [{ materialId: 'acero-sae1010', _pesoTotal: 40, _precioKgMaterial: 3800 }],
+  });
+  const r = copiloto({
+    config: { ...CFG_COPILOTO, comercial: { ...CFG_COPILOTO.comercial, margen: 0 } }, // error de dato
+    maquinas: [], materiales: [{ id: 'acero-sae1010', precioKg: 4200 }],
+    presupuestos: [p('a')], ordenes: [],
+  });
+  assert.equal(r.sugerencias[0].tipo, 'plata', `primero: ${r.sugerencias[0].titulo}`);
+});
+
+test('el impacto en pesos es null cuando no se puede calcular, nunca cero', () => {
+  /* Cero significa "no cuesta nada", que es una afirmación distinta de "no sé
+     cuánto cuesta" y casi siempre falsa. */
+  const r = copiloto({ config: CFG_COPILOTO, maquinas: [], materiales: [], presupuestos: [], ordenes: [] });
+  for (const s of r.sugerencias) {
+    assert.ok(s.impactoPesos === null || s.impactoPesos > 0, `${s.titulo}: ${s.impactoPesos}`);
+  }
+});
+
+test('cada sugerencia trae evidencia y adónde ir', () => {
+  const r = copiloto({ config: CFG_COPILOTO, maquinas: [{ id: 'l', tipo: 'laser' }], materiales: [], presupuestos: [], ordenes: [] });
+  assert.ok(r.hay > 0);
+  for (const s of r.sugerencias) {
+    assert.ok(s.porque && s.porque.length > 20, `${s.titulo} sin evidencia`);
+    assert.ok(s.accion, `${s.titulo} sin acción`);
+    assert.ok(s.ruta, `${s.titulo} sin ruta`);
+  }
+});
+
+test('el resumen distingue "nada urgente" de "no hay nada cargado"', () => {
+  // Son dos estados distintos y confundirlos hace que el tablero deje de creerse.
+  const vacio = { sugerencias: [], arranque: true, hay: 0 };
+  const limpio = { sugerencias: [], arranque: false, hay: 0 };
+  assert.ok(/no hay con qué operar/i.test(resumenCopiloto(vacio)));
+  assert.ok(/Nada urgente/i.test(resumenCopiloto(limpio)));
+  assert.equal(resumenCopiloto(null), null);
+});
+
+test('una orden vencida pesa más que una que sólo no entra en la carga', () => {
+  const base = { estado: 'pendiente', resumen: { tiempoProduccion: 4 * 3600 } };
+  const r = copiloto({
+    config: CFG_COPILOTO, maquinas: [], materiales: [], presupuestos: [],
+    ordenes: [
+      { ...base, id: 'v', fechaEntrega: '2020-01-01' },
+      { ...base, id: 'x', fechaEntrega: '2099-01-01' },
+    ],
+  });
+  const vencida = r.sugerencias.find((s) => /vencida/.test(s.titulo));
+  assert.ok(vencida, 'detecta la vencida');
+  assert.equal(vencida.tipo, 'promesa');
+});
+
+test('el resumen no repite en el encabezado lo que ya está en la lista', () => {
+  const r = copiloto({ config: CFG_COPILOTO, maquinas: [], materiales: [], presupuestos: [], ordenes: [] });
+  const txt = resumenCopiloto(r, null);
+  const veces = (txt.match(/estima el tiempo/g) || []).length;
+  assert.ok(veces <= 1, `aparece ${veces} veces: ${txt}`);
+});
+
+grupo('Aprendizaje con pocos datos');
+
+test('sin ninguna evidencia devuelve la raíz sin tocarla', () => {
+  /* Lo más importante del módulo: un taller que arranca no puede ver precios
+     movidos por un modelo que no aprendió nada todavía. */
+  const r = estimarConEncogimiento([{ id: 'a', valores: [] }, { id: 'b', valores: [] }]);
+  assert.equal(r.valor, 1);
+  assert.equal(r.evidencia, 0);
+  assert.equal(estimarConEncogimiento([]).valor, 1);
+});
+
+test('la consistencia pesa más que la cantidad', () => {
+  /* Seis mediciones iguales y seis desparramadas tienen la MISMA mediana y la
+     misma cantidad. Un estimador que sólo cuente las trata igual; el correcto
+     le cree a las primeras y desconfía de las segundas. */
+  const iguales = [1.5, 1.5, 1.5, 1.5, 1.5, 1.5];
+  const dispersas = [0.8, 2.2, 1.1, 1.9, 0.9, 2.0]; // mediana también 1,5
+  cerca(mediana(iguales), mediana(dispersas), 1e-9, 'misma mediana');
+
+  const a = estimarConEncogimiento([{ id: 'x', valores: iguales }]).valor;
+  const b = estimarConEncogimiento([{ id: 'x', valores: dispersas }]).valor;
+  assert.ok(a > 1.45, `las consistentes convencen: ${a}`);
+  assert.ok(b < 1.2, `las dispersas no: ${b}`);
+});
+
+test('las mismas muestras en varios niveles no se encogen dos veces', () => {
+  /* El bug que tenía la primera versión: con peso por cantidad, las mismas
+     seis observaciones repetidas en tres niveles arrastraban el resultado a
+     1,44 en vez de 1,5. */
+  const seis = [1.5, 1.5, 1.5, 1.5, 1.5, 1.5];
+  const r = estimarConEncogimiento([
+    { id: 'taller', valores: seis },
+    { id: 'banda', valores: seis },
+    { id: 'grupo', valores: seis },
+  ]);
+  cerca(r.valor, 1.5, 0.001);
+});
+
+test('nunca confía del todo, ni con mediciones idénticas', () => {
+  // El piso de dispersión: en un taller nadie cronometra mejor que ±5 %.
+  const muchas = Array(50).fill(1.4);
+  const r = estimarConEncogimiento([{ id: 'x', valores: muchas }]);
+  assert.ok(r.valor < 1.4, 'queda un residuo hacia el modelo');
+  assert.ok(r.valor > 1.39, 'pero mínimo con 50 mediciones');
+});
+
+test('un nivel específico corrige al general en vez de reemplazarlo', () => {
+  const r = estimarConEncogimiento([
+    { id: 'taller', valores: [1.2, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2] },
+    { id: 'grupo', valores: [1.8, 1.8] }, // sólo dos: no manda solo
+  ]);
+  assert.ok(r.valor > 1.2 && r.valor < 1.8, `queda en el medio: ${r.valor}`);
+  assert.ok(r.valor < 1.45, 'más cerca del general, que tiene más evidencia');
+});
+
+test('el peso crece con la evidencia y no da saltos', () => {
+  /* Lo que arregla el umbral duro: agregar un trabajo mueve el número de a
+     poco. Antes el quinto lo cambiaba de golpe. */
+  const pesos = [1, 2, 3, 4, 5, 6, 8, 12].map((k) => pesoDeEvidencia(Array(k).fill(1.3)));
+  for (let i = 1; i < pesos.length; i++) {
+    assert.ok(pesos[i] >= pesos[i - 1], 'monótono');
+  }
+  assert.ok(pesos.at(-1) > pesos[0] * 3, 'y crece de verdad');
+});
+
+test('la composición explica de dónde salió cada parte', () => {
+  const r = estimarConEncogimiento([
+    { id: 'taller', valores: [1.2, 1.2, 1.2, 1.2] },
+    { id: 'grupo', valores: [1.9, 1.9, 1.9, 1.9, 1.9, 1.9] },
+  ]);
+  const suma = r.composicion.reduce((s, c) => s + c.peso, 0);
+  cerca(suma, 1, 0.02, 'los pesos reparten el 100 %');
+  const txt = explicarEncogimiento(r, { taller: 'el taller', grupo: 'acero fino' });
+  assert.ok(/acero fino/.test(txt), txt);
+  assert.ok(/\d+ %/.test(txt), 'dice cuánto pesó');
+});
+
+test('sin evidencia el texto lo dice en vez de inventar', () => {
+  const r = estimarConEncogimiento([]);
+  assert.ok(/sin evidencia propia/i.test(explicarEncogimiento(r)));
+  assert.equal(evidenciaSuficiente(r), false);
+  assert.equal(explicarEncogimiento(null), null);
+});
+
+test('la evidencia mide observaciones que pesaron, no las que había', () => {
+  // 40 mediciones desparramadas no son 40 de evidencia.
+  const dispersas = Array.from({ length: 40 }, (_, i) => (i % 2 ? 0.6 : 2.4));
+  const r = estimarConEncogimiento([{ id: 'x', valores: dispersas }]);
+  assert.ok(r.evidencia < 40, `${r.evidencia} < 40`);
+});
+
 grupo('Calibración contra lo que tardó de verdad');
 
 /** Órdenes de mentira: n trabajos con un ratio real/estimado dado. */
@@ -1130,7 +1298,12 @@ test('el factor corrige el tiempo y el precio, y queda explicado', () => {
   const base = cotizarItem(it, CTX);
   const cor = cotizarItem(it, { ...CTX, calibracion: cal });
 
-  cerca(cor.corte.tTotal, base.corte.tTotal * 1.5, 1e-6, 'el tiempo se corrige');
+  /* No es 1,5 exacto y no debe serlo: el estimador nunca confía al 100 % en un
+     nivel, porque `DISPERSION_PISO` impide que seis mediciones idénticas den
+     certeza absoluta —en un taller nadie cronometra mejor que ±5 %—. Da
+     1,49999, que es 1,5 a todos los efectos y honesto en el residuo. */
+  cerca(cor.corte.tTotal, base.corte.tTotal * 1.5, base.corte.tTotal * 1e-4, 'el tiempo se corrige');
+  assert.ok(cor.corte.calibracion.factor < 1.5, 'nunca llega a confiar del todo');
   assert.ok(cor.costos.corte > base.costos.corte, 'y con él el costo');
   // La suma tiene que seguir cerrando
   cerca(cor.corte.tProduccion + cor.corte.tChapas + cor.corte.tSetup, cor.corte.tTotal, 1e-6);
