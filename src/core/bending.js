@@ -14,12 +14,21 @@
  */
 
 import { rad, deg } from './geometry.js';
+import { C_AIRE, revisarPlegadoMetalurgico } from './metalurgia.js';
 
 /** Matrices V disponibles en el taller (editable en Configuración). */
 export const MATRICES_V = [4, 6, 8, 10, 12, 16, 20, 25, 30, 35, 40, 50, 60, 80, 100];
 
-/** Constante de plegado al aire. 1.33 es el valor habitual de tabla. */
-export const C_PLEGADO = 1.33;
+/**
+ * Constante de plegado al aire.
+ *
+ * ⚠️ Era 1,33 y pasó a 1,42 el 2026-08-28. 1,33 está en el extremo bajo del
+ * rango que se usa en la industria (1,33–1,42) y por lo tanto **subestimaba el
+ * tonelaje alrededor de un 7 %**, que es la dirección peligrosa: el sistema
+ * decía que el pliegue entraba en la plegadora y en la máquina no entra.
+ * La justificación y la verificación están en `metalurgia.js`.
+ */
+export const C_PLEGADO = C_AIRE;
 
 /**
  * Selecciona la matriz V recomendada para un espesor.
@@ -157,18 +166,23 @@ export function validarPlegado({ t, material, pliegues = [], largoMM = 0, alas =
     }
   }
 
-  const fam = (material?.familia || '').toLowerCase();
+  /* Radio mínimo contra la tabla metalúrgica por aleación y temple, en vez de
+     las tres reglas por familia que había acá.
+
+     La diferencia no es cosmética: "aluminio con Ri < 2·t" trataba igual al
+     5052-H32 —que dobla a 1·t sin problema— y al 6061-T6, que necesita 3 a
+     6·t y se FISURA por debajo. Dos aleaciones con el mismo aviso cuando una
+     está bien y la otra se rompe. Y era aviso, no error, así que la pieza
+     salía a producción igual. */
   const Ri = pliegues[0]?.radioInterno ?? 0;
-  if (fam.includes('alumin') && Ri < 2 * t) {
-    avisos.push({
-      nivel: 'aviso',
-      msg: `Aluminio con radio interno ${Ri.toFixed(1)} mm (< 2·espesor). Riesgo de fisura en el pliegue: conviene matriz V mayor.`,
-    });
-  }
+  avisos.push(...revisarPlegadoMetalurgico({ material, espesor: t, radioInterno: Ri }));
+
   if (material?.id === 'galvanizado' && Ri < 1.5 * t) {
+    // El acero de abajo aguanta; lo que se descascara es el zinc. Es un
+    // problema de terminación y no de rotura, así que sigue siendo aviso.
     avisos.push({ nivel: 'aviso', msg: 'Galvanizado con radio chico: el zinc puede descascararse en el pliegue.' });
   }
-  if (fam.includes('inox') && Ri < 1.2 * t) {
+  if ((material?.familia || '').toLowerCase().includes('inox') && Ri < 1.2 * t) {
     avisos.push({ nivel: 'aviso', msg: 'Inoxidable con radio ajustado: mayor recuperación elástica, prever sobredoblado.' });
   }
   return avisos;

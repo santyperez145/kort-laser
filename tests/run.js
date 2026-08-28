@@ -61,6 +61,7 @@ import { estimarConEncogimiento, pesoDeEvidencia, explicarEncogimiento, evidenci
 import { copiloto, resumenCopiloto } from '../src/core/copiloto.js';
 import { entrenarProceso, ajustarRecta, statsVacios, sumar, ABSORTIVIDAD, correccionVacia, aprenderMedicion, factorCorreccion, velocidadCorregida, envejecerCorreccion } from '../src/core/modelo-corte.js';
 const ln = Math.log;
+import { radioMinimo, revisarPlegadoMetalurgico, distanciaMinimaAlPliegue, fuerzaPlegado } from '../src/core/metalurgia.js';
 import { calibrar, factorPara, explicarFactor, MINIMO_TRABAJOS } from '../src/core/calibracion.js';
 import { agendaProduccion, capacidadDiariaSegundos, segundosRestantesOrden, plazoParaTrabajo, explicarPlazo } from '../src/core/agenda.js';
 import { diametroPunto, sangria, revisarCabezal, fichaOptica } from '../src/core/optica.js';
@@ -316,9 +317,13 @@ test('el desarrollo es menor que la suma de cotas exteriores', () => {
   cerca(d.desarrollo, 100 - d.pliegues[0].BD, 1e-9);
 });
 
-test('tonelaje: F = 1.33·Rm·t²/V', () => {
+test('tonelaje: F = 1,42·Rm·t²/V, la constante de la industria', () => {
+  /* Era 1,33, que está en el extremo bajo del rango usado (1,33–1,42) y
+     subestimaba el tonelaje ~7 %. Subestimar es la dirección peligrosa: el
+     sistema decía que el pliegue entraba en la plegadora y no entraba.
+     Verificado el 2026-08-28 contra la fórmula de plegado al aire a 90°. */
   const p = calcularPliegue(3, 90, acero, 24, 1000);
-  const kN = (1.33 * acero.Rm * 9) / 24;
+  const kN = (1.42 * acero.Rm * 9) / 24;
   cerca(p.toneladasPorMetro, kN / 9.80665, 1e-6);
   cerca(p.toneladas, p.toneladasPorMetro, 1e-9); // 1000 mm = 1 m
 });
@@ -1106,6 +1111,95 @@ test('el resumen no repite en el encabezado lo que ya está en la lista', () => 
   const txt = resumenCopiloto(r, null);
   const veces = (txt.match(/estima el tiempo/g) || []).length;
   assert.ok(veces <= 1, `aparece ${veces} veces: ${txt}`);
+});
+
+grupo('Metalurgia y DFM de chapa');
+
+const AL5052 = { id: 'alu-5052', nombre: 'Aluminio 5052', familia: 'aluminio' };
+const AL6061 = { id: 'alu-6061', nombre: 'Aluminio 6061-T6', familia: 'aluminio' };
+
+test('el 6061-T6 y el 5052 NO se doblan igual', () => {
+  /* Es el caso que motivó el módulo. La regla que había —"aluminio con
+     Ri < 2·t"— trataba igual a los dos: al 5052, que dobla a 1·t sin
+     problema, y al 6061-T6, que necesita 3 a 6·t y se FISURA por debajo.
+     Mismo aviso para el que está bien y para el que se rompe. */
+  const a = radioMinimo(AL5052, 3);
+  const b = radioMinimo(AL6061, 3);
+  assert.ok(b.mm > a.mm * 3, `6061 pide ${b.mm} mm y 5052 ${a.mm} mm`);
+  assert.ok(/fisura/i.test(b.nota), b.nota);
+});
+
+test('sin saber la dirección del grano se toma el peor caso', () => {
+  /* El nesting rota piezas para aprovechar la chapa, y ahí se cambia la
+     dirección del grano sin que nadie lo decida. Suponer la favorable sería
+     mandar a producción algo que se fisura según cómo caiga. */
+  const peor = radioMinimo(AL6061, 2);
+  const bueno = radioMinimo(AL6061, 2, 'traves');
+  assert.ok(peor.mm > bueno.mm);
+  cerca(peor.mm, radioMinimo(AL6061, 2, 'favor').mm, 1e-9, 'null = a favor del grano');
+});
+
+test('un material fuera de tabla usa un mínimo conservador y lo dice', () => {
+  const r = radioMinimo({ id: 'zz-desconocido', familia: 'raro' }, 2);
+  assert.equal(r.conocido, false);
+  assert.ok(r.mm >= 2 * 2, 'no se inventa un mínimo optimista');
+});
+
+test('el radio por debajo del mínimo es ERROR, no aviso', () => {
+  // No es que la pieza salga fea: se fisura y hay que rehacerla.
+  const h = revisarPlegadoMetalurgico({ material: AL6061, espesor: 3, radioInterno: 2 });
+  const e = h.find((x) => x.codigo === 'radio-bajo-minimo');
+  assert.ok(e, 'lo detecta');
+  assert.equal(e.nivel, 'error');
+  assert.ok(e.accion, 'y dice qué hacer');
+});
+
+test('un radio holgado no genera ningún hallazgo', () => {
+  const h = revisarPlegadoMetalurgico({ material: AL5052, espesor: 2, radioInterno: 8 });
+  assert.equal(h.length, 0, JSON.stringify(h));
+});
+
+test('la distancia al pliegue es 2·t + Ri, y 2,5 para agujeros grandes', () => {
+  /* Verificado el 2026-08-28, y me corrigió: había puesto 1,5·t de memoria.
+     El 1,5·t es agujero a BORDE, que es otra cosa; cerca de un pliegue hace
+     falta más porque ahí el material se estira sobre el radio. */
+  const chico = distanciaMinimaAlPliegue(3, 4, 10);
+  cerca(chico.mm, 2 * 3 + 4, 1e-9);
+  const grande = distanciaMinimaAlPliegue(3, 4, 40);
+  cerca(grande.mm, 2.5 * 3 + 4, 1e-9);
+  assert.ok(grande.mm > chico.mm);
+});
+
+test('avisa por un agujero demasiado cerca de la línea de plegado', () => {
+  const h = revisarPlegadoMetalurgico({
+    material: AL5052, espesor: 3, radioInterno: 5,
+    agujerosCerca: [{ diametro: 8, distancia: 6 }], // hacen falta 11
+  });
+  const a = h.find((x) => x.codigo === 'agujero-cerca-del-pliegue');
+  assert.ok(a, 'lo detecta');
+  assert.ok(/ovalado/.test(a.msg), a.msg);
+});
+
+test('un agujero con margen suficiente no molesta', () => {
+  const h = revisarPlegadoMetalurgico({
+    material: AL5052, espesor: 3, radioInterno: 5,
+    agujerosCerca: [{ diametro: 8, distancia: 20 }],
+  });
+  assert.ok(!h.some((x) => x.codigo === 'agujero-cerca-del-pliegue'));
+});
+
+test('el tonelaje usa 1,42 y crece con el cuadrado del espesor', () => {
+  const a = fuerzaPlegado({ espesor: 2, Rm: 400, V: 16, largoMM: 1000 });
+  const b = fuerzaPlegado({ espesor: 4, Rm: 400, V: 16, largoMM: 1000 });
+  cerca(a.kNporMetro, (1.42 * 400 * 4) / 16, 1e-9);
+  cerca(b.kNporMetro / a.kNporMetro, 4, 1e-9, 'doble espesor, cuádruple fuerza');
+  assert.equal(a.constante, 1.42);
+});
+
+test('sin las tres entradas el tonelaje no se inventa', () => {
+  assert.equal(fuerzaPlegado({ espesor: 0, Rm: 400, V: 16, largoMM: 1000 }), null);
+  assert.equal(fuerzaPlegado({ espesor: 2, Rm: 0, V: 16, largoMM: 1000 }), null);
+  assert.equal(fuerzaPlegado({ espesor: 2, Rm: 400, V: 0, largoMM: 1000 }), null);
 });
 
 grupo('Modelo de corte: física y corrección aprendida');
@@ -3416,7 +3510,7 @@ test('el desarrollo plegado coincide con la cuenta a mano', () => {
 
 test('el tonelaje sale de la fórmula de plegado al aire', () => {
   const p = calcularPliegue(2, 90, acero, 16, 1000);
-  const kNporMetro = (1.33 * acero.Rm * 2 * 2) / 16;
+  const kNporMetro = (1.42 * acero.Rm * 2 * 2) / 16;
   cerca(p.toneladasPorMetro, kNporMetro / 9.80665, 0.01);
   cerca(p.toneladas, (p.toneladasPorMetro * 1000) / 1000, 0.01);
 });
